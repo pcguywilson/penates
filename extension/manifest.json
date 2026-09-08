@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Apply Autofill",
+  "version": "1.0",
+  "description": "Autofill the current job application using your local tool.",
+  "permissions": ["tabs"],
+  "host_permissions": ["http://127.0.0.1:8765/*", "http://localhost:8765/*"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_title": "Autofill this application",
+    "default_icon": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
+  },
+  "icons": { "16": "icon16.png", "48": "icon48.png", "128": "icon128.png" }
+}

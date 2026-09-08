@@ -1,0 +1,143 @@
+# Identity field matcher. A form label (or placeholder/aria-label) is tested against
+# each pattern IN ORDER; first match wins. `value` is a dotted path into profile.yaml,
+# or "literal:..." / "pause:...". Regex is case-insensitive.
+#
+# ORDER MATTERS: intent-bearing yes/no + salary come FIRST so a stray word like
+# "States" in "authorized to work in the United States" can't be stolen by the
+# geography rules. Geography rules use \b word boundaries for the same reason.
+fields:
+  - {pattern: "company phone|employer phone|business phone|office phone|work phone number", value: "pause:optional"}
+  - {pattern: "supervisor (position|title|phone|email)|supervisor's (phone|email|title)", value: "pause:optional"}
+  - {pattern: "have you applied.*before|applied for a job with us before|previously applied", value: "literal:No"}
+  - {pattern: "may we use sms|sms during the hiring|receive text messages|consent to.*text", value: "literal:Yes"}
+  - {pattern: "may we contact you|contact you\\b|ok to contact you|best way to contact you|preferred contact method", value: "literal:Yes"}
+  - {pattern: "contact for reference|may we contact|contact (this|the|your|current|prior).*(employer|supervisor|manager|company|reference)|contact (them|him)|contact your (employer|supervisor|manager|references?)", value: "literal:No"}
+  - {pattern: "^position$|position title|^job title$", value: "identity.current_title"}
+  # --- iCIMS generic one-word labels (username field + phone Type/Number columns) ---
+  - {pattern: "^login$|^username$|^user name$|^user id$", value: "pause:optional"}
+  - {pattern: "^number$|^phone number$", value: "identity.phone"}
+  - {pattern: "^type$", value: "pause:optional"}
+  # --- Paylocity/general address + education field names (must beat essay engine) ---
+  - {pattern: "^locality$|\\blocality\\b", value: "identity.city_only"}
+  - {pattern: "administrative area|province/region|state/province|state/region", value: "identity.state"}
+  - {pattern: "area of study|field of study|course of study|\\bmajor\\b|concentration", value: "education.field"}
+  - {pattern: "school type|institution type|type of (school|institution)", value: "literal:College / University"}
+  - {pattern: "degree obtained|degree earned|degree received|degree type|degree completed|^degree$|degree obtained", value: "education.degree"}
+  - {pattern: "did you graduate|graduated\\?", value: "literal:Yes"}
+  - {pattern: "reason for leaving|why did you leave|reason for departure", value: "pause:optional"}
+  - {pattern: "^responsibilities$|job responsibilities|\\bduties\\b|role description|job description|responsibilities$", value: "pause:optional"}
+  - {pattern: "^name$|^name\\b|^your name$|^full name$|^legal name$", value: "identity.legal_name"}
+  - {pattern: "employee id|employee number|associate id", value: "pause:optional"}
+  - {pattern: "north korea|\\biran\\b|\\bsyria\\b|\\bcuba\\b|crimea|donetsk|luhansk", value: "literal:No"}
+  # --- yes/no + salary (specific intent) ---
+  - {pattern: "\\bsponsor", value: "literal:No"}
+  - {pattern: "secondary employment|competitive in nature|conflict with your (ability|working|duties)|hold any secondary|outside (employment|business)", value: "literal:No"}
+  - {pattern: "located in the (nyc|new york)|\\bnyc area\\b|located in .{0,15}new york city|in the (nyc|new york) (metro|area)", value: "literal:No"}
+  - {pattern: "authoriz\\w* .{0,20}\\bwork\\b|work authoriz|legally .{0,18}work|(eligible|right|permitted|entitled) to .{0,10}work|lawfully work", value: "literal:Yes"}
+  - {pattern: "visa status|citizenship status|immigration status|work eligibility status", value: "identity.work_auth"}
+  - {pattern: "u\\.?s\\.? citizen|are you a citizen|citizen of the united states|\\bcitizenship\\b", value: "literal:Yes"}
+  - {pattern: "willing to relocate|relocation|relocate",                          value: "literal:No"}
+  - {pattern: "do you (currently )?(have|hold|possess).{0,20}clearance|currently have this clearance|have (this|a) .{0,20}clearance", value: "literal:Yes"}
+  - {pattern: "security clearance|clearance",                                     value: "clearance.level"}
+  - {pattern: "highest level of education|level of education completed|education level", value: "education.degree"}
+  - {pattern: "how many years of (work )?experience|years of (work )?experience|years of relevant experience", value: "literal:10+ years"}
+  - {pattern: "able to work a .{0,15}contract|work a contract position|contract position|open to contract", value: "literal:Yes"}
+  - {pattern: "willing to provide.{0,30}references?|provide at least.{0,10}references?|provide .{0,20}professional references?", value: "literal:Yes"}
+  - {pattern: "(salary|compensation|pay|gross).{0,35}(annual|annually|per year|per annum|yearly)|(annual|annually|per year|yearly).{0,35}(salary|compensation|pay)", value: "compensation.single_default"}
+  - {pattern: "(salary|compensation|pay|gross).{0,25}(per month|monthly|/month|a month)|(per month|monthly).{0,25}(salary|compensation|pay)", value: "pause:monthly-salary"}
+  - {pattern: "desired salary|salary expectation|expected (gross )?(pay|salary|compensation)|compensation range|salary range|pay range|requested compensation|expected compensation|gross salary|\\bsalary\\b|\\bcompensation\\b", value: "compensation.single_default"}
+  - {pattern: "meet this (salary |pay |compensation )?range|within (this |the )?range|can you meet", value: "compensation.single_default"}
+  - {pattern: "notice period|how much notice", value: "eligibility.notice_period"}
+  - {pattern: "earliest (start|available)|start date|when can you start|available to start", value: "eligibility.earliest_start"}
+  - {pattern: "willing to travel|able to travel|travel requirement|open to travel", value: "eligibility.willing_to_travel"}
+  - {pattern: "18 (years )?(or older|of age)|at least 18|legal working age|of legal age", value: "eligibility.over_18"}
+  - {pattern: "background check|background screen|consent to a background", value: "eligibility.background_check"}
+  - {pattern: "drug (screen|test)|substance (screen|test)|pre-employment drug", value: "eligibility.drug_screen"}
+  - {pattern: "driver.?s license|valid license to drive", value: "eligibility.drivers_license"}
+  - {pattern: "reliable transportation|own transportation|means of transportation", value: "eligibility.reliable_transportation"}
+  - {pattern: "full-time.*part-time|employment type|type of (employment|opportunity)|seeking (full|part)", value: "eligibility.employment_type"}
+  - {pattern: "non-?compete|obligations.*prevent|restrictive covenant|prevent you from working", value: "eligibility.non_compete"}
+  - {pattern: "experience working remotely|remote work experience|worked remotely", value: "eligibility.remote_experience"}
+  - {pattern: "evenings and weekends|nights and weekends|weekend availability|work weekends", value: "eligibility.evenings_weekends"}
+
+  # --- identity ---
+  - {pattern: "preferred first name",                     value: "identity.first_name"}
+  - {pattern: "preferred name|nickname",                   value: "identity.first_name"}
+  - {pattern: "middle name|middle initial",                value: "identity.middle_name"}
+  - {pattern: "first name",                               value: "identity.first_name"}
+  - {pattern: "last name|surname|family name",            value: "identity.last_name"}
+  - {pattern: "full name|^name$|your name|legal name",    value: "identity.legal_name"}
+  - {pattern: "e-?mail",                                   value: "identity.email"}
+  - {pattern: "country phone code|phone country code|country code",  value: "literal:+1"}
+  - {pattern: "phone device type|device type|phone type",  value: "literal:Mobile"}
+  - {pattern: "phone extension|extension|ext\\.?$",                    value: "pause:optional"}
+  - {pattern: "phone number|phone|mobile|cell",           value: "identity.phone"}
+  - {pattern: "linkedin",                                  value: "identity.linkedin"}
+  - {pattern: "current (job )?title|present (job )?title|current position|current role|most recent (job )?title|^job title$|^title$", value: "identity.current_title"}
+  - {pattern: "current employer|current company|present employer|present company|most recent employer|most recent company|^employer$|company name", value: "identity.current_company"}
+  - {pattern: "years of professional experience|total years of experience|^years of experience$|how many years of.*experience|years of relevant experience", value: "candidate.years_it"}
+  - {pattern: "how did you (hear|learn|find out)|where did you (hear|learn)|referral source|how were you referred", value: "literal:LinkedIn"}
+  - {pattern: "time ?zone|what time zone", value: "literal:Eastern Time"}
+  # --- SRE/DevOps screening Yes/No (the radio/select half of GitLab-style questions) ---
+  - {pattern: "on-?call rotation|participated in on-?call|been on-?call", value: "literal:Yes"}
+  - {pattern: "built .{0,30}(tooling|automation)|production tooling|automation to (improve|reduce|solve)|automating infrastructure", value: "literal:Yes"}
+  - {pattern: "experience with (monitoring|observability)|monitoring and observability|hands-on .{0,20}(monitoring|observability)", value: "literal:Yes"}
+  - {pattern: "code (diff|review)|technical interview includes|comfortable .{0,20}(code review|pair)|participate in a (pair|live coding)", value: "literal:Yes"}
+  - {pattern: "hands-on .{0,30}(kubernetes|docker|containers?|terraform|ansible|ci/?cd|infrastructure as code|linux|aws|cloud)", value: "literal:Yes"}
+  # --- standard Workday eligibility yes/no questions (answered from profile) ---
+  - {pattern: "legally permitted to work|legally authorized to work|authorized to work|eligible to work|right to work", value: "literal:Yes"}
+  - {pattern: "must be a u\\.?s\\.? citizen|u\\.?s\\.? citizen|citizen of the united states|do you satisfy that requirement", value: "literal:Yes"}
+  - {pattern: "currently a government employee|currently a federal employee|are you a government employee", value: "literal:No"}
+  - {pattern: "currently contracting at|currently a contractor at|contracting at this company", value: "literal:No"}
+  - {pattern: "source selecting|procurement, or oversight|oversight of contracts|direct involvement in source", value: "literal:No"}
+  - {pattern: "employed at (the )?parent company|acquiring company", value: "literal:No"}
+  - {pattern: "which statement best describes.{0,50}ai|how .{0,25}use ai|your (use|usage|experience) (of|with) ai|describe your ai|ai tools.{0,20}(daily|work|workflow)", value: "literal:I regularly use AI tools"}
+  # --- EEO / voluntary self-identification (from profile.eeo) ---
+  - {pattern: "hispanic or latino|hispanic/latino|are you hispanic", value: "eeo.hispanic_latino"}
+  - {pattern: "indicate your gender|what is your gender|gender identity|select your gender|^gender", value: "eeo.gender"}
+  - {pattern: "indicate your ethnicity|your ethnicity|what ethnicity|\\bethnicity\\b|your race|race/ethnicity|racial|ethnic background|select your race", value: "eeo.race"}
+  - {pattern: "protected veteran|veteran status|are you a veteran", value: "eeo.veteran_status"}
+  - {pattern: "disability status|do you have a disability|form cc-305", value: "eeo.disability_short"}
+  - {pattern: "preferred language|^language|language\\b", value: "literal:English"}
+  - {pattern: "proof of.{0,20}eligibility|provide proof of your eligibility|proof of (legal )?(right|authorization) to work|eligibility to work in the", value: "literal:Yes"}
+  - {pattern: "previously employed|formerly employed|former employee|previous employee|are you a (former|previous) employee|previously worked (at|for)|\\brehire\\b|boomerang employee", value: "literal:No"}
+  - {pattern: "github|git hub|\\bgit\\b profile", value: "identity.github"}
+  - {pattern: "\\bwebsite\\b|portfolio|personal (site|website)|other url|blog|github|gitlab", value: "pause:optional"}
+  - {pattern: "address line ?2|apartment|apt|suite|\\bunit\\b",  value: "pause:optional"}
+  - {pattern: "address line ?1|street address|^street$",  value: "ifreq:identity.street"}
+  - {pattern: "^location\\*?$|^location$|\\blocation\\b|where are you (based|located)|current location", value: "identity.city"}
+  - {pattern: "mailing address|mailing street", value: "identity.street"}
+  - {pattern: "^address$", value: "ifreq:identity.street"}
+  - {pattern: "\\baddress\\b", value: "identity.location_full"}
+  - {pattern: "type or paste your (resume|cv)|paste your (resume|cv)|paste your r\\xe9sum\\xe9", value: "pause:optional"}   # redundant with file upload
+  - {pattern: "\\bcounty\\b", value: "pause:optional"}
+  - {pattern: "referred by|referral name|referrer|who referred you", value: "pause:optional"}
+  - {pattern: "if you chose|if you selected|if other", value: "pause:optional"}
+  - {pattern: "messaging app|telegram|whatsapp|contact you via", value: "pause:optional"}
+  - {pattern: "type .*image text|captcha|image text|enter the (text|code)|verification code|security check", value: "pause:captcha"}
+
+  # --- geography (word-boundaried, tested LAST) ---
+  - {pattern: "location of residence and language|location of residence", value: "literal:Other"}   # Jobvite regional gate; Other = non-India
+  - {pattern: "current location|^location$|your location",  value: "identity.location_full"}
+  - {pattern: "\\bcity\\b",                                value: "identity.city_only"}
+  - {pattern: "\\bstate\\b|\\bprovince\\b",                value: "identity.state"}
+  - {pattern: "\\bzip\\b|\\bpostal\\b|zip code|postal code|post ?code", value: "identity.zip"}
+  - {pattern: "\\bcountry\\b",                             value: "literal:United States"}
+
+  # --- education ---
+  - {pattern: "highest.*(degree|education)|education level", value: "literal:Associate Degree"}
+  - {pattern: "school|university|institution",            value: "education.school"}
+  - {pattern: "graduation year|year.*graduat",            value: "education.year"}
+
+  # --- Voluntary self-identification (your own provided answers) ---
+  - {pattern: "hispanic|latino",                          value: "eeo.hispanic_latino"}
+  - {pattern: "transgender",                             value: "eeo.transgender"}
+  - {pattern: "sexual orientation",                      value: "eeo.sexual_orientation"}
+  - {pattern: "gender identity",                         value: "eeo.gender_identity"}
+  - {pattern: "pronouns",                                value: "literal:He/Him"}
+  - {pattern: "\\bgender\\b",             value: "eeo.gender"}
+  - {pattern: "\\brace\\b|identify your race|racial",     value: "eeo.race"}
+  - {pattern: "veteran or active member|active member",  value: "eeo.veteran_member"}
+  - {pattern: "veteran",                                  value: "eeo.veteran_status"}
+  - {pattern: "chronic condition",                       value: "eeo.disability_short"}
+  - {pattern: "disability|disabled",                      value: "eeo.disability_status"}

@@ -1,0 +1,11 @@
+{
+  "queue": [
+    {
+      "id": "example-devops",
+      "company": "Example Corp",
+      "role": "Senior DevOps Engineer",
+      "status": "go",
+      "url": "https://boards.greenhouse.io/example/jobs/1234567"
+    }
+  ]
+}

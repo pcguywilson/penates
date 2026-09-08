@@ -1,0 +1,710 @@
+intents:
+  company_interest:
+    type: template
+    keywords:
+    - why do you want
+    - why are you interested
+    - what excites
+    - what interests
+    - why work
+    - want to work at
+    - interested in working
+    - join
+    - motivates you
+    - spark
+    - attracted
+    - drew you
+    - made you apply
+    - what made you
+    - why apply
+    - apply to this
+    - apply to the
+    - excited to apply
+    - why now
+    - and why now
+    - why this company
+    - why us
+    - why here
+    variants:
+      technology: I'm interested in {{COMPANY}} because {{WHY_COMPANY}} My background in cloud infrastructure,
+        automation, reliability, and security maps directly to that kind of technical challenge, and I'd
+        like to contribute hands-on while continuing to grow in {{ROLE_FOCUS}}.
+      mission: I'm drawn to {{COMPANY}} because {{WHY_COMPANY}} I want my infrastructure and DevOps work
+        to support something with real impact, and I'd bring experience building secure, dependable systems
+        that let teams move quickly and safely.
+      general: I'm interested in {{COMPANY}} because {{WHY_COMPANY}} The role lines up well with my background
+        in cloud infrastructure, automation, and production operations, and it's the kind of environment
+        where I can contribute immediately while continuing to grow toward senior infrastructure and reliability
+        work.
+    default_variant: technology
+  role_alignment:
+    type: template
+    keywords:
+    - align with your career
+    - career goals
+    - align with your goals
+    - how does this role
+    - fit your goals
+    answer: This role aligns with my goal of continuing to grow as a cloud, DevOps, and infrastructure
+      engineer while taking on greater ownership of production systems. I want to keep working with cloud
+      infrastructure, automation, Kubernetes, security, and reliability while expanding into {{ROLE_FOCUS}}.
+      I'm particularly interested in opportunities where I can contribute hands-on while developing toward
+      senior-level infrastructure and reliability responsibilities.
+  good_fit:
+    type: template
+    keywords:
+    - good fit
+    - why are you a good fit
+    - right person
+    - make you a strong candidate
+    - sentences tell us why
+    - why should we hire
+    max_sentences: 4
+    answer: I bring {{YEARS_IT}} years of IT experience focused on cloud infrastructure, DevOps, security,
+      and production operations. I have hands-on experience with AWS, AWS GovCloud, Azure Government,
+      Terraform, Ansible, Docker, Kubernetes, monitoring, and compliance-driven environments, supporting
+      both commercial and government customers. I troubleshoot complex infrastructure and application
+      issues while improving reliability and automation, and I bring a strong ownership mindset{{FIT_HOOK}}.
+  aws_experience:
+    type: static
+    keywords:
+    - proficient in aws
+    - aws experience
+    - describe your aws
+    answer: Yes. I have extensive hands-on AWS experience supporting commercial and AWS GovCloud environments.
+      My experience includes EC2, VPC, IAM, S3, EBS, load balancers, Route 53, security controls, monitoring,
+      cost optimization, Terraform, Docker, Kubernetes, Amazon Bedrock, and Amazon Titan. I have provisioned
+      and secured production infrastructure, supported cloud migrations, troubleshot complex application
+      and networking issues, and independently deployed an AI platform in AWS GovCloud.
+  aws_years:
+    type: static
+    keywords:
+    - how many years
+    - years of aws
+    - years of professional experience with aws
+    answer: I have approximately 7+ years of professional AWS experience, including commercial AWS and
+      AWS GovCloud environments. My experience includes EC2, VPC, IAM, S3, EBS, security groups, load
+      balancers, Route 53, Amazon Bedrock, and Amazon Titan, along with Terraform, Docker, Kubernetes,
+      Ansible, GitHub Actions, and infrastructure/security automation. I have also supported cloud migrations,
+      production troubleshooting, compliance, monitoring, and cost optimization across customer environments.
+  aws_gcp_scope:
+    type: static
+    keywords:
+    - gcp
+    - google cloud
+    - both at once
+    - aws experience level and scope
+    answer: I have senior-level hands-on experience with AWS, including commercial and AWS GovCloud environments.
+      I've owned infrastructure provisioning, networking, security, troubleshooting, cost optimization,
+      and production operations using services such as EC2, VPC, IAM, S3, EBS, load balancers, Route 53,
+      Bedrock, and Titan, with Terraform, Docker, Kubernetes, and Ansible supporting the infrastructure.
+      My cloud experience also includes Azure Government. I have limited hands-on GCP experience and have
+      not operated AWS and GCP simultaneously in production. However, my experience managing multiple
+      cloud environments and infrastructure-as-code provides a strong foundation for working across GCP
+      and learning its services quickly.
+  docker:
+    type: static
+    keywords:
+    - docker
+    - app packaging
+    - containers packaging
+    answer: I have hands-on experience using Docker for application packaging and deployment in production-oriented
+      environments. Most recently, I independently deployed a containerized AI knowledge management platform
+      in AWS GovCloud using Docker, Amazon Bedrock, and Amazon Titan. I also support containerized workloads
+      deployed through Docker and Kubernetes in a multi-tenant cloud environments.
+  kubernetes:
+    type: static
+    keywords:
+    - kubernetes in production
+    - k8s
+    - kubernetes experience
+    - scale
+    - kubernetes
+    - used kubernetes
+    answer: I have hands-on experience supporting containerized production workloads in Kubernetes environments,
+      including a multi-tenant Kubernetes platform. My work has involved troubleshooting application
+      availability, networking, deployment, integration, and infrastructure issues affecting production
+      workloads. I also use Docker and Kubernetes as part of cloud application deployments and have supported
+      zero-downtime release processes.
+  k8s_migration:
+    type: static
+    keywords:
+    - major migration
+    - infrastructure upgrade
+    - zero downtime migration
+    answer: I have supported production Kubernetes environments and participated in customer migrations
+      from on-premises infrastructure to AWS, including deploying containerized workloads in a multi-tenant
+      Kubernetes environments. My approach to minimizing downtime is to validate changes in advance, maintain
+      redundancy, deploy incrementally, monitor application health throughout the change, and use controlled
+      rollbacks when necessary. I have also been responsible for monthly zero-downtime WFM deployments,
+      coordinating infrastructure and application changes to avoid service interruption.
+  terraform_helm:
+    type: static
+    keywords:
+    - helm
+    - rate your
+    - terraform and helm
+    answer: 'Terraform: Hands-on in production. I use Terraform to provision and manage AWS and Azure
+      infrastructure, including cloud resources, networking, security controls, and supporting services.
+      I have experience with reusable configurations, variables, state management, and environment-specific
+      deployments. Helm: Hands-on exposure through Kubernetes environments and deployments, but Terraform
+      is the stronger area of hands-on ownership.'
+  iac_approach:
+    type: static
+    keywords:
+    - infrastructure-as-code
+    - infrastructure as code
+    - iac
+    - approach to
+    answer: I prefer Infrastructure-as-Code because it makes infrastructure repeatable, version-controlled,
+      auditable, and easier to maintain across environments. Terraform is my primary IaC tool, with Ansible
+      used for configuration and operational automation. I focus on reusable configurations, minimizing
+      manual changes, controlling environment differences through variables and modules, and using version
+      control and review processes to reduce configuration drift.
+  cicd_daily:
+    type: static
+    keywords:
+    - ci/cd tools
+    - cicd
+    - pipelines
+    - optimized pipelines
+    answer: I have experience with GitHub Actions and Ansible for deployment and operational automation.
+      I have integrated automation with Terraform, Docker, and Kubernetes to create repeatable infrastructure
+      and application deployment workflows. My focus has been on reducing manual steps, improving consistency,
+      and making deployments more reliable and repeatable.
+  cicd_extensive:
+    type: static
+    keywords:
+    - ci/cd platforms
+    - used extensively
+    answer: I have extensive experience with GitHub Actions and Ansible to automate application deployments,
+      infrastructure provisioning, and operational workflows. I've integrated these with Terraform, Docker,
+      and Kubernetes to support repeatable, reliable deployments across AWS and AWS GovCloud environments.
+      My focus has been on reducing manual effort, improving deployment consistency, and enabling secure,
+      low-risk production releases through Infrastructure as Code and automation.
+  secure_cicd_envs:
+    type: static
+    keywords:
+    - secure development
+    - test environments
+    - release cycles
+    answer: I have experience building secure cloud-based development and test infrastructure using AWS,
+      Terraform, Docker, Kubernetes, Ansible, and GitHub Actions. I focus on repeatable infrastructure,
+      controlled access, security validation, and automated deployment processes so environments can be
+      consistently reproduced and safely promoted through release cycles.
+  cloud_providers:
+    type: static
+    keywords:
+    - which cloud providers
+    - cloud providers have you
+    - services did you manage
+    answer: AWS, AWS GovCloud, and Azure Government. AWS experience includes EC2, VPC, IAM, S3, EBS, load
+      balancers, Route 53, security groups, monitoring, Amazon Bedrock, Amazon Titan, and related infrastructure
+      services. I have also managed Azure Government tenant environments, including provisioning, configuration,
+      security, and lifecycle management.
+  onprem:
+    type: static
+    keywords:
+    - on-prem
+    - on premise
+    - on-premise
+    - server environments
+    answer: Yes. I have hands-on experience supporting on-premises Windows and Linux infrastructure, including
+      server administration, networking, VPNs, web servers, monitoring, provisioning, patching, and lifecycle
+      management. I have also managed SCCM, Foreman/Puppet, HAProxy, and other infrastructure components
+      before and during migrations to cloud environments.
+  windows_stack:
+    type: static
+    keywords:
+    - windows server
+    - iis
+    - sql server
+    - powershell
+    - ansible
+    answer: 1. I have hands-on experience administering Windows Server environments, including patching,
+      software deployment, imaging, troubleshooting, access management, and maintaining production systems.
+      2. I have administered IIS web servers and have upgraded and migrated IIS environments into secure
+      internal environments to improve security, reliability, and performance. 3. I have supported Microsoft
+      SQL Server environments as part of application infrastructure, including troubleshooting, maintenance,
+      performance considerations, and database-related migrations and cost optimization. 4. Yes. I have
+      used PowerShell for Windows administration and automation tasks. 5. Yes. I have hands-on experience
+      with Ansible for infrastructure and operational automation.
+  networking_issue:
+    type: static
+    keywords:
+    - routing
+    - load balancing
+    - firewall
+    - connectivity
+    answer: I have diagnosed application connectivity issues involving load balancing and network routing
+      in production environments. One example involved troubleshooting traffic through HAProxy and reviewing
+      routing and backend configuration to determine why application traffic was not reaching the expected
+      service. The root cause was a configuration issue affecting traffic routing, which I corrected and
+      then validated through connectivity and application testing.
+  security_controls_aws:
+    type: static
+    keywords:
+    - security controls
+    - across the aws
+    - designing security
+    answer: I have experience designing, implementing, and maintaining security controls across AWS, including
+      AWS GovCloud. This includes IAM and access controls, security groups and network controls, vulnerability
+      remediation, encryption and secure configuration, monitoring, logging, and compliance validation.
+      I have used tools such as Terraform, Nessus, Wazuh, Microsoft Sentinel, Splunk, and Sumo Logic to
+      implement and monitor controls, investigate issues, and maintain NIST and PCI DSS compliance across
+      production environments.
+  infra_security:
+    type: static
+    keywords:
+    - infrastructure security experience
+    - previous infrastructure security
+    answer: Yes. I have extensive infrastructure security experience across AWS GovCloud, Azure Government,
+      Linux, Windows, and enterprise environments. I have performed vulnerability remediation, Nessus
+      scanning, NIST compliance validation, audit preparation, security monitoring, IAM and access controls,
+      network security, VPN administration, and SIEM management using Wazuh, Microsoft Sentinel, Splunk,
+      and Sumo Logic. I have also rebuilt hardened security infrastructure and created reusable hardened
+      AMIs for future deployments.
+  security_first:
+    type: static
+    keywords:
+    - security-first
+    - security first infrastructure
+    answer: Security-first infrastructure means treating security as part of the design rather than something
+      added after deployment. In practice, that means applying least-privilege access, secure network
+      controls, hardened configurations, vulnerability management, logging and monitoring, encryption
+      where appropriate, and continuous compliance validation. I also believe security controls should
+      be automated where possible so that secure configurations are repeatable and deviations can be detected
+      quickly.
+  monitoring_incident:
+    type: static
+    keywords:
+    - monitor system
+    - respond to incidents
+    - incident response
+    answer: I use monitoring, logging, and alerting tools including Nagios, Wazuh, Microsoft Sentinel,
+      Splunk, and Sumo Logic to maintain visibility into infrastructure and security events. I start incident
+      response by determining scope and business impact, reviewing monitoring data and logs, isolating
+      the root cause, and implementing the safest resolution. Afterward, I document the issue and identify
+      opportunities to automate or improve monitoring so similar incidents can be detected or prevented
+      in the future.
+  devops_definition:
+    type: static
+    keywords:
+    - what does devops mean
+    - devops mean to you
+    answer: To me, DevOps means bringing development, operations, security, and automation together to
+      deliver reliable software and infrastructure efficiently. It is about removing unnecessary manual
+      work, creating repeatable processes, monitoring what you deploy, and taking shared ownership of
+      production. Good DevOps allows teams to move faster without sacrificing reliability or security.
+  devops_aws:
+    type: static
+    keywords:
+    - devops experience working within aws
+    - devops within aws
+    - devops experience
+    - backend/devops
+    answer: I have hands-on DevOps experience supporting AWS and AWS GovCloud environments using Terraform,
+      Ansible, Docker, Kubernetes, and GitHub Actions. I have managed EC2, VPC, IAM, S3, EBS, load balancers,
+      Route 53, monitoring, and security controls, as well as Amazon Bedrock and Titan for an AI platform.
+      My work includes infrastructure provisioning, automation, cloud migrations, production troubleshooting,
+      security/compliance, cost optimization, and deployment support.
+  saas_multi_env:
+    type: static
+    keywords:
+    - saas applications
+    - multiple customer environments
+    - customer environments
+    answer: I have extensive experience supporting SaaS applications across multiple customer environments,
+      primarily through an enterprise CloudSuite platform. I managed production environments for commercial and government
+      customers, troubleshooting application, integration, and infrastructure issues involving WFM, Birst,
+      ION, and Mingle. My responsibilities included coordinating customer migrations, supporting zero-downtime
+      monthly releases, resolving cross-system integration issues, maintaining secure cloud infrastructure,
+      and ensuring each customer environment remained stable, compliant, and highly available.
+  idp_provisioning:
+    type: static
+    keywords:
+    - google workspace
+    - idp
+    - provisioning
+    - offboarding
+    - access reviews
+    answer: I would start by using Google Workspace as the source of truth and leverage its native provisioning
+      capabilities for applications that support them. For applications that require additional lifecycle
+      management, I would introduce a SaaS management or identity platform such as BetterCloud or JumpCloud
+      rather than immediately replacing the existing directory. I would automate provisioning and offboarding
+      first, then add scheduled access reviews and least-privilege controls. I'd start with a small group
+      of critical SaaS applications, measure the results, and expand automation over time based on actual
+      gaps and ROI.
+  prioritization:
+    type: static
+    keywords:
+    - prioritize
+    - several technical issues
+    - at the same time
+    - multiple systems
+    answer: I prioritize issues based on business impact, customer impact, security risk, and availability.
+      I first address critical outages, security issues, and problems affecting multiple customers, while
+      communicating status and expectations to stakeholders. For example, while supporting multiple customer
+      environments, I have managed application, networking, and infrastructure issues simultaneously by
+      quickly assessing scope and severity, isolating independent problems, and coordinating with the
+      appropriate teams while continuing lower-priority work in parallel.
+  code_review_collab:
+    type: static
+    keywords:
+    - reviewing code
+    - collaborating with developers
+    - deployment impacts
+    answer: Yes. I have collaborated with development and cross-functional teams to troubleshoot application
+      issues, evaluate deployment impacts, resolve integration problems, and improve production reliability.
+      My infrastructure role requires understanding application behavior, reviewing configurations and
+      scripts, and working with developers when changes affect performance, networking, security, or deployment
+      processes.
+  cross_team_collab:
+    type: static
+    keywords:
+    - qa
+    - product
+    - professional services
+    - operational friction
+    - collaborated with teams
+    answer: I regularly collaborate with development, QA, security, and customer-facing teams to troubleshoot
+      issues and improve operational processes. I have helped standardize deployment and troubleshooting
+      procedures, created documentation and operational guides, automated repetitive customer documentation
+      tasks, and worked across teams during customer migrations and production releases. These efforts
+      have reduced manual work, improved consistency, and made it easier for teams to resolve issues and
+      support customers.
+  regulated_industry:
+    type: static
+    keywords:
+    - regulated industry
+    answer: I have extensive experience supporting regulated environments in both the public and private
+      sectors. In my current role, I manage AWS GovCloud and Azure Government environments while ensuring
+      compliance with NIST requirements through vulnerability remediation, audit preparation, and security
+      monitoring. Previously at a large ticketing and live-events company, I supported PCI DSS compliance by implementing
+      security controls, participating in annual audits, and maintaining secure enterprise infrastructure.
+      Throughout my career, I've worked closely with security, compliance, and audit teams to maintain
+      secure, highly available production environments.
+  compliance_frameworks:
+    type: static
+    keywords:
+    - soc 2
+    - hipaa
+    - pci
+    - compliance-driven
+    answer: Yes. My strongest compliance experience is with NIST and PCI DSS rather than SOC 2 or HIPAA.
+      I have supported AWS GovCloud and Azure Government environments, performed vulnerability remediation,
+      analyzed Nessus scans, provided audit evidence, and presented findings to auditors. I also supported
+      PCI DSS compliance at a large ticketing and live-events company by maintaining security controls and supporting audit
+      requirements.
+  fedramp:
+    type: static
+    keywords:
+    - fedramp
+    answer: I have not directly managed a FedRAMP authorization or led a formal FedRAMP assessment. However,
+      I have extensive experience supporting government cloud environments with similar security and compliance
+      requirements. I currently support AWS GovCloud and Azure Government environments, perform vulnerability
+      remediation, analyze Nessus scans, maintain security controls, provide audit evidence, and ensure
+      compliance with NIST requirements. While my direct experience is with NIST-based government compliance
+      rather than owning a FedRAMP authorization, I am familiar with the security, documentation, continuous
+      monitoring, and evidence-driven processes that underpin FedRAMP.
+  public_health:
+    type: static
+    keywords:
+    - nbs
+    - hl7
+    - fhir
+    - loinc
+    - snomed
+    - public health
+    answer: No direct experience with NBS, HL7, FHIR, LOINC, or SNOMED. My background is primarily in
+      cloud infrastructure, systems administration, DevOps, security, automation, and supporting enterprise
+      application integrations.
+  founding_hire:
+    type: static
+    keywords:
+    - founding
+    - first devops
+    - 0-to-1
+    - from scratch
+    - first hire
+    answer: I have not been the first dedicated DevOps/SRE hire at a company, but I have built and owned
+      0-to-1 infrastructure solutions within existing organizations. Most notably, I independently designed
+      and deployed a self-hosted AI platform in AWS GovCloud, building the infrastructure, containerization,
+      integrations, security controls, monitoring, documentation, and operational processes from the ground
+      up. I have also rebuilt infrastructure such as Wazuh SIEM and developed automation and reusable
+      infrastructure patterns for production government and commercial environments.
+  it_years:
+    type: static
+    keywords:
+    - it administration
+    - systems administration
+    - it operations
+    - years of professional experience in it
+    answer: I have {{YEARS_IT}} years of professional IT administration and operations experience, spanning
+      systems administration, infrastructure, cloud engineering, and DevOps. My experience includes administering
+      Windows and Linux environments, AWS/AWS GovCloud and Azure Government, networking, VPNs, web servers,
+      monitoring, security, patching, provisioning, and automation. I have supported both commercial and
+      government production environments, troubleshooting critical infrastructure and application issues
+      while maintaining security and compliance requirements.
+  enterprise_it:
+    type: static
+    keywords:
+    - enterprise it
+    answer: I have {{YEARS_IT}} years of enterprise IT experience spanning systems administration, cloud
+      infrastructure, DevOps, security, monitoring, and production operations. I have supported large
+      commercial and government environments with Windows and Linux systems, AWS and Azure, networking,
+      databases, web servers, Kubernetes, monitoring, compliance, and customer-facing applications. My
+      experience includes managing multiple environments simultaneously while maintaining availability,
+      security, and operational standards.
+  skills_list:
+    type: static
+    keywords:
+    - list relevant skills
+    - list your skills
+    - relevant skills
+    answer: AWS, AWS GovCloud, Azure Government, Terraform, Ansible, Docker, Kubernetes, GitHub Actions,
+      Linux, Windows Server, PowerShell, SCCM, Foreman, Puppet, HAProxy, Nagios, Wazuh, Splunk, Sumo Logic,
+      Microsoft Sentinel, Nessus, Amazon Bedrock, Amazon Titan, S3, EC2, VPC, IAM, networking, load balancing,
+      infrastructure as code, cloud security, NIST, PCI DSS, vulnerability management, monitoring, incident
+      response, troubleshooting, documentation, customer support, technical communication, and cross-functional
+      collaboration.
+  expertise_area:
+    type: static
+    keywords:
+    - area of expertise
+    - tech stacks
+    - familiar with
+    answer: AWS, AWS GovCloud, Azure Government, Terraform, Ansible, Docker, Kubernetes, Linux, Windows
+      Server, networking, IAM, SCCM, Foreman, Puppet, HAProxy, Nagios, Wazuh, Splunk, Sumo Logic, Microsoft
+      Sentinel, Nessus, PowerShell, GitHub Actions, Amazon Bedrock, Amazon Titan, S3, EC2, VPC, IAM, load
+      balancing, infrastructure automation, cloud security, NIST compliance, PCI DSS compliance, troubleshooting,
+      monitoring and incident response.
+  skill_self_rating:
+    type: static
+    keywords:
+    - skill level
+    - particularly strong
+    - don't have exposure
+    answer: I have strong hands-on experience with AWS, AWS GovCloud, Azure Government, Linux, Windows
+      Server, Terraform, Ansible, Docker, Kubernetes, networking, monitoring, security, and infrastructure
+      automation. I am particularly strong in cloud infrastructure, troubleshooting, security/compliance,
+      and operational automation. My experience is broader in infrastructure and operations than in application
+      development, and I am transparent about technologies where I have limited or no direct production
+      exposure.
+  industries:
+    type: static
+    keywords:
+    - list the industries
+    - industries you have
+    answer: Government, Government Contracting, Cloud Computing, Enterprise Software, Workforce Management,
+      a prior employermation Technology, Cybersecurity, SaaS, Financial/Compliance-focused environments, and Entertainment/Ticketing.
+  technical_issue:
+    type: static
+    keywords:
+    - technical issue
+    - how you resolved
+    - diagnose
+    answer: I inherited a broken Wazuh SIEM deployment where the indexer was failing because of certificate
+      and filesystem permission issues, while Filebeat and agent deployments were also failing. I reviewed
+      service logs and configuration, identified the certificate, noexec /tmp, and permission-related
+      problems, and rebuilt the environment on Rocky Linux 9.7. I successfully restored the SIEM, deployed
+      agents across Windows and Linux systems, and captured the hardened configuration as a reusable AMI
+      for future deployments.
+  reliability_improvement:
+    type: static
+    keywords:
+    - reliability
+    - operational improvement
+    - personally implemented
+    answer: I rebuilt a broken Wazuh SIEM deployment, resolving indexer certificate, filesystem permission,
+      and Filebeat issues. I redeployed the components on Rocky Linux, deployed agents across Windows
+      and Linux systems, and created a hardened reusable AMI for future deployments. This restored reliable
+      security monitoring and made future deployments faster and more consistent.
+  automation_example:
+    type: static
+    keywords:
+    - manual process
+    - worth the investment
+    - automated
+    answer: I automated the creation of customer documentation and application walkthroughs. The existing
+      process required repeatedly logging into the application, navigating through specific areas, capturing
+      screenshots, and compiling information for each new customer. Because the process was repetitive
+      and followed a consistent pattern, it was a good candidate for automation. The automation now handles
+      the application navigation and screenshot collection, improving consistency and significantly reducing
+      the manual effort required for each customer.
+  automation_workflow:
+    type: static
+    keywords:
+    - workflow or process you automated
+    - automated in an it context
+    answer: I automated the creation of customer documentation and application walkthroughs. Previously,
+      creating documentation for new customers required manually logging into the application, navigating
+      through multiple screens, capturing screenshots, and compiling the relevant information. I built
+      an automated workflow that logs into the application, navigates to the required areas, captures
+      pertinent information and screenshots, and produces consistent documentation. This removed a repetitive
+      manual process from the onboarding workflow and improved the consistency and speed of documentation
+      creation.
+  learn_quickly:
+    type: static
+    keywords:
+    - learn something
+    - very quickly
+    - learn quickly
+    answer: A recent example was deploying a self-hosted AI knowledge platform in AWS GovCloud using technologies
+      I had not previously worked with extensively. I prioritized understanding the architecture, identifying
+      GovCloud-specific limitations, and getting the core application working before addressing enhancements.
+      I used documentation, source-code analysis, testing, and AI-assisted research to quickly troubleshoot
+      unfamiliar components. The result was a functioning AI platform using Amazon Bedrock and Titan,
+      with custom patches, S3 integration, and support for multiple document formats.
+  create_clarity:
+    type: static
+    keywords:
+    - unclear
+    - creating clarity
+    - took responsibility
+    - ambiguous
+    - ambiguity
+    - ambiguous environment
+    answer: When deploying the AI knowledge platform in AWS GovCloud, there was no established implementation
+      path for the specific combination of open-source software, Bedrock, and Titan. I took ownership
+      of understanding the requirements, identifying technical gaps, documenting the architecture and
+      known issues, and creating a repeatable deployment process. This turned an unclear proof of concept
+      into a documented, repeatable platform with installation instructions, end-user documentation, and
+      defined operational procedures.
+  built_unprompted:
+    type: static
+    keywords:
+    - no one asked
+    - built, fixed, or improved
+    - even though no one
+    - most impactful
+    - impactful thing you
+    - proudest
+    - most proud
+    - biggest accomplishment
+    - thing you've built
+    - thing you have built
+    - something you built
+    - project you are most proud
+    answer: I independently built a self-hosted AI knowledge management platform in AWS GovCloud. I identified
+      the opportunity, deployed the infrastructure, patched open-source dependencies to support Amazon
+      Titan, built a custom S3 connector, added document extraction and deletion detection, and enabled
+      end-user uploads. I also created technical and end-user documentation so the solution could be maintained
+      and used by others.
+  used_ai_work:
+    type: static
+    keywords:
+    - used ai in
+    - meaningful work
+    - validate the output
+    answer: I recently used AI tools such as Claude and ChatGPT extensively while deploying a self-hosted
+      AI knowledge platform in AWS GovCloud. I used AI to accelerate troubleshooting, research unfamiliar
+      code, develop and refine custom patches, and work through integration problems involving Amazon
+      Bedrock and Titan. AI significantly shortened the time needed to understand unfamiliar components
+      and iterate on solutions. I validated the output through hands-on testing, reviewing the underlying
+      code, checking AWS documentation, and confirming the behavior in the actual environment rather than
+      treating AI-generated answers as authoritative.
+  ai_tools_usage:
+    type: static
+    keywords:
+    - how do you currently use ai
+    - ai tools in your
+    answer: I use AI tools such as Claude and ChatGPT as engineering assistants for troubleshooting, research,
+      documentation, scripting, and understanding unfamiliar technologies. Most recently, I used AI extensively
+      while deploying a self-hosted AI platform in AWS GovCloud, using it to accelerate troubleshooting
+      and development of custom patches and integrations. I validate AI-generated solutions through testing,
+      documentation, vendor references, and reviewing the underlying code rather than treating the output
+      as authoritative.
+  motivation_generic:
+    type: static
+    keywords:
+    - motivates you
+    - consider the offer
+    - motivate you to work
+    answer: I'm motivated by opportunities where I can apply my infrastructure and DevOps experience to
+      meaningful technical challenges while continuing to grow. I look for roles where I can take ownership,
+      solve complex problems, improve automation and reliability, and work with a strong technical team.
+      I'm also interested in opportunities where the work provides exposure to new technologies and allows
+      me to make a measurable impact.
+  english_proficiency:
+    type: static
+    keywords:
+    - english proficiency
+    - level of english
+    - english level
+    - proficiency in english
+    - fluency in english
+    - how is your english
+    answer: I am a native English speaker with full professional working proficiency in both written and
+      spoken English.
+  linux_experience:
+    type: static
+    keywords:
+    - linux experience
+    - describe your linux
+    - linux administration
+    - what kind of linux
+    - your linux
+    - experience with linux
+    answer: I have extensive hands-on Linux experience across production environments, including Rocky
+      Linux, RHEL/CentOS, and Ubuntu. My work spans administration, hardening, networking, services, shell
+      scripting, patching, monitoring, and troubleshooting. Recent examples include rebuilding a Wazuh
+      SIEM on Rocky Linux 9.7 and managing Linux fleets across AWS and AWS GovCloud.
+  databases:
+    type: static
+    keywords:
+    - data storage
+    - postgresql
+    - postgres
+    - redis
+    - nosql
+    - relational database
+    - database technologies
+    - mysql
+    - in-memory database
+    answer: My database experience is primarily operational rather than schema design. I have supported
+      relational databases including Microsoft SQL Server and PostgreSQL as part of application infrastructure
+      — handling maintenance, performance considerations, backups, migrations, and cost optimization (including
+      a database and instance downsizing initiative). I have worked with these datastores in production
+      AWS environments, though my depth is in infrastructure and operations rather than application-level
+      data modeling.
+  product_familiarity:
+    type: static
+    keywords:
+    - have you used
+    - have you tried
+    - ever used
+    - used our product
+    - used the product
+    - used our platform
+    - familiar with our product
+    - familiar with our platform
+    - experience with our product
+    - hands-on with our
+    - used it before
+    - personal or professional
+    - tried our
+    answer: I have surface-level familiarity with {{COMPANY}}'s product rather than deep hands-on production
+      use. I understand what it does and where it fits, I've seen it demoed, and I ramp up on new tools
+      and platforms quickly.
+  success_metrics:
+    type: static
+    keywords:
+    - how did you know it worked
+    - what did success look like
+    - success actually look
+    - how did you measure
+    - how do you measure success
+    - measure the impact
+    - measure success
+    - how did you validate
+    - what was the outcome
+    - what were the results
+    - define success
+    - know it was successful
+    answer: I measure success by concrete reliability and delivery outcomes. After rebuilding our Wazuh
+      SIEM, success meant restored monitoring with healthy agents across the Linux and Windows fleet.
+      On multi-tenant Kubernetes I delivered monthly zero-downtime deployments, validating ahead of time
+      and watching health through each rollout. For the AWS GovCloud AI platform, success was validating
+      it against real workloads in the production account. In short, systems that stay up, deployments
+      that don't cause incidents, and stakeholders who trust the infrastructure.

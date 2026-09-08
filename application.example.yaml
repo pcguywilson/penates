@@ -1,0 +1,17 @@
+# EDIT PER JOB. Everything about you lives in profile.yaml; this is just the job.
+company: Acme Cloud
+role_title: Senior DevOps Engineer
+salary: 125000
+
+# One or two lines on what THIS company does / why it appeals.
+# Turned into the single {{WHY_COMPANY}} sentence. Describe only this company.
+company_description: >
+  Acme Cloud builds secure, high-scale infrastructure for regulated financial
+  customers, with a strong focus on reliability and automation.
+
+# Which company-interest framing to use: mission | technology | general
+interest_style: technology
+
+# Optional per-job variable overrides:
+overrides:
+  ROLE_FOCUS: large-scale reliability and platform engineering

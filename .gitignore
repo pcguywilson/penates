@@ -1,0 +1,53 @@
+# ============================================================================
+# YOUR REAL DATA — never committed. Copy the .example files and edit locally.
+# ============================================================================
+profile.yaml
+application.yaml
+data/work_history.yaml
+data/jobs.json
+secrets.yaml
+.env
+
+# resume / cover-letter PDFs live in documents/ but are never committed
+*.pdf
+
+# ============================================================================
+# credentials / secrets
+# ============================================================================
+*.secret
+*.pem
+*.key
+
+# ============================================================================
+# runtime + local state (regenerated)
+# ============================================================================
+data/answer_cache.json
+data/log.json
+data/latest_run.log
+data/*_probe.txt
+data/*_dump.txt
+*_form_dom_dump.txt
+unmatched.log
+tool_test_output.log
+logs/
+
+# browser profiles created by the debug-Chrome launcher
+.browser-profile/
+chrome-profile/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# editor / OS / session noise
+*.bak
+*.bak[0-9]*
+*.tgz
+.DS_Store
+.idea/
+.vscode/
+_to_delete/
+"Claude outputs/"
