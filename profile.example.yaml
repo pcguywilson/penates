@@ -1,0 +1,115 @@
+# ============================================================================
+# profile.example.yaml  ->  copy to profile.yaml and edit with YOUR facts.
+# profile.yaml is git-ignored so your real data never lands in the repo.
+#
+# LOCKED FACTS. The model may never contradict or exceed these. This file is
+# the source of truth for every deterministic field and every grounded essay.
+# The whole point of the tool: the LLM writes, but it may only use facts here.
+# ============================================================================
+
+identity:
+  legal_name: Jane Q. Example
+  first_name: Jane
+  last_name: Example
+  middle_name: Quinn
+  email: jane.example@example.com
+  phone: "555-555-0100"
+  linkedin: linkedin.com/in/jane-example
+  github: https://github.com/jane-example
+  location_full: "Springfield, Illinois, United States"
+  city: Springfield, Illinois     # full string so a single-box location typeahead resolves
+  city_only: Springfield          # bare city for a dedicated City field next to a separate State
+  state: Illinois                 # full name so state dropdowns match the option text
+  zip: "62704"
+  country: "United States"
+  street: "123 Example St."        # line 1 only; filled ONLY when the form marks it required
+  timezone: America/Chicago
+  work_auth: US citizen
+  current_title: "Senior Platform Engineer"
+  current_company: "Example Corp"
+  sponsorship_required: false
+  will_relocate: false
+  remote_only: true
+
+education:
+  degree: Associate               # <- the exact option text your forms should pick
+  field: Computer Information Technology
+  school: Example Community College
+  year: 2011
+  location: Springfield, IL
+  # The tool will only ever select this degree level. It will NOT upgrade to a
+  # higher one to look better. Set it to the truth.
+
+clearance:
+  level: None                     # e.g. "Active Secret", or "None"
+  on_resume: false
+
+# Voluntary self-identification (your own answers). Filled on forms that ask.
+# Values must match the option text shown in the dropdown. Leave blank to skip.
+eeo:
+  gender: ""
+  gender_identity: ""
+  hispanic_latino: ""
+  race: ""
+  veteran_status: ""
+  veteran_member: ""
+  disability_status: ""
+  disability_short: ""
+  sexual_orientation: ""
+  transgender: ""
+
+compensation:
+  band_usd: [120000, 140000]
+  single_default: 125000          # used unless an employer floor is higher; never invents a new band
+
+candidate:
+  years_it: "10+"                 # used via {{YEARS_IT}}; keep it truthful
+  years_aws: "5+"
+
+# ---- skills you would honestly claim ---------------------------------------
+cloud: [AWS, Azure]
+iac: [Terraform, Ansible]
+containers: [Docker, Kubernetes]
+cicd: [GitHub Actions]
+monitoring_security: [Nagios, Grafana, Prometheus]
+systems: [Linux, Windows Server, PowerShell, HAProxy]
+languages: [Bash, Python, YAML, SQL]
+
+# Honest gaps: the gap guard uses these. If a question names a tool in this list,
+# the tool writes an HONEST answer and flags it for review instead of pretending.
+limited_or_none: [Jenkins, "GCP production", "FedRAMP authorization ownership", SOC 2, HIPAA]
+
+# Surface / working-level experience: not a full gap, but must be framed honestly.
+# Key = technology, value = the honest qualifier the answer must use.
+limited_experience:
+  PostgreSQL: "surface level - running queries and modifying tables, not schema design or tuning"
+
+# Canonical stories: the ONLY war stories the model may reuse. It never invents new ones.
+# Behavioral questions are mapped onto these by intent.
+canonical_stories:
+  incident: "Inherited a broken monitoring stack, rebuilt it on a hardened base image, restored coverage, and captured a reusable image."
+  automation: "Automated repetitive onboarding/documentation by scripting the steps and compiling the output."
+  migration: "Led on-prem to cloud migrations with zero-downtime rollouts: validate ahead, keep redundancy, roll incrementally, roll back when needed."
+
+defaults:
+  ROLE_FOCUS: modern platforms and engineering practices
+  FIT_HOOK: " and experience taking projects from concept through implementation and support"
+  INTEREST_STYLE: technology       # mission | technology | general
+
+application_defaults:
+  how_did_you_hear: LinkedIn
+
+# Universal eligibility answers (invariant about you; safe to pre-fill everywhere).
+eligibility:
+  notice_period: "2 weeks"
+  earliest_start: "2 weeks from offer"
+  willing_to_travel: "Yes, occasionally"
+  over_18: "Yes"
+  background_check: "Yes"
+  drug_screen: "Yes"
+  drivers_license: "Yes"
+  reliable_transportation: "Yes"
+  employment_type: "Full-time"
+  non_compete: "No"
+  remote_experience: "Yes"
+  evenings_weekends: "Yes"
