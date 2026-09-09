@@ -9,9 +9,10 @@ form.
 
 No account. No cloud LLM required. Nothing leaves the machine by default.
 
-> The everyday, supported path is the right-click answer helper, which works in a normal
-> browser next to a commercial autofiller. Full-page structured autofill (Playwright plus
-> a debug Chrome) exists but is **work in progress**, so treat it as a sharp edge.
+> Two ways to fill, both in a normal browser through one extension: a whole-page **Fill
+> application** that handles identity, EEO, yes/no and dropdowns and drafts the essays, and
+> a per-field answer helper for one written question at a time. Both stop before Submit. A
+> separate Playwright/debug-Chrome runner predates the extension and is now legacy.
 
 ## Why it exists
 
@@ -32,15 +33,20 @@ tool whose whole point is that your data stays home and belongs to you.
 
 ## What works today
 
-- Right-click (or a page action) on a written-answer field gives you a draft from the local answer engine.
+- **Whole-page fill in normal Chrome:** one "Fill application" button scans the form
+  (light DOM, open shadow roots, same-origin iframes), fills identity, EEO, yes/no and
+  radio groups, picks the right option in `react-select`-style dropdowns, drafts the
+  essays, and shows a review panel of what it filled, flagged, or left for you.
+- **Per-field helper:** right-click or a shortcut on any written-answer field for a single
+  grounded draft you can edit, regenerate, and insert.
 - Deterministic identity fields (name, email, phone, city, yes/no) from a locked profile.
 - Answers grounded on your real work history: employer, dates, stack.
 - **Gap guard:** a tool or cert you didn't list stays unclaimed; the field is answered honestly and flagged for review.
-- It stops before Submit.
+- Optional fields you marked "leave blank" stay blank instead of getting a generated essay.
+- It stops before Submit, always.
 
-Full ATS walks (Greenhouse, Lever, Ashby, Workable, Paylocity, Workday, iCIMS, Salesforce
-Lightning, and their comboboxes) are **in progress**. Rely on the answer path; treat the
-full autofill as experimental.
+The whole-page fill is early: it is solid on Greenhouse and `react-select` forms and widens
+from there. Salesforce Lightning and Workday shadow forms are still hardening.
 
 ## What it is not
 
@@ -55,7 +61,7 @@ full autofill as experimental.
 | `profile.yaml` + `data/work_history.yaml` | Source of truth. Not the model. |
 | `fields.yaml` | Deterministic rules: yes/no, work authorization, city, salary, EEO you chose. |
 | `answers.yaml` + `apply.py` | Classify the question, write a short answer from your facts plus the job blurb. |
-| Browser | A local server plus an MV3 right-click menu (normal Chrome); a CDP runner for the WIP full-fill. |
+| Browser | One MV3 extension in normal Chrome (whole-page Fill + per-field helper) talking to a local server; a legacy CDP runner remains for reference. |
 | You | Captchas, MFA, account creation, the final read, and Submit. |
 
 Every answer resolves to one of three states: **AUTO** (deterministic, filled),

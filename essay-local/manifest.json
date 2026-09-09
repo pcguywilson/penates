@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Essay Local AI",
-  "version": "0.1.0",
-  "description": "Right-click or Alt+A in any essay box to fill it with your local, grounded Ollama answer via serve.py. Runs next to Simplify.",
+  "name": "Penates Apply",
+  "version": "0.2.0",
+  "description": "Fill job applications from your local, grounded engine (serve.py): whole-page Fill or per-field essays. Stops before Submit. Runs in normal Chrome, next to Simplify.",
   "permissions": ["contextMenus"],
   "host_permissions": ["http://127.0.0.1:8765/*"],
   "background": { "service_worker": "background.js" },
@@ -12,7 +12,11 @@
   "commands": {
     "answer-field": {
       "suggested_key": { "default": "Alt+A" },
-      "description": "Answer the focused essay field with local AI"
+      "description": "Answer the focused field with local AI (per-field card)"
+    },
+    "fill-application": {
+      "suggested_key": { "default": "Alt+Shift+F" },
+      "description": "Fill the whole application from your local engine"
     }
   }
 }

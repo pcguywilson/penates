@@ -176,6 +176,18 @@ def fill(text, d):
 # ---- 5. length enforcement -------------------------------------------------
 def sentences(t): return re.findall(r'[^.!?]+[.!?]+', t.strip()) or [t.strip()]
 
+def _no_emdash(t):
+    """Owner preference + honesty note: generated answers never contain em/en dashes.
+    Ranges between digits become a hyphen; elsewhere a dash becomes a comma."""
+    if not t:
+        return t
+    t = re.sub(r"(\d)\s*[\u2013\u2014\u2015]\s*(\d)", r"\1-\2", t)   # 2020 - 2025 -> 2020-2025
+    t = re.sub(r"\s*[\u2013\u2014\u2015]\s*", ", ", t)                    # spaced dash -> comma
+    t = re.sub(r",\s*,", ",", t)
+    t = re.sub(r"\s+([,.;:])", r"\1", t)
+    t = re.sub(r"\s{2,}", " ", t)
+    return t.strip()
+
 def enforce_length(text, spec, max_chars, use_llm):
     max_s = spec.get("max_sentences")
     if max_s:
@@ -188,7 +200,7 @@ def enforce_length(text, spec, max_chars, use_llm):
                                 "add nothing, remove no claims. Output only the answer.", 0.2).strip()
         while len(text) > limit and len(sentences(text)) > 1:   # fallback hard trim
             text = " ".join(x.strip() for x in sentences(text)[:-1])
-    return text
+    return _no_emdash(text)
 
 # ---- orchestration ---------------------------------------------------------
 def log_unmatched(question):
