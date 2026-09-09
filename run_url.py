@@ -1098,7 +1098,7 @@ def _icims_use_address_anyway(page):
 def _icims_create_login(page, dry):
     """iCIMS embeds account creation ('Create a login': Login + Password + Re-enter) INSIDE
     the application form. Fill it from secrets.yaml (login = email, password = the stored
-    one) so applying creates the account. The tool - not the model - supplies the password,
+    one) so applying creates the account. The tool itself supplies the password,
     read from the user's local secrets.yaml, same as the Workday login."""
     creds = (load_secrets().get("icims") or {})
     email, pw = creds.get("email", ""), creds.get("password", "")
