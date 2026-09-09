@@ -48,6 +48,67 @@ tool whose whole point is that your data stays home and belongs to you.
 The whole-page fill is early: it is solid on Greenhouse and `react-select` forms and widens
 from there. Salesforce Lightning and Workday shadow forms are still hardening.
 
+## Find jobs faster: discovery + dashboard
+
+Applying is only half the grind. The other half is finding the postings worth applying to.
+Penates now pulls openings from several sources into one local queue, ranks them against
+your lane, and shows them in a dashboard so you stop checking five sites by hand every day.
+
+![Dashboard](docs/img/dashboard.png)
+
+Click any row for a preview pane with the posting's details and a one-click path to the
+real apply page:
+
+![Preview pane](docs/img/preview.png)
+
+### Sources
+
+| Source | How | Notes |
+|---|---|---|
+| LinkedIn / Indeed / Google | JobSpy (MIT) | Easy Apply on LinkedIn is skipped (no employer link to fill) |
+| hiring.cafe | public `_next/data` JSON | direct employer apply URLs, salary, posted date |
+| Built In | server-rendered HTML | Easy Apply cards skipped; resolves to the employer ATS |
+| RemoteOK | public JSON API | remote-only, no key |
+| Remotive | public JSON API | remote-only, no key (thin catalog) |
+| ZipRecruiter | JobSpy, opt-in | off by default (Cloudflare-gated) |
+
+Everything runs locally and writes to `data/jobs.json`. Nothing needs a key or an account.
+
+### Pipeline
+
+Each source is a small script that filters to your titles and appends new postings to the
+store, deduped by URL. Then `resolve.py` turns listing links into real apply URLs where it
+can, and `rank.py` scores each row against your lane.
+
+```
+python discover.py       # LinkedIn / Indeed / Google via JobSpy
+python hiringcafe.py     # hiring.cafe
+python builtin.py        # Built In (employer-direct only)
+python remoteok.py       # RemoteOK
+python remotive.py       # Remotive
+python resolve.py        # listing URL -> employer apply URL
+python rank.py           # score against your lane
+```
+
+Or skip the CLI: open the dashboard and hit **Refresh jobs**, which runs the whole pipeline
+in the background and respects the source toggles in **Settings**.
+
+### Dashboard
+
+```
+python serve.py                       # http://127.0.0.1:8765/dashboard
+```
+
+- **Jobs** - ranked, filterable, sortable list; each row opens a preview pane with an
+  Apply + autofill button that hands off to the extension.
+- **Settings** - edit your search terms and turn sources on or off (saved to `config.json`).
+- **Logs** - discovery runs, fills, and answer generations.
+- **Profile** - a read-only view of the facts the answer helper draws on.
+- **Themes** - a color picker in the header (default Slate); pick what is easy on your eyes.
+
+Discovery finds and ranks; the extension fills; you review and submit. Same contract as the
+rest of the tool: nothing leaves the machine, nothing auto-submits.
+
 ## What it is not
 
 - Not an auto-apply bot.
@@ -62,6 +123,7 @@ from there. Salesforce Lightning and Workday shadow forms are still hardening.
 | `fields.yaml` | Deterministic rules: yes/no, work authorization, city, salary, EEO you chose. |
 | `answers.yaml` + `apply.py` | Classify the question, write a short answer from your facts plus the job blurb. |
 | Browser | One MV3 extension in normal Chrome (whole-page Fill + per-field helper) talking to a local server; a legacy CDP runner remains for reference. |
+| Discovery (`discover.py`, `hiringcafe.py`, `builtin.py`, `remoteok.py`, `remotive.py`) | Pull postings into `data/jobs.json`; `rank.py` scores them; `serve.py` dashboard shows them. |
 | You | Captchas, MFA, account creation, the final read, and Submit. |
 
 Every answer resolves to one of three states: **AUTO** (deterministic, filled),
@@ -133,6 +195,7 @@ the iCIMS runner page through, still stopping before the last step.
 | `data/jobs.json` | Your application queue | `.example` only; real is git-ignored |
 | `application.yaml` | The current job's company blurb | `.example` only; real is git-ignored |
 | `fields.yaml` | Field-label to profile mapping rules | shipped |
+| `config.json` | Dashboard search terms + source toggles | `.example` only; runtime is git-ignored |
 | `answers.yaml` | Intent templates for essays | shipped |
 | `secrets.yaml` | Workday login (WIP runner only) | `.example` only; real is git-ignored |
 

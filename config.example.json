@@ -1,0 +1,19 @@
+{
+  "terms": [
+    "devops engineer",
+    "site reliability engineer",
+    "cloud engineer",
+    "platform engineer",
+    "infrastructure engineer",
+    "systems administrator",
+    "systems engineer",
+    "systems analyst"
+  ],
+  "sources": {
+    "discover": true,
+    "hiringcafe": true,
+    "builtin": true,
+    "remotive": true,
+    "remoteok": true
+  }
+}
