@@ -34,6 +34,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   let path = null;
   if (msg.type === "FETCH_ANSWER") path = "/answer";
   else if (msg.type === "FETCH_LEARN") path = "/learn";
+  else if (msg.type === "FETCH_APPLIED") path = "/applied";
+  else if (msg.type === "FETCH_FILLLOG") path = "/fill-log";
   else return;
   fetch(BASE + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(msg.payload) })
     .then((r) => r.json())

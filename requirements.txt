@@ -1,3 +1,14 @@
+# Core
 pyyaml
-playwright
+
+# Job discovery
+python-jobspy      # LinkedIn/Indeed/Google scraping (discover.py)
+cloudscraper       # Cloudflare bypass for hiring.cafe (hiringcafe.py)
+requests           # HTTP (builtin.py, hiringcafe.py)
+beautifulsoup4     # HTML parsing (builtin.py)
+
+# Resume parsing (profile onboarding)
 pdfplumber
+
+# Optional: browser fallback if a source hard-challenges
+playwright

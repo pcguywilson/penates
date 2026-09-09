@@ -100,6 +100,27 @@
     return t.split(/[|\-–—·:]/)[0].trim().slice(0, 80);
   }
 
+  function roleGuess() {
+    const t = clean(document.title);
+    let m = t.match(/(?:application|apply)\s+(?:for|:)\s+(.+?)\s+(?:at|@|-|\|)\s+/i);
+    if (m) return m[1].slice(0, 100);
+    m = t.match(/^(.+?)\s+(?:at|@)\s+/i);
+    if (m) return m[1].slice(0, 100);
+    return t.split(/[|\-–—·]/)[0].trim().slice(0, 100);
+  }
+
+  async function markApplied() {
+    const payload = { url: location.href, company: companyGuess(), role: roleGuess() };
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: "FETCH_APPLIED", payload });
+      if (resp && resp.ok && resp.data && resp.data.ok) {
+        toast("Logged as applied: " + (resp.data.company || "this role") + " (" + (resp.data.applied_at || "") + ")");
+      } else {
+        toast((resp && resp.error) || "Could not log (is serve.py running on :8765?)", true);
+      }
+    } catch (e) { toast("Could not log: " + e, true); }
+  }
+
   // ---- server call (via background: dodges CORS / mixed-content / private-network) ----
   async function askEngine(question, limit, fresh) {
     const payload = { question, company: companyGuess(), url: location.href, limit: limit || null, fresh: !!fresh };
@@ -347,7 +368,28 @@
     }
 
     fillBusy = false;
-    setReport("Filled " + filled + " . " + review + " to review . " + skipped + " left for you . NOTHING submitted.", rows);
+    const summary = "Filled " + filled + " . " + review + " to review . " + skipped + " left for you . NOTHING submitted.";
+    setReport(summary, rows);
+    try {
+      chrome.runtime.sendMessage({ type: "FETCH_FILLLOG", payload: {
+        url: location.href, company: companyGuess(), role: roleGuess(),
+        summary: summary, filled: filled, review: review, skipped: skipped,
+        rows: rows.slice(0, 40).map(function (r) { return { q: r[0], status: r[1], detail: r[2] }; })
+      } }).catch(function () {});
+    } catch (_) {}
+  }
+
+  // Auto-fill when the dashboard opens an apply page with #penates-fill.
+  function autoFillIfRequested() {
+    if (!IS_TOP) return;
+    if (!/penates-fill/i.test((location.hash || "") + (location.search || ""))) return;
+    var tries = 0;
+    var iv = setInterval(function () {
+      if (looksLikeApplication() || ++tries > 15) {
+        clearInterval(iv);
+        if (looksLikeApplication()) runFillAll();
+      }
+    }, 1000);
   }
 
   // ---- report panel ----
@@ -364,10 +406,12 @@
       '<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:#111827;border-bottom:1px solid #334155;position:sticky;top:0">' +
         '<span style="font-weight:600">Penates . Fill report</span>' +
         '<span data-r="sum" style="flex:1;color:#94a3b8"></span>' +
+        '<button data-r="applied" title="Log this as an application after you submit" style="background:#166534;color:#fff;border:1px solid #14532d;border-radius:6px;padding:4px 8px;cursor:pointer;font:11px system-ui,sans-serif">Mark applied</button>' +
         '<span data-r="x" title="Close" style="cursor:pointer;color:#94a3b8;padding:0 4px">✕</span>' +
       '</div><div data-r="body" style="padding:8px 10px"></div>';
     document.documentElement.appendChild(report);
     report.querySelector('[data-r="x"]').onclick = () => (report.style.display = "none");
+    report.querySelector('[data-r="applied"]').onclick = markApplied;
   }
   function setReport(summary, rows) {
     if (!report) return;
@@ -387,16 +431,19 @@
   const ATS_HOST = /greenhouse|lever\.co|ashbyhq|myworkdayjobs|workday|icims|paylocity|smartrecruiters|jobvite|teksystems|taleo|breezy|workable|bamboohr|recruitee|applytojob|dayforce|jobs\.|careers?\./i;
   function looksLikeApplication() {
     if (ATS_HOST.test(location.hostname)) return true;
+    // NOTE: no getBoundingClientRect / innerText here on purpose - those force a
+    // layout that makes strict-CSP pages (e.g. GitHub) try to fetch a blocked web
+    // font, spamming the console. Attribute-only checks below never force layout.
     let fillable = 0, hasIdentity = false, els;
     try { els = document.querySelectorAll("input, textarea, select"); } catch (_) { return false; }
     for (const e of els) {
       const t = (e.type || "").toLowerCase();
       if (e.tagName === "INPUT" && /^(hidden|submit|button|image|reset|checkbox|radio)$/.test(t)) continue;
-      if (inPenates(e)) continue;
-      let r; try { r = e.getBoundingClientRect(); } catch (_) { continue; }
-      if (!(r.width > 0 && r.height > 0)) continue;
+      if (e.disabled || e.hidden || inPenates(e)) continue;
+      const st = e.style;   // reading inline style is cheap; does not force reflow
+      if (st && (st.display === "none" || st.visibility === "hidden")) continue;
       fillable++;
-      const lbl = (((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute("aria-label") || e.placeholder || e.name || "") + "").toLowerCase();
+      const lbl = ((e.getAttribute("aria-label") || e.placeholder || e.name || "") + "").toLowerCase();
       if (t === "email" || /first name|last name|full name|e-?mail|phone|resume|cover letter|linkedin/.test(lbl)) hasIdentity = true;
     }
     return fillable >= 4 && hasIdentity;
@@ -424,8 +471,8 @@
     try { obs = new MutationObserver(() => { mountLauncher(); if (launcherMounted && obs) obs.disconnect(); }); obs.observe(document.documentElement, { childList: true, subtree: true }); } catch (_) {}
     const iv = setInterval(() => { mountLauncher(); if (launcherMounted || ++tries > 20) { clearInterval(iv); try { if (obs) obs.disconnect(); } catch (_) {} } }, 1000);
   }
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", watchForForm);
-  else watchForForm();
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { watchForForm(); autoFillIfRequested(); });
+  else { watchForForm(); autoFillIfRequested(); }
 
   // ============================ PER-FIELD CARD ============================
   function run(el) {

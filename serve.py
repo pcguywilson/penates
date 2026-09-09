@@ -14,7 +14,7 @@ Routes:
 
 Leave this window running in the background.
 """
-import os, sys, re, json, time, subprocess, urllib.parse
+import os, sys, re, json, time, subprocess, threading, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -164,6 +164,40 @@ def do_answer(payload):
     # tier 3: essay compose (gap-guarded)
     return _shape(_apply.compose(q, max_chars=limit))
 
+# ---- refresh pipeline (dashboard "Refresh jobs" button) --------------------
+_PIPE = {"running": False, "log": [], "started": 0, "finished": 0}
+_ANSWER_LOG = []   # local-model reasoning: recent /answer resolutions
+_FILL_LOG = []     # form-fill reports posted by the extension
+_PIPE_SCRIPTS = ["discover.py", "hiringcafe.py", "builtin.py", "remotive.py", "remoteok.py", "resolve.py", "rank.py"]
+
+def _run_pipeline():
+    import jobs_store
+    srcs = jobs_store.config_sources({"discover": True, "hiringcafe": True, "builtin": True,
+                                      "remotive": True, "remoteok": True})
+    src_of = {"discover.py": "discover", "hiringcafe.py": "hiringcafe", "builtin.py": "builtin",
+              "remotive.py": "remotive", "remoteok.py": "remoteok"}
+    _PIPE.update(running=True, log=["starting refresh..."], started=time.time(), finished=0)
+    for sc in _PIPE_SCRIPTS:
+        key = src_of.get(sc)
+        if key and not srcs.get(key, True):
+            _PIPE["log"].append("skip " + sc + " (disabled)"); continue
+        _PIPE["log"].append("running " + sc + " ...")
+        try:
+            pr = subprocess.run([sys.executable, sc], cwd=HERE, capture_output=True, text=True, timeout=900)
+            tail = [ln for ln in (pr.stdout or "").splitlines() if ln.strip()][-2:]
+            _PIPE["log"].append("  " + (" | ".join(tail) if tail else "(done)"))
+        except Exception as e:
+            _PIPE["log"].append("  ERROR: " + str(e)[:120])
+    _PIPE.update(running=False, finished=time.time())
+    _PIPE["log"].append("refresh complete.")
+
+def _start_pipeline():
+    if _PIPE.get("running"):
+        return False
+    threading.Thread(target=_run_pipeline, daemon=True).start()
+    return True
+
+
 class H(BaseHTTPRequestHandler):
     def _cors(self):
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -181,6 +215,63 @@ class H(BaseHTTPRequestHandler):
         self.send_response(204); self._cors(); self.end_headers()
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in ("/", "/dashboard"):
+            try:
+                with open(os.path.join(HERE, "dashboard.html"), "rb") as f:
+                    return self._send(200, f.read(), "text/html; charset=utf-8")
+            except Exception as e:
+                return self._send(500, str(e))
+        if parsed.path == "/ranked":
+            try:
+                import jobs_store
+                rows = jobs_store.ranked()
+                out = [{"company": r.get("company", ""), "role": r.get("role", ""),
+                        "score": r.get("score") or 0, "ats": r.get("ats", ""),
+                        "status": r.get("status"), "source": r.get("source", ""),
+                        "posted": r.get("posted", ""),
+                        "location": r.get("location") or r.get("workplace", ""),
+                        "workplace": r.get("workplace", ""),
+                        "salary": r.get("salary", ""), "desc": r.get("desc", ""),
+                        "url": r.get("url", ""),
+                        "apply": r.get("apply_url") or r.get("url", "")} for r in rows]
+                return self._json(200, {"count": len(out), "jobs": out})
+            except Exception as e:
+                return self._json(500, {"error": str(e)})
+        if parsed.path == "/discover/status":
+            return self._json(200, _PIPE)
+        if parsed.path == "/logs":
+            return self._json(200, {"pipeline": _PIPE.get("log", []), "answers": _ANSWER_LOG, "fills": _FILL_LOG})
+        if parsed.path == "/config":
+            try:
+                import jobs_store
+                return self._json(200, jobs_store.load_config())
+            except Exception as e:
+                return self._json(500, {"error": str(e)})
+        if parsed.path == "/profile":
+            def _read(fn):
+                try:
+                    with open(os.path.join(HERE, fn), encoding="utf-8") as f:
+                        return f.read()
+                except Exception:
+                    return ""
+            return self._json(200, {"profile": _read("profile.yaml"),
+                                    "work_history": _read(os.path.join("data", "work_history.yaml"))})
+        if parsed.path == "/stats":
+            try:
+                import jobs_store
+                return self._json(200, jobs_store.stats())
+            except Exception as e:
+                return self._json(500, {"ok": False, "error": str(e)})
+        if parsed.path == "/jobs":
+            try:
+                import jobs_store
+                q = jobs_store.load()["queue"]
+                st = (urllib.parse.parse_qs(parsed.query).get("status") or [""])[0]
+                if st:
+                    q = [r for r in q if r.get("status") == st]
+                return self._json(200, {"count": len(q), "jobs": q})
+            except Exception as e:
+                return self._json(500, {"ok": False, "error": str(e)})
         if parsed.path != "/apply":
             return self._send(404, b"not found")
         url = (urllib.parse.parse_qs(parsed.query).get("url") or [""])[0]
@@ -195,6 +286,25 @@ class H(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         n = int(self.headers.get("Content-Length", 0) or 0)
         raw = self.rfile.read(n) if n else b""
+        if parsed.path == "/discover":
+            started = _start_pipeline()
+            return self._json(200, {"started": started, "running": _PIPE.get("running", False)})
+        if parsed.path == "/fill-log":
+            try:
+                payload = json.loads(raw or b"{}")
+            except Exception:
+                payload = {}
+            payload["t"] = int(time.time())
+            _FILL_LOG.insert(0, payload); del _FILL_LOG[30:]
+            return self._json(200, {"ok": True})
+        if parsed.path == "/config":
+            try:
+                cfg = json.loads(raw or b"{}")
+                import jobs_store
+                jobs_store.save_config(cfg)
+                return self._json(200, {"ok": True})
+            except Exception as e:
+                return self._json(500, {"ok": False, "error": str(e)})
         if parsed.path == "/apply":
             url = (urllib.parse.parse_qs(parsed.query).get("url") or [""])[0]
             if not url:
@@ -204,6 +314,24 @@ class H(BaseHTTPRequestHandler):
                 launch(url); return self._send(200, b"launched")
             except Exception as e:
                 print("[error] " + str(e), flush=True); return self._send(500, str(e))
+        if parsed.path == "/applied":
+            try:
+                payload = json.loads(raw or b"{}")
+            except Exception:
+                return self._json(400, {"ok": False, "error": "bad json"})
+            url = (payload.get("url") or "").strip()
+            if not url:
+                return self._json(400, {"ok": False, "error": "missing url"})
+            try:
+                import jobs_store
+                r = jobs_store.upsert_applied(url, company=payload.get("company"),
+                                              role=payload.get("role"), ats=payload.get("ats"))
+                print("[applied] %s | %s (%s)" % (r.get("company"), r.get("role"), r.get("ats")), flush=True)
+                return self._json(200, {"ok": True, "id": r.get("id"), "applied_at": r.get("applied_at"),
+                                        "company": r.get("company"), "role": r.get("role")})
+            except Exception as e:
+                print("[error] " + str(e), flush=True)
+                return self._json(500, {"ok": False, "error": str(e)})
         if parsed.path in ("/answer", "/learn"):
             try:
                 payload = json.loads(raw or b"{}")
@@ -222,6 +350,13 @@ class H(BaseHTTPRequestHandler):
             try:
                 out = do_answer(payload)
                 print("       -> %s / %s chars / gaps=%s" % (out.get("method"), out.get("chars"), out.get("gaps")), flush=True)
+                try:
+                    _ANSWER_LOG.insert(0, {"q": q[:120], "method": out.get("method"),
+                                           "chars": out.get("chars"), "gaps": out.get("gaps"),
+                                           "t": int(time.time())})
+                    del _ANSWER_LOG[60:]
+                except Exception:
+                    pass
                 return self._json(200, out)
             except Exception as e:
                 print("[error] " + str(e), flush=True)
