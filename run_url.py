@@ -4,7 +4,7 @@ run_url.py — open a job application URL in a visible browser, scrape the compa
 role, and questions, let Ollama infer the company context, then fill every field
 using the local answer engine. You review and click Submit yourself.
 
-Usage (PowerShell, from C:\\src\\Claude-apply-local):
+Usage (PowerShell, from C:\\src\\penates):
     python run_url.py "https://job-boards.greenhouse.io/acme/jobs/123"
     python run_url.py "<url>" --dry          # scrape + print answers, DON'T fill
     python run_url.py "<url>" --no-upload     # skip resume upload
@@ -1098,7 +1098,7 @@ def _icims_use_address_anyway(page):
 def _icims_create_login(page, dry):
     """iCIMS embeds account creation ('Create a login': Login + Password + Re-enter) INSIDE
     the application form. Fill it from secrets.yaml (login = email, password = the stored
-    one) so applying creates the account. The tool - not Claude - supplies the password,
+    one) so applying creates the account. The tool itself supplies the password,
     read from the user's local secrets.yaml, same as the Workday login."""
     creds = (load_secrets().get("icims") or {})
     email, pw = creds.get("email", ""), creds.get("password", "")

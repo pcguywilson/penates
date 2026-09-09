@@ -597,7 +597,7 @@ intents:
     - used ai in
     - meaningful work
     - validate the output
-    answer: I recently used AI tools such as Claude and ChatGPT extensively while deploying a self-hosted
+    answer: I recently used AI assistants extensively while deploying a self-hosted
       AI knowledge platform in AWS GovCloud. I used AI to accelerate troubleshooting, research unfamiliar
       code, develop and refine custom patches, and work through integration problems involving Amazon
       Bedrock and Titan. AI significantly shortened the time needed to understand unfamiliar components
@@ -609,7 +609,7 @@ intents:
     keywords:
     - how do you currently use ai
     - ai tools in your
-    answer: I use AI tools such as Claude and ChatGPT as engineering assistants for troubleshooting, research,
+    answer: I use AI assistants as engineering aids for troubleshooting, research,
       documentation, scripting, and understanding unfamiliar technologies. Most recently, I used AI extensively
       while deploying a self-hosted AI platform in AWS GovCloud, using it to accelerate troubleshooting
       and development of custom patches and integrations. I validate AI-generated solutions through testing,

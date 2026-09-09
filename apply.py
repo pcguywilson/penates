@@ -2,7 +2,7 @@
 """
 apply.py — local job-application answer engine.
 
-Merges: keyword-first classifier (Claude, tested) + length constraints and
+Merges: keyword-first classifier (tested) + length constraints and
 company-interest variants (ChatGPT) + identity field matcher, confidence/pause
 loop, cross-contamination guard, and strict variable contract (Grok).
 
