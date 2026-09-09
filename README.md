@@ -54,7 +54,9 @@ Applying is only half the grind. The other half is finding the postings worth ap
 Penates now pulls openings from several sources into one local queue, ranks them against
 your lane, and shows them in a dashboard so you stop checking five sites by hand every day.
 
-![Dashboard](docs/img/dashboard.png)
+![Penates dashboard cycling color themes](docs/img/penates-colors.gif)
+
+*The dashboard, with selectable color themes (Slate, Nord, Light, and more).*
 
 Click any row for a preview pane with the posting's details and a one-click path to the
 real apply page:
