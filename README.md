@@ -233,6 +233,23 @@ the iCIMS runner page through, still stopping before the last step.
 Penates' distinct position: local, plus a hard anti-fabrication contract, plus a
 right-click control that works in a normal browser.
 
+### Prior art: job discovery
+
+The discovery side (`sources/`, `scan_ats.py`) follows patterns from these projects.
+Penates borrows ideas, not code:
+
+- [career-ops](https://github.com/career-ops-hq/career-ops) - the template: one provider
+  adapter per ATS behind a common interface, a companies/portals config, and a fast public-API
+  scan. MIT.
+- [JobSpy](https://github.com/Bunsly/JobSpy) - the consumer-board scrapers (LinkedIn / Indeed /
+  Google); Penates calls the `python-jobspy` package rather than vendoring it.
+- [freehire](https://github.com/strelov1/freehire) - a large ATS-adapter architecture worth
+  studying for the source interface and stable-fingerprint dedupe.
+
+Penates keeps its own line: direct ATS APIs first with a small, auditable adapter per
+provider (Greenhouse / Lever / Ashby), deduped into the same local store the apply side
+already uses, and no code copied from AGPL-licensed tools.
+
 ## Roadmap
 
 - **Done:** genre-aware answer engine with a user-owned story bank and a code validator
