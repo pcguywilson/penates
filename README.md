@@ -14,6 +14,28 @@ No account. No cloud LLM required. Nothing leaves the machine by default.
 > a per-field answer helper for one written question at a time. Both stop before Submit. A
 > separate Playwright/debug-Chrome runner predates the extension and is now legacy.
 
+## Features
+
+- **Answers from one real story.** Each screening question is classified (owned project,
+  hypothetical, why-company, or gap). The model may dress a story from your bank or admit the
+  gap; it may not invent a project. A validator rejects skills-dumps, wrong word counts, and
+  "let me define DevOps" drafts, then regenerates once and flags for review.
+- **A story bank for what never fits on the résumé.** STAR entries you add in the dashboard,
+  tagged with the tools you actually used. The engine retrieves one match and may name only
+  those tools. An empty bank pauses and asks you to add a story instead of inventing one.
+- **Import answers you already wrote.** Paste a ChatGPT (or other AI) export. Penates strips
+  the "here's a great answer / Option A" wrapper, splits variants, and offers your own wording
+  as a review-flagged draft when the question comes back. Browse, edit, and prune them in the
+  Imports tab.
+- **Jobs from the company's ATS, not job-board soup.** Greenhouse, Lever, and Ashby boards into
+  one local queue with title, location, and a real apply URL, ranked to your lane. Every source
+  is a toggle; switch the noisy aggregators off if you only want direct-ATS.
+- **Fills the form. You submit.** Identity and common screening fields, plus essays drafted in
+  the overlay for you to review. It mounts on application forms only, and the extension requests
+  ATS hosts, not every site.
+- **Local by default.** Ollama on your machine, a profile you keep in YAML on disk, no account,
+  no cloud LLM. Nothing leaves unless you point it at an API yourself.
+
 ## Why it exists
 
 Applying today means filling the same form far more times than it used to, just to reach
@@ -57,6 +79,22 @@ tool whose whole point is that your data stays home and belongs to you.
 
 The whole-page fill is early: it is solid on Greenhouse and `react-select` forms and widens
 from there. Salesforce Lightning and Workday shadow forms are still hardening.
+
+## The story bank
+
+Your résumé is bullets. Interviews and screening boxes run on stories: the outage you owned,
+the migration you drove, the thing you automated because nobody else would. Those rarely
+survive the one-pager, so a model that only sees the résumé lists tools and hopes.
+
+`stories.yaml` (the Stories tab) is where those live. Each entry is something you did, in STAR
+shape, tagged with domains and the exact tools you used. On a question, the engine picks the
+single best story and writes that. If nothing fits, it says so. If the bank is empty, it asks
+you to add one, never a fabricated answer.
+
+![The Stories tab: your STAR story bank](docs/img/stories.png)
+
+The repo ships `stories.example.yaml` with fake entries. Copy it, delete them, replace with
+yours.
 
 ## Find jobs faster: discovery + dashboard
 
@@ -107,6 +145,8 @@ python rank.py           # score against your lane
 Or skip the CLI: open the dashboard and hit **Refresh jobs**, which runs the whole pipeline
 in the background and respects the source toggles in **Settings**.
 
+![Settings: every job source is a toggle](docs/img/settings.png)
+
 ### Dashboard
 
 ```
@@ -129,7 +169,9 @@ rest of the tool: nothing leaves the machine, nothing auto-submits.
 
 If a year of job-application questions and answers is buried in a ChatGPT (or any AI)
 thread, import them so Penates can reuse them. Export the chat, convert it to a small JSON
-with any AI (the dashboard **Settings** tab has the exact conversion prompt), then:
+with any AI (the dashboard **Imports** tab has the exact conversion prompt), then:
+
+![The Imports tab: browse, edit, and prune answers imported from an AI chat](docs/img/imports.png)
 
 ```
 python import_qa.py my_export.json          # heuristic cleaning
