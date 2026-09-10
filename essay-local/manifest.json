@@ -1,14 +1,51 @@
 {
   "manifest_version": 3,
   "name": "Penates Apply",
-  "version": "0.3.0",
-  "description": "Fill job applications from your local, grounded engine (serve.py): whole-page Fill or per-field essays. Shows only on application forms. Stops before Submit. Runs in normal Chrome, next to Simplify.",
-  "permissions": ["contextMenus", "storage"],
+  "version": "0.4.0",
+  "description": "Fill job applications from your local, grounded engine (serve.py). The fill bubble auto-appears only on known ATS application forms; the per-field helper works anywhere on demand (right-click / Alt+A). Stops before Submit. Runs in normal Chrome, next to Simplify.",
+  "permissions": ["contextMenus", "storage", "activeTab", "scripting"],
   "host_permissions": ["http://127.0.0.1:8765/*"],
   "background": { "service_worker": "background.js" },
   "options_ui": { "page": "options.html", "open_in_tab": true },
   "content_scripts": [
-    { "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_idle", "all_frames": true }
+    {
+      "matches": [
+        "https://*.greenhouse.io/*",
+        "https://boards.greenhouse.io/*",
+        "https://job-boards.greenhouse.io/*",
+        "https://*.lever.co/*",
+        "https://jobs.lever.co/*",
+        "https://*.ashbyhq.com/*",
+        "https://jobs.ashbyhq.com/*",
+        "https://*.myworkdayjobs.com/*",
+        "https://*.workday.com/*",
+        "https://*.rippling.com/*",
+        "https://ats.rippling.com/*",
+        "https://*.workable.com/*",
+        "https://apply.workable.com/*",
+        "https://*.smartrecruiters.com/*",
+        "https://*.icims.com/*",
+        "https://*.jobvite.com/*",
+        "https://*.paylocity.com/*",
+        "https://*.paycomonline.net/*",
+        "https://*.adp.com/*",
+        "https://*.successfactors.com/*",
+        "https://*.successfactors.eu/*",
+        "https://apply.teksystems.com/*",
+        "https://*.pinpointhq.com/*",
+        "https://*.hrmdirect.com/*",
+        "https://*.zohorecruit.com/*",
+        "https://*.hire.trakstar.com/*",
+        "https://*.recruitee.com/*",
+        "https://*.bamboohr.com/*",
+        "https://*.dayforcehcm.com/*",
+        "https://*.breezy.hr/*",
+        "https://*.applytojob.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
   ],
   "commands": {
     "answer-field": {

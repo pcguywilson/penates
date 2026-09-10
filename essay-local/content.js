@@ -10,6 +10,8 @@
 //      opens a review card for ONE field so you can read, edit, regenerate, insert. Edits
 //      you keep are learned (serve.py /learn).
 (() => {
+  if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
+  window.__penatesInit = true;
   const IS_TOP = window.top === window;
   let currentEl = null, currentQuestion = "", lastEditable = null;
 
