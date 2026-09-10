@@ -312,6 +312,17 @@ class H(BaseHTTPRequestHandler):
                     return self._send(200, f.read(), "text/html; charset=utf-8")
             except Exception as e:
                 return self._send(500, str(e))
+        if parsed.path == "/api/imports":
+            try:
+                st = json.load(open(IMPORTED_PATH, encoding="utf-8"))
+                ans = st.get("answers", {}) or {}
+                items = [{"key": k, "question": v.get("question", ""),
+                          "category": v.get("category", ""), "variants": v.get("variants", []),
+                          "source": v.get("source", "")} for k, v in ans.items()]
+                items.sort(key=lambda r: (r["category"], r["question"].lower()))
+                return self._json(200, {"count": len(items), "items": items})
+            except Exception:
+                return self._json(200, {"count": 0, "items": []})
         if parsed.path == "/api/imports/stats":
             try:
                 st = json.load(open(IMPORTED_PATH, encoding="utf-8"))
@@ -407,6 +418,37 @@ class H(BaseHTTPRequestHandler):
                 import jobs_store
                 jobs_store.save_config(cfg)
                 return self._json(200, {"ok": True})
+            except Exception as e:
+                return self._json(500, {"ok": False, "error": str(e)})
+        if parsed.path == "/api/imports/update":
+            try:
+                payload = json.loads(raw or b"{}")
+                import import_qa
+                store = import_qa.load_store(); ans = store.setdefault("answers", {})
+                old = ans.pop((payload.get("key") or "").strip(), {})
+                q = (payload.get("question") or old.get("question") or "").strip()
+                if not q:
+                    return self._json(400, {"ok": False, "error": "question required"})
+                variants = [v.strip() for v in (payload.get("variants") or []) if v and v.strip()]
+                if not variants:
+                    variants = old.get("variants", [])
+                nk = import_qa._norm_q(q)
+                ans[nk] = {"question": q[:400], "variants": variants[:6],
+                           "category": (payload.get("category") or old.get("category") or "").strip(),
+                           "source": old.get("source", "edited"),
+                           "imported_at": old.get("imported_at"), "status": "reference"}
+                import_qa.save_store(store)
+                return self._json(200, {"ok": True, "key": nk})
+            except Exception as e:
+                return self._json(500, {"ok": False, "error": str(e)})
+        if parsed.path == "/api/imports/delete":
+            try:
+                payload = json.loads(raw or b"{}")
+                import import_qa
+                store = import_qa.load_store()
+                store.get("answers", {}).pop((payload.get("key") or "").strip(), None)
+                import_qa.save_store(store)
+                return self._json(200, {"ok": True, "count": len(store.get("answers", {}))})
             except Exception as e:
                 return self._json(500, {"ok": False, "error": str(e)})
         if parsed.path == "/api/import":
