@@ -89,6 +89,7 @@ tr.jobrow:hover{background:var(--panel2)}
     <button data-tab="settings">Settings</button>
     <button data-tab="profile">Profile</button>
     <button data-tab="stories">Stories</button>
+    <button data-tab="imports">Imports</button>
   </nav>
   <span class="ts" id="lastAdded"></span>
   <span class="grow"></span>
@@ -133,22 +134,6 @@ tr.jobrow:hover{background:var(--panel2)}
     <div class="card"><h3>Search terms</h3><p class="hint">One per line. Used by every source on the next Refresh.</p>
       <textarea id="terms"></textarea>
       <div style="margin-top:10px"><button class="btn" id="saveCfg">Save settings</button> <span class="muted" id="cfgMsg"></span></div></div>
-    <div class="card"><h3>Import answers from AI chats</h3>
-      <p class="hint">Import a Q&amp;A export from ChatGPT or any AI (JSON or Markdown). A match surfaces as a <b>review-flagged draft</b> when the same question appears - never auto-trusted, and you edit before inserting.</p>
-      <input type="file" id="impFile" accept=".json,.md,.txt" style="color:var(--muted)">
-      <div style="margin-top:8px"><button class="btn" id="impBtn">Import</button> <span class="muted" id="impMsg"></span></div>
-      <div class="muted" id="impCount" style="margin-top:6px;font-size:12px"></div>
-      <details style="margin-top:10px"><summary style="cursor:pointer;color:var(--muted);font-size:12px">How to export + convert your chat</summary>
-        <div class="hint" style="margin-top:8px">
-          1. Ask your AI: "generate a JSON of every job-application question and my answer from this chat." If it can, great.<br>
-          2. If not, export the chat (print-to-PDF, the AI's official data export, or a chat-exporter extension), then paste the text back and use the prompt below to convert it.<br>
-          3. Import the resulting file here.
-        </div>
-        <textarea readonly style="width:100%;box-sizing:border-box;min-height:120px;margin-top:8px;background:var(--panel2,#0b1220);color:var(--text,#e5e7eb);border:1px solid var(--line,#334155);border-radius:6px;padding:8px;font:12px/1.4 ui-monospace,Menlo,monospace">Convert my job-application Q&amp;A history into a JSON file. Output ONLY valid JSON in this exact shape and nothing else:
-{"items":[{"question":"the application question","answer":"my answer, cleaned of your commentary","category":"screening_general | technical_screening | behavioral | company_role_interest | cover_letter | resume_ats | other"}]}
-Rules: one object per distinct question. Put ONLY the final answer text in "answer" - no "Option A/B", no "here is...", no markdown headers. If I gave several options for one question, pick the single best. Do not invent facts.</textarea>
-      </details>
-    </div>
   </section>
   <section data-panel="profile" hidden>
     <div class="card"><h3>Profile (read-only for now)</h3>
@@ -194,6 +179,39 @@ Rules: one object per distinct question. Put ONLY the final answer text in "answ
       </div>
     </div>
   </section>
+<section data-panel="imports" hidden>
+    <p class="hint" style="margin:0 0 12px">Answers imported from a ChatGPT / AI chat export. A match surfaces as a <b>review-flagged draft</b> when the same question appears - never auto-trusted; you edit before inserting. Browse, edit, or delete them here.</p>
+    <div class="card"><h3>Import answers from AI chats</h3>
+      <p class="hint">Import a Q&amp;A export from ChatGPT or any AI (JSON or Markdown). A match surfaces as a <b>review-flagged draft</b> when the same question appears - never auto-trusted, and you edit before inserting.</p>
+      <input type="file" id="impFile" accept=".json,.md,.txt" style="color:var(--muted)">
+      <div style="margin-top:8px"><button class="btn" id="impBtn">Import</button> <span class="muted" id="impMsg"></span></div>
+      <div class="muted" id="impCount" style="margin-top:6px;font-size:12px"></div>
+      <details style="margin-top:10px"><summary style="cursor:pointer;color:var(--muted);font-size:12px">How to export + convert your chat</summary>
+        <div class="hint" style="margin-top:8px">
+          1. Ask your AI: "generate a JSON of every job-application question and my answer from this chat." If it can, great.<br>
+          2. If not, export the chat (print-to-PDF, the AI's official data export, or a chat-exporter extension), then paste the text back and use the prompt below to convert it.<br>
+          3. Import the resulting file here.
+        </div>
+        <textarea readonly style="width:100%;box-sizing:border-box;min-height:120px;margin-top:8px;background:var(--panel2,#0b1220);color:var(--text,#e5e7eb);border:1px solid var(--line,#334155);border-radius:6px;padding:8px;font:12px/1.4 ui-monospace,Menlo,monospace">Convert my job-application Q&amp;A history into a JSON file. Output ONLY valid JSON in this exact shape and nothing else:
+{"items":[{"question":"the application question","answer":"my answer, cleaned of your commentary","category":"screening_general | technical_screening | behavioral | company_role_interest | cover_letter | resume_ats | other"}]}
+Rules: one object per distinct question. Put ONLY the final answer text in "answer" - no "Option A/B", no "here is...", no markdown headers. If I gave several options for one question, pick the single best. Do not invent facts.</textarea>
+      </details>
+    </div>
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:10px">
+        <h3 style="margin:0">Imported Q&amp;A (<span id="impListCount">0</span>)</h3>
+        <input type="search" id="impFilter" placeholder="filter question / category..." style="margin-left:auto;max-width:280px;background:var(--panel2,#0b1220);color:var(--text,#e5e7eb);border:1px solid var(--line,#334155);border-radius:6px;padding:6px 8px;font:13px system-ui">
+      </div>
+      <div id="impEdit" hidden style="border:1px solid var(--line,#334155);border-radius:8px;padding:12px;margin-top:12px;background:var(--panel2,#0b1220)">
+        <label class="stl">Question</label><input class="sti" id="impEditQ">
+        <label class="stl">Category</label><input class="sti" id="impEditCat">
+        <label class="stl">Answer variant(s) - separate multiple with a line of --- </label>
+        <textarea class="stt" id="impEditVars" style="min-height:120px"></textarea>
+        <div style="margin-top:8px"><button class="btn" id="impEditSave">Save</button> <button class="btn ghost" id="impEditCancel">Cancel</button> <span class="muted" id="impEditMsg"></span></div>
+      </div>
+      <div id="impList" style="margin-top:12px"></div>
+    </div>
+  </section>
 </main>
 <div class="drawer-ov" id="drov"></div>
 <aside class="drawer" id="drawer" aria-hidden="true">
@@ -228,7 +246,7 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('[data-panel]').forEach(p=>p.hidden=p.dataset.panel!==b.dataset.tab);
   if(b.dataset.tab==='logs') loadLogs();
   if(b.dataset.tab==='settings') loadCfg();
-  if(b.dataset.tab==='settings') loadImports();
+  if(b.dataset.tab==='imports'){ loadImports(); loadImportsList(); }
   if(b.dataset.tab==='profile') loadProfile();
   if(b.dataset.tab==='stories') loadStories();
 });
@@ -359,8 +377,49 @@ $('impBtn').onclick=async()=>{
   const r=await fetch('/api/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content,filename:f.name})}).then(x=>x.json()).catch(e=>({ok:false,error:String(e)}));
   $('impBtn').disabled=false;
   $('impMsg').textContent = r.ok ? ('added '+r.added+', updated '+r.updated+', skipped '+r.skipped) : ('error: '+(r.error||'?'));
-  loadImports();
+  loadImports(); loadImportsList();
 };
+let IMPORTS=[];
+async function loadImportsList(){
+  const r=await fetch('/api/imports').then(x=>x.json()).catch(()=>({items:[]}));
+  IMPORTS=r.items||[]; renderImports();
+}
+function renderImports(){
+  const q=($('impFilter').value||'').toLowerCase();
+  const rows=IMPORTS.map((it,idx)=>({it,idx})).filter(o=>!q||((o.it.question+' '+o.it.category).toLowerCase().includes(q)));
+  $('impListCount').textContent=IMPORTS.length;
+  $('impList').innerHTML=rows.map(o=>{const it=o.it,v0=(it.variants&&it.variants[0])||'';
+    return `<div class="stcard">
+      <div style="font-weight:600">${esc(it.question)}</div>
+      <div class="muted" style="font-size:12px">${esc(it.category||'')}${(it.variants&&it.variants.length>1)?' \u00b7 '+it.variants.length+' variants':''}</div>
+      <div class="muted" style="font-size:12px;margin-top:3px">${esc(v0.slice(0,180))}${v0.length>180?'...':''}</div>
+      <div style="margin-top:5px;display:flex;gap:6px">
+        <button class="mini" data-edit="${o.idx}">edit</button>
+        <button class="mini" data-del="${o.idx}" style="background:#7f1d1d">delete</button></div></div>`;
+  }).join('')||'<div class="muted">No imports yet. Upload an export above.</div>';
+  document.querySelectorAll('#impList [data-edit]').forEach(b=>b.onclick=()=>editImport(+b.dataset.edit));
+  document.querySelectorAll('#impList [data-del]').forEach(b=>b.onclick=()=>delImport(+b.dataset.del));
+}
+let impEditKey=null;
+function editImport(idx){ const it=IMPORTS[idx]; if(!it)return; impEditKey=it.key;
+  $('impEditQ').value=it.question||''; $('impEditCat').value=it.category||'';
+  $('impEditVars').value=(it.variants||[]).join('\n---\n');
+  $('impEdit').hidden=false; $('impEditMsg').textContent=''; window.scrollTo(0,0);
+}
+async function saveImport(){ if(!impEditKey)return;
+  const variants=$('impEditVars').value.split(/\n-{3,}\n/).map(v=>v.trim()).filter(Boolean);
+  const r=await fetch('/api/imports/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:impEditKey,question:$('impEditQ').value,category:$('impEditCat').value,variants})}).then(x=>x.json());
+  $('impEditMsg').textContent=r.ok?'saved':('error: '+(r.error||'?'));
+  if(r.ok){$('impEdit').hidden=true;impEditKey=null;loadImportsList();loadImports();}
+}
+async function delImport(idx){ const it=IMPORTS[idx]; if(!it)return;
+  if(!confirm('Delete this imported answer?\n\n'+it.question))return;
+  await fetch('/api/imports/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key})});
+  loadImportsList();loadImports();
+}
+$('impFilter').oninput=renderImports;
+$('impEditSave').onclick=saveImport;
+$('impEditCancel').onclick=()=>{$('impEdit').hidden=true;impEditKey=null;};
 async function loadProfile(){ const p=await fetch('/profile').then(r=>r.json()).catch(()=>({}));
   $('prof').textContent=p.profile||'(profile.yaml not found)'; $('work').textContent=p.work_history||'(work_history.yaml not found)';
 }
