@@ -13,7 +13,7 @@
   if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
   window.__penatesInit = true;
   const IS_TOP = window.top === window;
-  let currentEl = null, currentQuestion = "", lastEditable = null;
+  let currentEl = null, currentQuestion = "", lastEditable = null, chip = null;
 
   const clean = (s) => (s || "").replace(/\s+/g, " ").trim();
   const norm  = (s) => clean(s).toLowerCase().replace(/[^a-z0-9 ]+/g, "").trim();
@@ -649,7 +649,6 @@
   function closeCard() { if (card) card.style.display = "none"; currentEl = null; }
 
   // ---- focus chip ----
-  let chip;
   function showChip(el) {
     if (card && card.style.display !== "none") return;
     if (!chip) {
