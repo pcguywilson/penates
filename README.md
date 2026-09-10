@@ -221,34 +221,30 @@ the iCIMS runner page through, still stopping before the last step.
 
 ## Related projects
 
+The space around local, honest job-application tooling, on both the apply side and the
+discovery side. Penates borrows ideas, not code; where it leans on one, it is credited.
+
 | Project | Local LLM | Autofill | Essays | You submit | Note |
 |---|---|---|---|---|---|
-| Offlyn Apply | Ollama | wide ATS | rewrite menus | yes | Closest UX; strong context-menu verbs |
-| AgentMan | Ollama | page agent | via agent | yes | Multi-step page walking |
-| ApplyEase | Ollama / LM Studio | common fields | custom answers | yes | React + FastAPI + Postgres/pgvector |
-| AI-Job-Applier | Ollama | one-click | context files | yes | Learn-as-you-go into cache |
-| Persona | Ollama | none | resume builder | n/a | Same manifesto, different artifact |
-| Simplify Copilot | cloud | strong | paid/cloud | yes | Great for structure; not local |
+| [Offlyn Apply](https://github.com/offlyn-ai/offlyn-apply) | Ollama | wide ATS | rewrite menus | yes | Closest UX; strong context-menu verbs |
+| [AgentMan](https://github.com/AliRezaBeigy/AgentMan) | Ollama | page agent (CDP) | via agent | yes | Multi-step portals, "Add entry" loops |
+| [ApplyEase](https://github.com/sainikhil1605/ApplyEase) | Ollama / LM Studio | common fields | custom answers | yes | React + FastAPI + Postgres/pgvector |
+| [AI-Job-Applier](https://github.com/khmkarimhisham/AI-Job-Applier) | Ollama | autofill | context files | yes | Learn-as-you-go into cache |
+| [Persona](https://github.com/nithiin7/persona) | Ollama | none | resume builder | n/a | Same manifesto, different artifact |
+| [ApplyPilot](https://github.com/Pickle-Pixel/ApplyPilot) | local | wide | answers | yes | JobSpy + Workday YAML; AGPL, not vendored |
+| [Simplify Copilot](https://simplify.jobs/copilot) | cloud | strong | paid/cloud | yes | Great for structure; not local |
+| [JobOps](https://github.com/DaKheera47/job-ops) | Ollama / LM Studio / cloud | - | CV tailor | yes | DevOps-style pipeline: search 10+ boards, AI fit scoring, tracking |
+| [career-ops](https://github.com/career-ops-hq/career-ops) | local (CLI) | - | CV tailor | n/a | ATS scan + A-H JD evaluation; the discovery template. MIT |
+| [Personal JobPilot](https://github.com/TheCromazone/Personal-JobPilot) | local | - | - | n/a | ATS-API-first discovery (Greenhouse/Lever/Ashby/Workday) |
+| [JobSpy](https://github.com/Bunsly/JobSpy) | - | - | - | n/a | Board scraper library (`python-jobspy`) that Penates calls |
+| [freehire](https://github.com/strelov1/freehire) | - | - | - | n/a | Large ATS-adapter aggregator (Go); dedupe reference |
+| [Pinloop CLI](https://github.com/pinloop-ai/pinloop-cli) | - | - | - | n/a | Hosted ATS index as a CLI / URL hose |
 
-Penates' distinct position: local, plus a hard anti-fabrication contract, plus a
-right-click control that works in a normal browser.
-
-### Prior art: job discovery
-
-The discovery side (`sources/`, `scan_ats.py`) follows patterns from these projects.
-Penates borrows ideas, not code:
-
-- [career-ops](https://github.com/career-ops-hq/career-ops) - the template: one provider
-  adapter per ATS behind a common interface, a companies/portals config, and a fast public-API
-  scan. MIT.
-- [JobSpy](https://github.com/Bunsly/JobSpy) - the consumer-board scrapers (LinkedIn / Indeed /
-  Google); Penates calls the `python-jobspy` package rather than vendoring it.
-- [freehire](https://github.com/strelov1/freehire) - a large ATS-adapter architecture worth
-  studying for the source interface and stable-fingerprint dedupe.
-
-Penates keeps its own line: direct ATS APIs first with a small, auditable adapter per
-provider (Greenhouse / Lever / Ashby), deduped into the same local store the apply side
-already uses, and no code copied from AGPL-licensed tools.
+Penates' distinct position: local, a hard anti-fabrication contract, a genre-aware answer
+engine that dresses one real story or states a gap, and direct-ATS discovery deduped into
+the same local store, all in a normal browser. The discovery side (`sources/`,
+`scan_ats.py`) follows career-ops' adapter pattern and freehire's dedupe idea, and calls
+`python-jobspy` rather than vendoring it; no code is copied from AGPL-licensed tools.
 
 ## Roadmap
 
