@@ -1,11 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Penates Apply",
-  "version": "0.2.0",
-  "description": "Fill job applications from your local, grounded engine (serve.py): whole-page Fill or per-field essays. Stops before Submit. Runs in normal Chrome, next to Simplify.",
-  "permissions": ["contextMenus"],
+  "version": "0.3.0",
+  "description": "Fill job applications from your local, grounded engine (serve.py): whole-page Fill or per-field essays. Shows only on application forms. Stops before Submit. Runs in normal Chrome, next to Simplify.",
+  "permissions": ["contextMenus", "storage"],
   "host_permissions": ["http://127.0.0.1:8765/*"],
   "background": { "service_worker": "background.js" },
+  "options_ui": { "page": "options.html", "open_in_tab": true },
   "content_scripts": [
     { "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_idle", "all_frames": true }
   ],

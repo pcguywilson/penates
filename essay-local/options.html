@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Penates Apply - settings</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; background:#0f172a; color:#e5e7eb; margin:0; padding:24px; }
+  .wrap { max-width:640px; margin:0 auto; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  .sub { color:#94a3b8; margin:0 0 20px; }
+  fieldset { border:1px solid #334155; border-radius:8px; margin:0 0 18px; padding:14px 16px; }
+  legend { padding:0 6px; color:#cbd5e1; font-weight:600; }
+  label.row { display:flex; gap:8px; align-items:flex-start; padding:5px 0; cursor:pointer; }
+  label.row span small { color:#94a3b8; display:block; font-weight:400; }
+  textarea { width:100%; box-sizing:border-box; min-height:96px; resize:vertical; background:#0b1220; color:#e5e7eb;
+             border:1px solid #334155; border-radius:6px; padding:8px; font:13px/1.5 ui-monospace, Menlo, monospace; }
+  .hint { color:#94a3b8; font-size:12px; margin:4px 0 0; }
+  .bar { display:flex; gap:10px; align-items:center; margin-top:6px; }
+  button { background:#2563eb; color:#fff; border:1px solid #1e40af; border-radius:6px; padding:8px 16px; cursor:pointer; font:600 13px system-ui; }
+  button.ghost { background:#1f2937; border-color:#334155; }
+  #saved { color:#34d399; font-size:13px; }
+  code { background:#111827; padding:1px 5px; border-radius:4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Penates Apply</h1>
+  <p class="sub">Control where the fill bubble and per-field helper appear. Your lists override the automatic detection, so if it ever guesses wrong you can force it on or off by site.</p>
+
+  <fieldset>
+    <legend>Show the fill bubble on</legend>
+    <label class="row"><input type="radio" name="mode" value="forms"><span>Application forms only <small>Default. Detects the actual application form (name / resume / screening fields) and shows nothing on job listings, search pages, or normal sites.</small></span></label>
+    <label class="row"><input type="radio" name="mode" value="ats"><span>Known ATS hosts <small>Also show on any Greenhouse/Lever/Workday/etc. page, including the job description before you click Apply.</small></span></label>
+    <label class="row"><input type="radio" name="mode" value="never"><span>Never <small>Turn the on-page bubble and chip off everywhere. Right-click "Answer with local AI" still works.</small></span></label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Always show on these sites</legend>
+    <textarea id="always" placeholder="one host per line, e.g.&#10;careers.acme.com&#10;jobs.example.org"></textarea>
+    <p class="hint">Forces the bubble on even if detection says no. One hostname per line (no https://, no path). Subdomains of what you list match too.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Never show on these sites</legend>
+    <textarea id="never" placeholder="one host per line, e.g.&#10;mail.google.com&#10;github.com"></textarea>
+    <p class="hint">Wins over everything else. Gmail, GitHub, GitLab, Google Docs, Reddit, X, YouTube, ChatGPT and your local dashboard (<code>127.0.0.1</code>) are already blocked by default; add your own here.</p>
+  </fieldset>
+
+  <div class="bar">
+    <button id="save">Save</button>
+    <button id="addthis" class="ghost" title="Prefill the box with a host to paste">Copy an example host</button>
+    <span id="saved"></span>
+  </div>
+</div>
+<script src="options.js"></script>
+</body>
+</html>

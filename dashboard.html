@@ -88,6 +88,7 @@ tr.jobrow:hover{background:var(--panel2)}
     <button data-tab="logs">Logs</button>
     <button data-tab="settings">Settings</button>
     <button data-tab="profile">Profile</button>
+    <button data-tab="stories">Stories</button>
   </nav>
   <span class="ts" id="lastAdded"></span>
   <span class="grow"></span>
@@ -128,7 +129,7 @@ tr.jobrow:hover{background:var(--panel2)}
   </section>
   <section data-panel="settings" hidden>
     <div class="card"><h3>Sources to scrape</h3><div id="srcs"></div>
-      <p class="hint">A brand-new site needs its own scraper; ping me to add one. These three are wired now.</p></div>
+      <p class="hint">ATS boards are the reliable spine (direct company APIs, edit config/companies.yml). The rest are aggregators. Uncheck any you do not want on the next Refresh.</p></div>
     <div class="card"><h3>Search terms</h3><p class="hint">One per line. Used by every source on the next Refresh.</p>
       <textarea id="terms"></textarea>
       <div style="margin-top:10px"><button class="btn" id="saveCfg">Save settings</button> <span class="muted" id="cfgMsg"></span></div></div>
@@ -138,6 +139,44 @@ tr.jobrow:hover{background:var(--panel2)}
       <p class="hint">What the local model speaks from. UI editing + resume-upload onboarding are the next build; for now edit profile.yaml on disk.</p>
       <pre id="prof">loading...</pre></div>
     <div class="card"><h3>Work history</h3><pre id="work">loading...</pre></div>
+  </section>
+  <section data-panel="stories" hidden>
+    <style>
+      .stwrap{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+      @media(max-width:820px){.stwrap{grid-template-columns:1fr}}
+      .stl{display:block;font-size:12px;color:var(--muted);margin:9px 0 3px}
+      .sti,.stt{width:100%;box-sizing:border-box;background:var(--panel2,#0b1220);color:var(--text,#e5e7eb);
+        border:1px solid var(--line,#334155);border-radius:6px;padding:7px;font:13px/1.4 ui-monospace,Menlo,monospace}
+      .stt{min-height:52px;resize:vertical}
+      .stcard{border-bottom:1px solid var(--line,#1e293b);padding:9px 0}
+      .btn.ghost{background:var(--panel2,#1f2937)}
+    </style>
+    <p class="hint" style="margin:0 0 12px">Real experiences the local model draws on for complex answers, separate from your resume. Add the things you tell in interviews but never put on paper (the 3am incident, the migration nobody saw). The engine picks ONE per question and never invents one.</p>
+    <div class="stwrap">
+      <div class="card">
+        <h3 id="st-formtitle">Add a story</h3>
+        <input type="hidden" id="st-id">
+        <label class="stl">Title</label>
+        <input class="sti" id="st-title" placeholder="Restored service during a 3am Sev1 page">
+        <label class="stl" style="display:inline-flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="st-owned" checked> I personally owned / led this</label>
+        <div style="display:flex;gap:10px">
+          <div style="flex:1"><label class="stl">Domains (comma)</label><input class="sti" id="st-domains" placeholder="incident, on-call, reliability"></div>
+          <div style="flex:1"><label class="stl">Tools used (comma)</label><input class="sti" id="st-tools" placeholder="PagerDuty, Nagios, Linux"></div>
+        </div>
+        <label class="stl">Do NOT imply (comma, optional)</label>
+        <input class="sti" id="st-not_implied" placeholder="Kubernetes, Salesforce">
+        <label class="stl">Situation</label><textarea class="stt" id="st-situation"></textarea>
+        <label class="stl">Task</label><textarea class="stt" id="st-task"></textarea>
+        <label class="stl">Action</label><textarea class="stt" id="st-action"></textarea>
+        <label class="stl">Result</label><textarea class="stt" id="st-result"></textarea>
+        <label class="stl">Hero line (optional)</label><input class="sti" id="st-hero">
+        <div style="margin-top:10px"><button class="btn" id="st-save">Save story</button> <button class="btn ghost" id="st-clear">New / clear</button> <span class="muted" id="st-msg"></span></div>
+      </div>
+      <div class="card">
+        <h3>Your stories (<span id="st-count">0</span>)</h3>
+        <div id="st-list"></div>
+      </div>
+    </div>
   </section>
 </main>
 <div class="drawer-ov" id="drov"></div>
@@ -158,7 +197,7 @@ tr.jobrow:hover{background:var(--panel2)}
 </aside>
 <script>
 const $=id=>document.getElementById(id), esc=s=>(s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let JOBS=[], sortKey="score", sortDir=-1;
+let JOBS=[], sortKey="score", sortDir=-1, STORIES=[];
 
 // theme
 function applyTheme(t){ document.documentElement.setAttribute('data-theme',t); try{localStorage.setItem('penates-theme',t);}catch(_){}}
@@ -174,6 +213,7 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==='logs') loadLogs();
   if(b.dataset.tab==='settings') loadCfg();
   if(b.dataset.tab==='profile') loadProfile();
+  if(b.dataset.tab==='stories') loadStories();
 });
 
 function ago(iso){ if(!iso) return 'never';
@@ -281,7 +321,7 @@ async function loadLogs(){ const l=await fetch('/logs').then(r=>r.json()).catch(
 }
 async function loadCfg(){ const c=await fetch('/config').then(r=>r.json()).catch(()=>({}));
   $('terms').value=(c.terms||[]).join('\n'); const src=c.sources||{};
-  const SRC_LABELS={discover:'JobSpy (LinkedIn/Indeed/ZipRecruiter/Google)',hiringcafe:'hiring.cafe',builtin:'Built In',remotive:'Remotive',remoteok:'RemoteOK'};
+  const SRC_LABELS={ats:'ATS boards (Greenhouse/Lever/Ashby)',discover:'JobSpy (LinkedIn/Indeed/ZipRecruiter/Google)',hiringcafe:'hiring.cafe',builtin:'Built In',remotive:'Remotive',remoteok:'RemoteOK'};
   $('srcs').innerHTML=Object.keys(SRC_LABELS).map(k=>`<label class="src"><input type="checkbox" data-src="${k}" ${src[k]!==false?'checked':''}> ${SRC_LABELS[k]}</label>`).join('');
 }
 $('saveCfg').onclick=async()=>{ const terms=$('terms').value.split('\n').map(t=>t.trim()).filter(Boolean);
@@ -292,6 +332,36 @@ $('saveCfg').onclick=async()=>{ const terms=$('terms').value.split('\n').map(t=>
 async function loadProfile(){ const p=await fetch('/profile').then(r=>r.json()).catch(()=>({}));
   $('prof').textContent=p.profile||'(profile.yaml not found)'; $('work').textContent=p.work_history||'(work_history.yaml not found)';
 }
+// ---- stories tab ----
+const ST_FIELDS=['id','title','domains','tools','not_implied','situation','task','action','result','hero'];
+async function loadStories(){
+  const r=await fetch('/api/stories').then(x=>x.json()).catch(()=>({stories:[]}));
+  STORIES=r.stories||[]; $('st-count').textContent=STORIES.length;
+  $('st-list').innerHTML=STORIES.map((s,i)=>`<div class="stcard">
+    <div style="font-weight:600">${esc(s.title||s.id)}</div>
+    <div class="muted" style="font-size:12px">${s.owned?'owned · ':''}${esc((s.domains||[]).join(', '))}</div>
+    <div style="margin-top:5px;display:flex;gap:6px">
+      <button class="mini" data-edit="${i}">edit</button>
+      <button class="mini" data-del="${esc(s.id)}" style="background:#7f1d1d">delete</button></div></div>`).join('')||'<div class="muted">No stories yet.</div>';
+  document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>fillStory(STORIES[+b.dataset.edit]));
+  document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>delStory(b.dataset.del));
+}
+function fillStory(s){ if(!s)return;
+  $('st-id').value=s.id||'';$('st-title').value=s.title||'';$('st-owned').checked=!!s.owned;
+  $('st-domains').value=(s.domains||[]).join(', ');$('st-tools').value=(s.tools||[]).join(', ');
+  $('st-not_implied').value=(s.not_implied||[]).join(', ');const st=s.star||{};
+  $('st-situation').value=st.situation||'';$('st-task').value=st.task||'';$('st-action').value=st.action||'';$('st-result').value=st.result||'';
+  $('st-hero').value=s.hero||'';$('st-formtitle').textContent='Edit: '+(s.title||s.id);
+  window.scrollTo(0,0);
+}
+function clearStory(){ST_FIELDS.forEach(f=>$('st-'+f).value='');$('st-owned').checked=true;$('st-formtitle').textContent='Add a story';$('st-msg').textContent='';}
+async function saveStory(){const p={};ST_FIELDS.forEach(f=>p[f]=$('st-'+f).value);p.owned=$('st-owned').checked;
+  if(!p.title.trim()){$('st-msg').textContent='Title required';return;}
+  const r=await fetch('/api/stories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}).then(x=>x.json());
+  $('st-msg').textContent=r.ok?('saved: '+r.story.id):'save failed';if(r.ok){clearStory();loadStories();}}
+async function delStory(id){if(!confirm('Delete this story?'))return;
+  await fetch('/api/stories/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});loadStories();}
+$('st-save').onclick=saveStory;$('st-clear').onclick=clearStory;
 loadJobs();
 </script>
 </body>

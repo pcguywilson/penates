@@ -1,0 +1,126 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Penates - Story bank</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font:14px/1.5 system-ui,sans-serif; background:#0b1220; color:#e5e7eb; margin:0; padding:24px; }
+  .wrap { max-width:900px; margin:0 auto; }
+  h1 { font-size:20px; margin:0 0 2px; }
+  .sub { color:#94a3b8; margin:0 0 20px; }
+  a { color:#60a5fa; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+  @media (max-width:760px){ .grid{ grid-template-columns:1fr; } }
+  .card { background:#0f172a; border:1px solid #334155; border-radius:10px; padding:16px; }
+  h2 { font-size:15px; margin:0 0 10px; }
+  label { display:block; font-size:12px; color:#cbd5e1; margin:10px 0 3px; }
+  input[type=text], textarea { width:100%; box-sizing:border-box; background:#0b1220; color:#e5e7eb;
+    border:1px solid #334155; border-radius:6px; padding:7px; font:13px/1.4 ui-monospace,Menlo,monospace; }
+  textarea { min-height:52px; resize:vertical; }
+  .row2 { display:flex; gap:10px; }
+  .row2 > div { flex:1; }
+  .chk { display:flex; align-items:center; gap:6px; margin-top:10px; font-size:13px; }
+  button { background:#2563eb; color:#fff; border:1px solid #1e40af; border-radius:6px; padding:8px 14px; cursor:pointer; font:600 13px system-ui; }
+  button.ghost { background:#1f2937; border-color:#334155; font-weight:400; padding:4px 9px; }
+  button.del { background:#7f1d1d; border-color:#991b1b; }
+  .bar { display:flex; gap:10px; align-items:center; margin-top:14px; }
+  #msg { font-size:13px; }
+  .story { border-bottom:1px solid #1e293b; padding:9px 0; }
+  .story .t { font-weight:600; }
+  .story .m { color:#94a3b8; font-size:12px; }
+  .story .btns { margin-top:5px; display:flex; gap:6px; }
+  .hint { color:#64748b; font-size:11px; margin-top:2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Story bank</h1>
+  <p class="sub">Real experiences the local model draws on for complex answers - separate from your resume. Add the things you tell in interviews but never put on paper (the 3am incident, the migration nobody saw). The engine picks ONE per question and never invents one. <a href="/">back to dashboard</a></p>
+  <div class="grid">
+    <div class="card">
+      <h2 id="formtitle">Add a story</h2>
+      <input type="hidden" id="id">
+      <label>Title</label>
+      <input type="text" id="title" placeholder="Restored service during a 3am Sev1 page">
+      <div class="chk"><input type="checkbox" id="owned" checked> <label style="margin:0">I personally owned / led this</label></div>
+      <div class="row2">
+        <div><label>Domains (comma)</label><input type="text" id="domains" placeholder="incident, on-call, reliability, troubleshooting">
+          <div class="hint">topics a question would match on</div></div>
+        <div><label>Tools used (comma)</label><input type="text" id="tools" placeholder="PagerDuty, Nagios, Linux">
+          <div class="hint">the ONLY tools the model may name for this story</div></div>
+      </div>
+      <label>Do NOT imply (comma, optional)</label>
+      <input type="text" id="not_implied" placeholder="Kubernetes, Salesforce">
+      <div class="hint">tools a reader might assume but you did not use here</div>
+      <label>Situation</label><textarea id="situation" placeholder="One or two sentences: the context and the pain."></textarea>
+      <label>Task</label><textarea id="task" placeholder="What you were on the hook for."></textarea>
+      <label>Action</label><textarea id="action" placeholder="What you did. Only tools you listed above."></textarea>
+      <label>Result</label><textarea id="result" placeholder="What changed. A metric if you have one."></textarea>
+      <label>Hero line (optional)</label><input type="text" id="hero" placeholder="short proof line; defaults to the title">
+      <div class="bar">
+        <button id="save">Save story</button>
+        <button id="clear" class="ghost">New / clear</button>
+        <span id="msg"></span>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Your stories (<span id="count">0</span>)</h2>
+      <div id="list"></div>
+    </div>
+  </div>
+</div>
+<script>
+const BASE = location.origin;
+const F = (id) => document.getElementById(id);
+const fields = ["id","title","domains","tools","not_implied","situation","task","action","result","hero"];
+
+async function refresh() {
+  const r = await fetch(BASE + "/api/stories").then(x=>x.json()).catch(()=>({stories:[]}));
+  const list = F("list"); list.innerHTML = "";
+  F("count").textContent = (r.stories||[]).length;
+  (r.stories||[]).forEach(s => {
+    const d = document.createElement("div"); d.className = "story";
+    d.innerHTML = '<div class="t"></div><div class="m"></div><div class="btns">'
+      + '<button class="ghost e">edit</button><button class="del d">delete</button></div>';
+    d.querySelector(".t").textContent = s.title || s.id;
+    d.querySelector(".m").textContent = (s.owned?"owned . ":"") + (s.domains||[]).join(", ");
+    d.querySelector(".e").onclick = () => fillForm(s);
+    d.querySelector(".d").onclick = () => del(s.id, s.title);
+    list.appendChild(d);
+  });
+}
+function fillForm(s) {
+  F("id").value = s.id||""; F("title").value = s.title||"";
+  F("owned").checked = !!s.owned;
+  F("domains").value = (s.domains||[]).join(", ");
+  F("tools").value = (s.tools||[]).join(", ");
+  F("not_implied").value = (s.not_implied||[]).join(", ");
+  const st = s.star||{};
+  F("situation").value = st.situation||""; F("task").value = st.task||"";
+  F("action").value = st.action||""; F("result").value = st.result||"";
+  F("hero").value = s.hero||"";
+  F("formtitle").textContent = "Edit: " + (s.title||s.id);
+  window.scrollTo(0,0);
+}
+function clearForm() {
+  fields.forEach(f=>F(f).value=""); F("owned").checked=true;
+  F("formtitle").textContent="Add a story"; F("msg").textContent="";
+}
+async function save() {
+  const p = {}; fields.forEach(f=>p[f]=F(f).value); p.owned = F("owned").checked;
+  if (!p.title.trim()) { F("msg").textContent="Title required"; return; }
+  const r = await fetch(BASE+"/api/stories",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(p)}).then(x=>x.json());
+  F("msg").textContent = r.ok ? ("Saved: "+r.story.id) : ("Error: "+(r.error||"?"));
+  if (r.ok) { clearForm(); refresh(); }
+}
+async function del(id, title) {
+  if (!confirm("Delete story: "+(title||id)+" ?")) return;
+  await fetch(BASE+"/api/stories/delete",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})}).then(x=>x.json());
+  refresh();
+}
+F("save").onclick = save; F("clear").onclick = clearForm;
+refresh();
+</script>
+</body>
+</html>

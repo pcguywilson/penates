@@ -39,6 +39,15 @@ tool whose whole point is that your data stays home and belongs to you.
   essays, and shows a review panel of what it filled, flagged, or left for you.
 - **Per-field helper:** right-click or a shortcut on any written-answer field for a single
   grounded draft you can edit, regenerate, and insert.
+- **Genre-aware answers:** each written question is classified (owned-project story,
+  hypothetical, why-company, gap) and answered from a **story bank** you control - real
+  experiences you would tell in an interview but never put on the résumé. The model dresses
+  ONE story or states a gap; it never invents a project. A code validator rejects skills-dump
+  openings, off-target word counts, and definitions where a proposal was asked for, and
+  regenerates once before flagging for review.
+- **Shows only on application forms:** the fill bubble and per-field helper stay hidden on
+  Gmail, GitHub, search results, and job descriptions; a Settings page (mode plus per-site
+  allow/deny lists) overrides the detection when it guesses wrong.
 - Deterministic identity fields (name, email, phone, city, yes/no) from a locked profile.
 - Answers grounded on your real work history: employer, dates, stack.
 - **Gap guard:** a tool or cert you didn't list stays unclaimed; the field is answered honestly and flagged for review.
@@ -67,6 +76,7 @@ real apply page:
 
 | Source | How | Notes |
 |---|---|---|
+| **Company ATS boards** | **direct public APIs (Greenhouse, Lever, Ashby)** | **the reliable spine: clean titles, locations, posted dates, real apply URLs; from `config/companies.yml`** |
 | LinkedIn / Indeed / Google | JobSpy (MIT) | Easy Apply on LinkedIn is skipped (no employer link to fill) |
 | hiring.cafe | public `_next/data` JSON | direct employer apply URLs, salary, posted date |
 | Built In | server-rendered HTML | Easy Apply cards skipped; resolves to the employer ATS |
@@ -83,6 +93,7 @@ store, deduped by URL. Then `resolve.py` turns listing links into real apply URL
 can, and `rank.py` scores each row against your lane.
 
 ```
+python scan_ats.py       # company ATS boards (Greenhouse/Lever/Ashby) - the spine
 python discover.py       # LinkedIn / Indeed / Google via JobSpy
 python hiringcafe.py     # hiring.cafe
 python builtin.py        # Built In (employer-direct only)
@@ -106,6 +117,8 @@ python serve.py                       # http://127.0.0.1:8765/dashboard
 - **Settings** - edit your search terms and turn sources on or off (saved to `config.json`).
 - **Logs** - discovery runs, fills, and answer generations.
 - **Profile** - a read-only view of the facts the answer helper draws on.
+- **Stories** - add and edit the story bank the answer engine draws on (the interview-grade
+  experiences that never make the résumé), no YAML editing.
 - **Themes** - a color picker in the header (default Slate); pick what is easy on your eyes.
 
 Discovery finds and ranks; the extension fills; you review and submit. Same contract as the
@@ -123,9 +136,10 @@ rest of the tool: nothing leaves the machine, nothing auto-submits.
 |---|---|
 | `profile.yaml` + `data/work_history.yaml` | Source of truth. Not the model. |
 | `fields.yaml` | Deterministic rules: yes/no, work authorization, city, salary, EEO you chose. |
-| `answers.yaml` + `apply.py` | Classify the question, write a short answer from your facts plus the job blurb. |
+| `answers.yaml` + `apply.py` | Deterministic identity + short intent-template answers (why-company, ratings). |
+| `stories.yaml` + `essay.py` | The story bank and the genre engine: classify the question, retrieve ONE real story (or a gap), validate the draft in code. |
 | Browser | One MV3 extension in normal Chrome (whole-page Fill + per-field helper) talking to a local server; a legacy CDP runner remains for reference. |
-| Discovery (`discover.py`, `hiringcafe.py`, `builtin.py`, `remoteok.py`, `remotive.py`) | Pull postings into `data/jobs.json`; `rank.py` scores them; `serve.py` dashboard shows them. |
+| Discovery (`scan_ats.py` + `sources/`, `discover.py`, `hiringcafe.py`, `builtin.py`, `remoteok.py`, `remotive.py`) | ATS-API boards first, then aggregators; pull postings into `data/jobs.json`, dedupe, `rank.py` scores, `serve.py` dashboard shows them. |
 | You | Captchas, MFA, account creation, the final read, and Submit. |
 
 Every answer resolves to one of three states: **AUTO** (deterministic, filled),
@@ -164,6 +178,8 @@ the WIP runner) Chrome's debug port `9222`. No paid API, Docker, or database.
    cp profile.example.yaml profile.yaml
    cp data/work_history.example.yaml data/work_history.yaml
    cp application.example.yaml application.yaml
+   cp stories.example.yaml stories.yaml            # your story bank (or add stories in the dashboard)
+   cp config/companies.example.yml config/companies.yml
    ```
 4. Start the local server: **Start Autofill Server.bat**, or `python serve.py`
    (serves `/answer` on `127.0.0.1:8765`).
@@ -196,6 +212,8 @@ the iCIMS runner page through, still stopping before the last step.
 | `data/work_history.yaml` | Dated employment history | `.example` only; real is git-ignored |
 | `data/jobs.json` | Your application queue | `.example` only; real is git-ignored |
 | `application.yaml` | The current job's company blurb | `.example` only; real is git-ignored |
+| `stories.yaml` | Your story bank (interview-grade experiences the answer engine uses) | `.example` only; real is git-ignored |
+| `config/companies.yml` | ATS boards to scan (Greenhouse/Lever/Ashby slugs) | `.example` only; real is git-ignored |
 | `fields.yaml` | Field-label to profile mapping rules | shipped |
 | `config.json` | Dashboard search terms + source toggles | `.example` only; runtime is git-ignored |
 | `answers.yaml` | Intent templates for essays | shipped |
@@ -217,9 +235,14 @@ right-click control that works in a normal browser.
 
 ## Roadmap
 
-- **Now (answer path):** better question-label detection (aria, headings, selected text), native value setter with `InputEvent` for React/LWC fields, per-intent length caps, a cache-hit indicator.
+- **Done:** genre-aware answer engine with a user-owned story bank and a code validator
+  (no skills dumps, honest gaps, enforced word/sentence counts); ATS-API job discovery
+  (Greenhouse/Lever/Ashby) with dedupe; application-form-only overlay gating with a Settings
+  page; a Stories tab to grow the bank without editing YAML.
+- **Now (answer path):** better question-label detection (aria, headings, selected text),
+  native value setter with `InputEvent` for React/LWC fields, per-intent length caps.
 - **Next (structured fill without lying):** identity fields for Greenhouse/Rippling/Ashby directly in the extension (no CDP), strict Yes/No polarity, never pick "Decline to self-identify" when a real answer exists, Workday account and experience from `work_history.yaml`, Salesforce Flow shadow-DOM handling.
-- **Later:** optional cloud OpenAI-compatible endpoint behind the same compose contract, a PII-free application log, cover letters from the same templates.
+- **Later:** interview prep built on the same story bank (rehearse behavioral answers from your own STARs), a tailored résumé/cover-letter path from the same locked facts, an optional cloud OpenAI-compatible endpoint behind the same compose contract, a PII-free application log.
 - **Not planned:** auto-submit as default, mass-apply, hosted SaaS, or inventing skills to raise a match score.
 
 ## Privacy

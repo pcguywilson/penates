@@ -143,6 +143,28 @@ def do_answer(payload):
     except Exception as e:
         print("[tier1 skip] " + str(e), flush=True)
 
+    # tier 1.5: genre router - project / hypothetical / gap questions go to the genre
+    # engine (essay.py), NOT the flat answers.yaml templates. why_company / why_role /
+    # technical_experience / definition still flow to the tier-2 templates below.
+    try:
+        import essay as _essay
+        _c = _essay.parse_constraints(q, limit)
+        _genre = _essay.classify_genre(q, _c)
+        _gaps = _essay.detect_gaps(q)
+        _is_gap = bool(_gaps["hard"] or _gaps["limited"])
+        if _genre in ("owned_project", "hypothetical", "behavioral", "short_text") or _is_gap:
+            if not fresh:
+                _la = learned_lookup(q)
+                if _la:
+                    return _shape({"kind": "answer", "method": "learned", "chars": len(_la),
+                                   "gaps": [], "text": _la})
+            out = _essay.answer_essay(q, limit=limit, company=payload.get("company"),
+                                      url=payload.get("url"))
+            out.setdefault("ok", out.get("kind") in ("answer", "field"))
+            return out
+    except Exception as e:
+        print("[essay route skip] " + str(e), flush=True)
+
     # tier 2: intent template
     try:
         r = _apply.answer(question=q, max_chars=limit)
@@ -161,21 +183,29 @@ def do_answer(payload):
         except Exception as e:
             print("[learned skip] " + str(e), flush=True)
 
-    # tier 3: essay compose (gap-guarded)
-    return _shape(_apply.compose(q, max_chars=limit))
+    # tier 3: genre-aware essay engine (fallback for anything not caught above)
+    try:
+        import essay as _essay
+        out = _essay.answer_essay(q, limit=limit, company=payload.get("company"),
+                                  url=payload.get("url"))
+        out.setdefault("ok", out.get("kind") in ("answer", "field"))
+        return out
+    except Exception as e:
+        print("[essay tier3 skip] " + str(e), flush=True)
+        return _shape(_apply.compose(q, max_chars=limit))
 
 # ---- refresh pipeline (dashboard "Refresh jobs" button) --------------------
 _PIPE = {"running": False, "log": [], "started": 0, "finished": 0}
 _ANSWER_LOG = []   # local-model reasoning: recent /answer resolutions
 _FILL_LOG = []     # form-fill reports posted by the extension
-_PIPE_SCRIPTS = ["discover.py", "hiringcafe.py", "builtin.py", "remotive.py", "remoteok.py", "resolve.py", "rank.py"]
+_PIPE_SCRIPTS = ["scan_ats.py", "discover.py", "hiringcafe.py", "builtin.py", "remotive.py", "remoteok.py", "resolve.py", "rank.py"]
 
 def _run_pipeline():
     import jobs_store
-    srcs = jobs_store.config_sources({"discover": True, "hiringcafe": True, "builtin": True,
-                                      "remotive": True, "remoteok": True})
-    src_of = {"discover.py": "discover", "hiringcafe.py": "hiringcafe", "builtin.py": "builtin",
-              "remotive.py": "remotive", "remoteok.py": "remoteok"}
+    srcs = jobs_store.config_sources({"ats": True, "discover": True, "hiringcafe": True,
+                                      "builtin": True, "remotive": True, "remoteok": True})
+    src_of = {"scan_ats.py": "ats", "discover.py": "discover", "hiringcafe.py": "hiringcafe",
+              "builtin.py": "builtin", "remotive.py": "remotive", "remoteok.py": "remoteok"}
     _PIPE.update(running=True, log=["starting refresh..."], started=time.time(), finished=0)
     for sc in _PIPE_SCRIPTS:
         key = src_of.get(sc)
@@ -221,6 +251,24 @@ class H(BaseHTTPRequestHandler):
                     return self._send(200, f.read(), "text/html; charset=utf-8")
             except Exception as e:
                 return self._send(500, str(e))
+        if parsed.path == "/demo":
+            try:
+                with open(os.path.join(HERE, "demo.html"), "rb") as f:
+                    return self._send(200, f.read(), "text/html; charset=utf-8")
+            except Exception as e:
+                return self._send(500, str(e))
+        if parsed.path == "/stories":
+            try:
+                with open(os.path.join(HERE, "stories.html"), "rb") as f:
+                    return self._send(200, f.read(), "text/html; charset=utf-8")
+            except Exception as e:
+                return self._send(500, str(e))
+        if parsed.path == "/api/stories":
+            try:
+                import stories_store
+                return self._json(200, {"stories": stories_store.load()})
+            except Exception as e:
+                return self._json(500, {"error": str(e)})
         if parsed.path == "/ranked":
             try:
                 import jobs_store
@@ -303,6 +351,24 @@ class H(BaseHTTPRequestHandler):
                 import jobs_store
                 jobs_store.save_config(cfg)
                 return self._json(200, {"ok": True})
+            except Exception as e:
+                return self._json(500, {"ok": False, "error": str(e)})
+        if parsed.path == "/api/stories":
+            try:
+                payload = json.loads(raw or b"{}")
+                import stories_store
+                st = stories_store.upsert(payload)
+                print("[stories] upsert %s" % st.get("id"), flush=True)
+                return self._json(200, {"ok": True, "story": st})
+            except Exception as e:
+                print("[error] " + str(e), flush=True)
+                return self._json(500, {"ok": False, "error": str(e)})
+        if parsed.path == "/api/stories/delete":
+            try:
+                payload = json.loads(raw or b"{}")
+                import stories_store
+                n = stories_store.delete((payload.get("id") or "").strip())
+                return self._json(200, {"ok": True, "count": n})
             except Exception as e:
                 return self._json(500, {"ok": False, "error": str(e)})
         if parsed.path == "/apply":

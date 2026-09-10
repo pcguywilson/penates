@@ -53,6 +53,25 @@ def _norm_url(u):
 def _slug(s):
     return re.sub(r"[^a-z0-9]+", "-", (s or "").lower()).strip("-")[:40] or "job"
 
+def _fp(company, role, loc):
+    n = lambda x: re.sub(r"[^a-z0-9]+", " ", (x or "").lower()).strip()
+    return n(company) + "|" + n(role) + "|" + n(loc)
+
+def _enrich(existing, j):
+    """Backfill/improve display fields on an already-stored row from a fresh fetch.
+    Longer desc wins; empty fields get filled. Never touches status/score/applied_at."""
+    changed = False
+    nd = j.get("desc") or ""
+    if nd and len(nd) > len(existing.get("desc") or ""):
+        existing["desc"] = nd; changed = True
+    for k in ("posted", "location", "workplace", "salary", "apply_url", "ats_id", "board", "remote"):
+        v = j.get(k)
+        if v not in (None, "") and not existing.get(k):
+            existing[k] = v; changed = True
+    if j.get("ats") and existing.get("ats") in (None, "", "other"):
+        existing["ats"] = j["ats"]; changed = True
+    return changed
+
 def load():
     try:
         with open(PATH, encoding="utf-8") as f:
@@ -101,24 +120,42 @@ def add_discovered(jobs):
     skipping URLs already present. Returns count added (the dedupe backbone)."""
     with _LOCK:
         d = load(); q = d["queue"]
-        have = {_norm_url(r.get("url")) for r in q}
-        added = 0
+        by_url = {_norm_url(r.get("url")): r for r in q if r.get("url")}
+        by_aid = {r.get("ats_id"): r for r in q if r.get("ats_id")}
+        have_fp = {_fp(r.get("company"), r.get("role"), r.get("location") or r.get("workplace"))
+                   for r in q}
+        added = enriched = 0
         today = datetime.date.today().isoformat()
         for j in jobs:
             u = j.get("url")
-            if not u or _norm_url(u) in have:
+            if not u:
                 continue
+            aid = j.get("ats_id")
+            fp = _fp(j.get("company"), j.get("role"), j.get("location") or j.get("workplace"))
+            existing = by_url.get(_norm_url(u)) or (by_aid.get(aid) if aid else None)
+            if existing is not None:
+                if _enrich(existing, j):
+                    enriched += 1
+                continue
+            if fp.strip("|") and fp in have_fp:
+                continue                        # fingerprint dup from another source/url
             row = {"id": (_slug(j.get("company")) + "-" + _slug(j.get("role")))[:60],
                    "company": j.get("company", ""), "role": j.get("role", ""),
-                   "url": u, "status": "discovered", "ats": infer_ats(u),
+                   "url": u, "status": "discovered",
+                   "ats": j.get("ats") or infer_ats(u),
                    "source": j.get("source", "discovery"),
                    "score": j.get("score"), "discovered_at": today}
-            for k in ("posted", "location", "workplace", "salary", "desc"):
-                if j.get(k):
+            for k in ("posted", "location", "workplace", "salary", "desc",
+                      "apply_url", "ats_id", "board", "remote"):
+                if j.get(k) is not None and j.get(k) != "":
                     row[k] = j[k]
             q.append(row)
-            have.add(_norm_url(u)); added += 1
-        if added:
+            by_url[_norm_url(u)] = row
+            if aid: by_aid[aid] = row
+            if fp.strip("|"): have_fp.add(fp)
+            added += 1
+        d["last_enriched"] = enriched
+        if added or enriched:
             d["last_added"] = datetime.datetime.now().isoformat(timespec="seconds")
             save(d)
         return added

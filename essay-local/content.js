@@ -23,8 +23,91 @@
 
   const inPenates = (el) => !!(el && el.closest && el.closest("[data-penates]"));
 
+  // ===== surface gating (only show on real application forms) =====
+  // User overrides live in chrome.storage.local "penatesSettings" and win over detection,
+  // so if the heuristic ever guesses wrong the owner fixes it by site in the options page.
+  let SETTINGS = { mode: "forms", alwaysHosts: [], neverHosts: [] };
+  const DENY = [
+    "mail.google.com", "docs.google.com", "drive.google.com", "calendar.google.com",
+    "github.com", "gitlab.com", "bitbucket.org", "reddit.com", "x.com", "twitter.com",
+    "youtube.com", "chatgpt.com", "chat.openai.com", "claude.ai", "stackoverflow.com",
+    "bankofamerica.com", "chase.com", "wellsfargo.com", "localhost", "127.0.0.1"
+  ];
+  const ATS_HOST_RE = /greenhouse|lever\.co|ashbyhq|myworkdayjobs|workday|icims|paylocity|smartrecruiters|jobvite|teksystems|taleo|breezy|workable|bamboohr|recruitee|applytojob|dayforce|pinpointhq|zohorecruit|paycomonline|successfactors|jobvite|hrmdirect/i;
+  const hostIn = (list) => {
+    const h = (location.hostname || "").toLowerCase();
+    return (list || []).some((d) => h === d || h.endsWith("." + d));
+  };
+  const isAtsHost = () => ATS_HOST_RE.test(location.hostname || "");
+  function applyUrlEvidence() {
+    const u = (location.pathname + " " + location.search + " " + location.hash).toLowerCase();
+    return /\/apply|\/application|applynow|apply-now|job-app|cx\/job|step=application|gh_jid|ashby_jid|jobid=|\/careers?\/.*\/apply/.test(u);
+  }
+  // Attribute-only form score (no layout reads, so strict-CSP pages don't fetch blocked fonts).
+  function formScore() {
+    let inputs = 0, hasIdentity = false, hasResume = false, hasScreening = false, els;
+    try { els = document.querySelectorAll("input, textarea, select"); } catch (_) { return 0; }
+    for (const e of els) {
+      const t = (e.type || "").toLowerCase();
+      if (e.tagName === "INPUT" && /^(hidden|submit|button|image|reset)$/.test(t)) continue;
+      if (e.disabled || e.hidden || inPenates(e)) continue;
+      const st = e.style; if (st && (st.display === "none" || st.visibility === "hidden")) continue;
+      const lbl = ((e.getAttribute("aria-label") || e.placeholder || e.name || e.getAttribute("autocomplete") || "") + "").toLowerCase();
+      if (t === "search" || /\bsearch\b/.test(lbl)) continue;                 // ignore site search boxes
+      if (e.tagName === "INPUT" && /^(radio|checkbox)$/.test(t)) {
+        if (/authoriz|sponsor|eeo|self.?identif|veteran|disabilit|hear about|cover letter|gender|\brace\b|ethnic|consent|acknowledg/.test(lbl)) hasScreening = true;
+        continue;
+      }
+      inputs++;
+      if (t === "email" || /first name|last name|full name|e-?mail|phone|linkedin/.test(lbl)) hasIdentity = true;
+      if (t === "file" || /resume|\bcv\b|cover letter|attach/.test(lbl)) hasResume = true;
+    }
+    let score = 0;
+    if (inputs >= 3) score++;
+    if (hasIdentity) score++;
+    if (hasResume) score++;
+    if (hasScreening) score++;
+    return score;
+  }
+  function isApplySurface() {
+    if (isAtsHost()) return formScore() >= 2 || applyUrlEvidence();   // ATS host but not a bare JD/search
+    if (applyUrlEvidence()) return formScore() >= 1;
+    return formScore() >= 2;
+  }
+  function surfaceAllowed() {
+    if (SETTINGS.mode === "never") return false;
+    if (hostIn(SETTINGS.neverHosts)) return false;
+    if (hostIn(DENY)) return false;
+    if (hostIn(SETTINGS.alwaysHosts)) return true;
+    if (SETTINGS.mode === "ats") return isAtsHost() || isApplySurface();  // opt-in: JD reminder too
+    return isApplySurface();
+  }
+  function reevaluate() {
+    if (!IS_TOP) return;
+    if (!surfaceAllowed()) {
+      if (chip) chip.style.display = "none";
+      if (launcherBtn) { try { launcherBtn.remove(); } catch (_) {} launcherBtn = null; launcherMounted = false; }
+      return;
+    }
+    mountLauncher();
+  }
+  try {
+    if (chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get("penatesSettings", (o) => {
+        if (o && o.penatesSettings) SETTINGS = Object.assign(SETTINGS, o.penatesSettings);
+        reevaluate();
+      });
+      chrome.storage.onChanged.addListener((ch, area) => {
+        if (area === "local" && ch.penatesSettings) {
+          SETTINGS = Object.assign({ mode: "forms", alwaysHosts: [], neverHosts: [] }, ch.penatesSettings.newValue || {});
+          reevaluate();
+        }
+      });
+    }
+  } catch (_) {}
+
   document.addEventListener("focusin", (e) => {
-    if (isEditable(e.target) && !inPenates(e.target)) { lastEditable = e.target; showChip(e.target); }
+    if (isEditable(e.target) && !inPenates(e.target) && surfaceAllowed()) { lastEditable = e.target; showChip(e.target); }
   }, true);
   document.addEventListener("focusout", () => setTimeout(hideChip, 200), true);
 
@@ -427,7 +510,7 @@
   function escapeHtml(s) { return (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
 
   // ---- floating launcher (top frame only, and only on application-like pages) ----
-  let launcherMounted = false;
+  let launcherMounted = false, launcherBtn = null;
   const ATS_HOST = /greenhouse|lever\.co|ashbyhq|myworkdayjobs|workday|icims|paylocity|smartrecruiters|jobvite|teksystems|taleo|breezy|workable|bamboohr|recruitee|applytojob|dayforce|jobs\.|careers?\./i;
   function looksLikeApplication() {
     if (ATS_HOST.test(location.hostname)) return true;
@@ -450,9 +533,10 @@
   }
   function mountLauncher() {
     if (!IS_TOP || launcherMounted) return;
-    if (!looksLikeApplication()) return;
+    if (!surfaceAllowed()) return;
     launcherMounted = true;
     const b = document.createElement("button");
+    launcherBtn = b;
     b.setAttribute("data-penates", "launch");
     b.textContent = "Fill application";
     b.type = "button";
@@ -463,13 +547,17 @@
     b.addEventListener("click", (e) => { e.preventDefault(); runFillAll(); });
     (document.body || document.documentElement).appendChild(b);
   }
+  let _reevalT = 0;
+  function reevaluateDebounced() { clearTimeout(_reevalT); _reevalT = setTimeout(reevaluate, 350); }
   function watchForForm() {
     if (!IS_TOP) return;
-    mountLauncher();
-    if (launcherMounted) return;
-    let tries = 0, obs = null;
-    try { obs = new MutationObserver(() => { mountLauncher(); if (launcherMounted && obs) obs.disconnect(); }); obs.observe(document.documentElement, { childList: true, subtree: true }); } catch (_) {}
-    const iv = setInterval(() => { mountLauncher(); if (launcherMounted || ++tries > 20) { clearInterval(iv); try { if (obs) obs.disconnect(); } catch (_) {} } }, 1000);
+    reevaluate();
+    let obs = null;
+    try { obs = new MutationObserver(reevaluateDebounced); obs.observe(document.documentElement, { childList: true, subtree: true }); } catch (_) {}
+    window.addEventListener("popstate", reevaluateDebounced);
+    window.addEventListener("hashchange", reevaluateDebounced);
+    let tries = 0;
+    const iv = setInterval(() => { reevaluate(); if (++tries > 20) clearInterval(iv); }, 1000);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { watchForForm(); autoFillIfRequested(); });
   else { watchForForm(); autoFillIfRequested(); }
@@ -492,8 +580,15 @@
     els.text.value = data.text || "";
     els.method = data.method;
     const gap = data.gaps && data.gaps.length;
-    setMeta((data.method || "done") + "  .  " + (data.chars || (data.text || "").length) + " chars" +
-            (gap ? "  .  review: " + data.gaps.join(", ") : ""), !!gap);
+    const chk = data.checks && data.checks.length;
+    const parts = [];
+    if (data.genre) parts.push(data.genre);
+    if (data.story) parts.push("story: " + data.story);
+    parts.push((data.words ? data.words + "w" : ((data.chars || (data.text || "").length) + " chars")));
+    if (chk) parts.push("review: " + data.checks.join(", "));
+    else if (gap) parts.push("gap: " + data.gaps.join(", "));
+    else if (!data.genre) parts.unshift(data.method || "done");
+    setMeta(parts.join("  .  "), !!(gap || chk));
     autosize(); els.text.focus();
   }
   function doInsert() {
