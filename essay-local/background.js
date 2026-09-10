@@ -11,8 +11,13 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
-function send(tabId, type) {
+async function send(tabId, type) {
   if (tabId == null) return;
+  // Ensure the content script is present (on ATS hosts it already is; the guard makes a
+  // re-inject a no-op). activeTab grants this tab on the user's gesture - no all-sites perm.
+  try {
+    await chrome.scripting.executeScript({ target: { tabId, allFrames: true }, files: ["content.js"] });
+  } catch (e) { /* not injectable (chrome://, web store, pdf) - ignore */ }
   chrome.tabs.sendMessage(tabId, { type }, () => void chrome.runtime.lastError);
 }
 

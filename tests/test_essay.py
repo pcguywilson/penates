@@ -64,5 +64,20 @@ honest = essay._honest_gap(Q3, g3, None, c3)
 check("gap answer opens with an honest denial", "have not worked" in honest.lower() or "not owned" in honest.lower(), honest[:80])
 
 print("\n%d/%d checks passed" % (12 - len(fails) + 0, 12) if False else "")
+# --- end-to-end: empty bank must NOT invent a project ---
+_orig = essay._load_stories
+essay._load_stories = lambda: []
+_r = essay.answer_essay("Describe the most complex project you personally owned. What changed?")
+check("empty story bank -> NEEDS_INPUT, no invented project",
+      (not _r.get("ok")) and "NEEDS INPUT" in (_r.get("text") or "").upper(), (_r.get("method"), _r.get("ok")))
+essay._load_stories = _orig
+
+# --- end-to-end: Salesforce question -> gap_analog genre + first-sentence denial (deterministic) ---
+_r3 = essay.answer_essay(Q3)
+check("Q3 final genre is gap_analog", _r3.get("genre") == "gap_analog", _r3.get("genre"))
+_t3 = (_r3.get("text") or "").lower()
+check("Q3 discloses the gap up front",
+      ("have not worked" in _t3[:150] or "not owned" in _t3[:150]) and "salesforce" in _t3[:150], _t3[:90])
+
 print(("ALL PASS" if not fails else ("FAILURES: " + ", ".join(fails))))
 sys.exit(1 if fails else 0)

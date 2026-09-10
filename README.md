@@ -45,9 +45,10 @@ tool whose whole point is that your data stays home and belongs to you.
   ONE story or states a gap; it never invents a project. A code validator rejects skills-dump
   openings, off-target word counts, and definitions where a proposal was asked for, and
   regenerates once before flagging for review.
-- **Shows only on application forms:** the fill bubble and per-field helper stay hidden on
-  Gmail, GitHub, search results, and job descriptions; a Settings page (mode plus per-site
-  allow/deny lists) overrides the detection when it guesses wrong.
+- **Shows only on application forms:** the extension asks for known ATS hosts only (not
+  "all sites"); on those the fill bubble appears only once a form actually scores as an
+  application, and the per-field helper injects on demand anywhere via `activeTab`. A Settings
+  page (mode plus per-site allow/deny lists) overrides the detection when it guesses wrong.
 - Deterministic identity fields (name, email, phone, city, yes/no) from a locked profile.
 - Answers grounded on your real work history: employer, dates, stack.
 - **Gap guard:** a tool or cert you didn't list stays unclaimed; the field is answered honestly and flagged for review.
@@ -183,8 +184,12 @@ the WIP runner) Chrome's debug port `9222`. No paid API, Docker, or database.
    ```
 4. Start the local server: **Start Autofill Server.bat**, or `python serve.py`
    (serves `/answer` on `127.0.0.1:8765`).
-5. In `chrome://extensions` (Developer mode, then Load unpacked), load the `essay-local/`
-   folder. It works in your normal Chrome.
+5. In `chrome://extensions` (Developer mode, then Load unpacked), load the **`essay-local/`**
+   folder (this is the real fill + answer UI; the `extension/` folder is a legacy
+   dashboard-launcher button - do not load it). It works in your normal Chrome. The install
+   prompt lists only known ATS hosts, not "all sites": the fill bubble auto-mounts on those
+   application pages, and the per-field helper injects on demand (right-click / Alt+A) on any
+   page you invoke it, via `activeTab`.
 6. Focus a written-answer box, then right-click **Answer with local AI**, or press
    **Alt+A**. The draft is inserted; a toast shows the method and any review flag.
 
