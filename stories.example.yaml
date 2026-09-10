@@ -1,0 +1,52 @@
+# Example story bank. Copy to stories.yaml and replace with YOUR real experiences.
+# The engine selects and dresses ONE of these per question (or states a gap). It never
+# invents one. Résumé bullets are not stories - each entry is a real thing you owned.
+stories:
+  - id: siem-rebuild
+    title: "Rebuilt a broken monitoring/SIEM stack"
+    domains: [siem, security monitoring, observability, linux, on-prem, incident, ownership]
+    tools: [Example SIEM, Linux, Log Shipper]
+    not_implied: [Salesforce, Intune, Jamf, Splunk]
+    owned: true
+    star:
+      situation: "I inherited a monitoring stack that was down with broken certs and stalled agents."
+      task: "I was the only engineer on it and had to restore visibility with no runbook."
+      action: "I rebuilt it on a hardened Linux base, fixed the certificates and permissions, and reconnected the agents."
+      result: "Alerting came back across the fleet and the rebuild became a repeatable image."
+    hero: "Rebuilt a dead monitoring/SIEM stack and made it a repeatable hardened image."
+  - id: cloud-platform
+    title: "Built an internal platform in a restricted cloud from scratch"
+    domains: [cloud, platform, greenfield, docker, containers, ownership]
+    tools: [Example Cloud, Docker]
+    not_implied: [Kubernetes, Salesforce]
+    owned: true
+    star:
+      situation: "Users had no internal self-service tool and the cloud had tight service limits."
+      task: "I owned building a private, containerized platform end to end."
+      action: "I ran it in Docker and wrote patches for the platform limits, validated in the real account."
+      result: "It shipped and gave staff a grounded internal tool without leaving the boundary."
+    hero: "Stood up a containerized internal platform in a restricted cloud, solo."
+  - id: zero-downtime-deploys
+    title: "Zero-downtime releases on multi-tenant infrastructure"
+    domains: [deployment, reliability, zero downtime, multi-tenant, release, ownership]
+    tools: [Example Orchestrator]
+    not_implied: [Salesforce]
+    owned: true
+    star:
+      situation: "A customer-facing product had to ship monthly with no downtime across tenants."
+      task: "I was responsible for landing those releases cleanly."
+      action: "I validated ahead, kept redundancy, rolled incrementally while watching health, and rolled back on a bad signal."
+      result: "Monthly releases went out with no customer-visible downtime."
+    hero: "Owned monthly zero-downtime releases on multi-tenant infrastructure."
+  - id: automation
+    title: "Automated a repetitive manual process"
+    domains: [automation, scripting, efficiency, toil, ownership]
+    tools: [Python, scripting]
+    not_implied: [Salesforce]
+    owned: true
+    star:
+      situation: "A recurring task was done by hand, slowly and inconsistently."
+      task: "I wanted the time back without losing quality."
+      action: "I scripted the whole flow end to end and compiled the output automatically."
+      result: "The manual toil was removed and the output became consistent."
+    hero: "Scripted an end-to-end workflow that removed repetitive manual toil."

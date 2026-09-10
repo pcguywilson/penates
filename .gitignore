@@ -51,3 +51,5 @@ env/
 .idea/
 .vscode/
 _to_delete/
+stories.yaml
+config/companies.yml

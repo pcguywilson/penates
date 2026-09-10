@@ -1,0 +1,15 @@
+# Example ATS scan targets. Copy to config/companies.yml and edit for your search.
+# These are public board slugs (no login). Adjust filters and companies to your lane.
+title_filter:
+  positive: [DevOps, SRE, Site Reliability, Platform, Cloud, Infrastructure, Systems Engineer, Linux, DevSecOps, Reliability]
+  negative: [Intern, Junior, Associate, Director, VP, Sales, Account Executive, Recruiter, Pre-Sales]
+location_filter:
+  positive: [Remote, United States, US, USA, Anywhere]
+  negative: [India, United Kingdom, Canada only, EMEA only, EU only]
+companies:
+  - {name: GitLab, ats: greenhouse, slug: gitlab, enabled: true}
+  - {name: Figma, ats: greenhouse, slug: figma, enabled: true}
+  - {name: Reddit, ats: greenhouse, slug: reddit, enabled: true}
+  - {name: 1Password, ats: ashby, slug: 1password, enabled: true}
+  - {name: Writer, ats: ashby, slug: writer, enabled: true}
+  - {name: Shield AI, ats: lever, slug: shieldai, enabled: true}
