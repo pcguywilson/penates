@@ -20,6 +20,38 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = 8765
 LEARN_PATH = os.path.join(HERE, "data", "learned_answers.json")
+IMPORTED_PATH = os.path.join(HERE, "data", "imported_answers.json")
+
+def imported_lookup(q):
+    """A prior answer imported from an AI-chat export (import_qa.py). Untrusted reference:
+    exact normalized-question match, else a high-overlap near match. Returned as a REVIEW
+    draft, never auto-trusted."""
+    try:
+        store = json.load(open(IMPORTED_PATH, encoding="utf-8"))
+        answers = store.get("answers", {}) or {}
+    except Exception:
+        return None
+    if not answers:
+        return None
+    nq = _norm_q(q)
+    rec = answers.get(nq)
+    if not rec:
+        qt = set(nq.split())
+        if not qt:
+            return None
+        best, bs = None, 0.0
+        for k, r in answers.items():
+            kt = set(k.split())
+            if not kt:
+                continue
+            j = len(qt & kt) / float(len(qt | kt))
+            if j > bs:
+                bs, best = j, r
+        if bs >= 0.72:
+            rec = best
+        else:
+            return None
+    return rec if rec and rec.get("variants") else None
 
 _last_proc = None
 
@@ -143,6 +175,23 @@ def do_answer(payload):
     except Exception as e:
         print("[tier1 skip] " + str(e), flush=True)
 
+    # tier 1.2: imported reference (your prior AI-chat answers) - a REVIEW draft, not trusted.
+    # Skipped on fresh so Regenerate falls through to a newly generated answer.
+    if not fresh:
+        try:
+            rec = imported_lookup(q)
+            if rec:
+                v = (rec.get("variants") or [""])[0]
+                if v:
+                    return {"ok": True, "kind": "answer", "method": "imported",
+                            "genre": "imported", "chars": len(v), "words": len(v.split()),
+                            "gaps": [], "review": True,
+                            "checks": ["imported - review before use"],
+                            "variants": rec.get("variants", []),
+                            "category": rec.get("category", ""), "text": v}
+        except Exception as e:
+            print("[imported skip] " + str(e), flush=True)
+
     # tier 1.5: genre router - project / hypothetical / gap questions go to the genre
     # engine (essay.py), NOT the flat answers.yaml templates. why_company / why_role /
     # technical_experience / definition still flow to the tier-2 templates below.
@@ -263,6 +312,13 @@ class H(BaseHTTPRequestHandler):
                     return self._send(200, f.read(), "text/html; charset=utf-8")
             except Exception as e:
                 return self._send(500, str(e))
+        if parsed.path == "/api/imports/stats":
+            try:
+                st = json.load(open(IMPORTED_PATH, encoding="utf-8"))
+                return self._json(200, {"total": len(st.get("answers", {}) or {}),
+                                        "last_import": st.get("last_import")})
+            except Exception:
+                return self._json(200, {"total": 0, "last_import": None})
         if parsed.path == "/api/stories":
             try:
                 import stories_store
@@ -352,6 +408,26 @@ class H(BaseHTTPRequestHandler):
                 jobs_store.save_config(cfg)
                 return self._json(200, {"ok": True})
             except Exception as e:
+                return self._json(500, {"ok": False, "error": str(e)})
+        if parsed.path == "/api/import":
+            try:
+                payload = json.loads(raw or b"{}")
+                content = payload.get("content") or ""
+                fn = re.sub(r"[^A-Za-z0-9_.-]", "_", (payload.get("filename") or "import.json"))[:80]
+                if not fn.lower().endswith((".json", ".md", ".txt")):
+                    fn += ".json"
+                impdir = os.path.join(HERE, "imports")
+                os.makedirs(impdir, exist_ok=True)
+                path = os.path.join(impdir, fn)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                import import_qa
+                r = import_qa.run(path, use_llm=bool(payload.get("llm")))
+                print("[import] %s -> +%d ~%d skip=%d total=%d" %
+                      (fn, r["added"], r["updated"], r["skipped"], r["total"]), flush=True)
+                return self._json(200, {"ok": True, **r})
+            except Exception as e:
+                print("[error] import: " + str(e), flush=True)
                 return self._json(500, {"ok": False, "error": str(e)})
         if parsed.path == "/api/stories":
             try:

@@ -133,6 +133,22 @@ tr.jobrow:hover{background:var(--panel2)}
     <div class="card"><h3>Search terms</h3><p class="hint">One per line. Used by every source on the next Refresh.</p>
       <textarea id="terms"></textarea>
       <div style="margin-top:10px"><button class="btn" id="saveCfg">Save settings</button> <span class="muted" id="cfgMsg"></span></div></div>
+    <div class="card"><h3>Import answers from AI chats</h3>
+      <p class="hint">Import a Q&amp;A export from ChatGPT or any AI (JSON or Markdown). A match surfaces as a <b>review-flagged draft</b> when the same question appears - never auto-trusted, and you edit before inserting.</p>
+      <input type="file" id="impFile" accept=".json,.md,.txt" style="color:var(--muted)">
+      <div style="margin-top:8px"><button class="btn" id="impBtn">Import</button> <span class="muted" id="impMsg"></span></div>
+      <div class="muted" id="impCount" style="margin-top:6px;font-size:12px"></div>
+      <details style="margin-top:10px"><summary style="cursor:pointer;color:var(--muted);font-size:12px">How to export + convert your chat</summary>
+        <div class="hint" style="margin-top:8px">
+          1. Ask your AI: "generate a JSON of every job-application question and my answer from this chat." If it can, great.<br>
+          2. If not, export the chat (print-to-PDF, the AI's official data export, or a chat-exporter extension), then paste the text back and use the prompt below to convert it.<br>
+          3. Import the resulting file here.
+        </div>
+        <textarea readonly style="width:100%;box-sizing:border-box;min-height:120px;margin-top:8px;background:var(--panel2,#0b1220);color:var(--text,#e5e7eb);border:1px solid var(--line,#334155);border-radius:6px;padding:8px;font:12px/1.4 ui-monospace,Menlo,monospace">Convert my job-application Q&amp;A history into a JSON file. Output ONLY valid JSON in this exact shape and nothing else:
+{"items":[{"question":"the application question","answer":"my answer, cleaned of your commentary","category":"screening_general | technical_screening | behavioral | company_role_interest | cover_letter | resume_ats | other"}]}
+Rules: one object per distinct question. Put ONLY the final answer text in "answer" - no "Option A/B", no "here is...", no markdown headers. If I gave several options for one question, pick the single best. Do not invent facts.</textarea>
+      </details>
+    </div>
   </section>
   <section data-panel="profile" hidden>
     <div class="card"><h3>Profile (read-only for now)</h3>
@@ -212,6 +228,7 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('[data-panel]').forEach(p=>p.hidden=p.dataset.panel!==b.dataset.tab);
   if(b.dataset.tab==='logs') loadLogs();
   if(b.dataset.tab==='settings') loadCfg();
+  if(b.dataset.tab==='settings') loadImports();
   if(b.dataset.tab==='profile') loadProfile();
   if(b.dataset.tab==='stories') loadStories();
 });
@@ -328,6 +345,21 @@ $('saveCfg').onclick=async()=>{ const terms=$('terms').value.split('\n').map(t=>
   const sources={}; document.querySelectorAll('[data-src]').forEach(c=>sources[c.dataset.src]=c.checked);
   const r=await fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({terms,sources})}).then(r=>r.json()).catch(()=>({}));
   $('cfgMsg').textContent=r.ok?'saved':'save failed'; setTimeout(()=>$('cfgMsg').textContent='',2500);
+};
+async function loadImports(){
+  const st=await fetch('/api/imports/stats').then(r=>r.json()).catch(()=>({total:0}));
+  const li=st.last_import;
+  $('impCount').textContent = (st.total||0)+' imported answers'+(li?(' . last: '+li.file+' (+'+li.added+')'):'');
+}
+$('impBtn').onclick=async()=>{
+  const f=$('impFile').files[0];
+  if(!f){$('impMsg').textContent='choose a file first';return;}
+  $('impBtn').disabled=true;$('impMsg').textContent='importing...';
+  const content=await f.text();
+  const r=await fetch('/api/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({content,filename:f.name})}).then(x=>x.json()).catch(e=>({ok:false,error:String(e)}));
+  $('impBtn').disabled=false;
+  $('impMsg').textContent = r.ok ? ('added '+r.added+', updated '+r.updated+', skipped '+r.skipped) : ('error: '+(r.error||'?'));
+  loadImports();
 };
 async function loadProfile(){ const p=await fetch('/profile').then(r=>r.json()).catch(()=>({}));
   $('prof').textContent=p.profile||'(profile.yaml not found)'; $('work').textContent=p.work_history||'(work_history.yaml not found)';
