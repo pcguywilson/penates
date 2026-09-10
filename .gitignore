@@ -53,3 +53,5 @@ env/
 _to_delete/
 stories.yaml
 config/companies.yml
+data/imported_answers.json
+imports/

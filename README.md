@@ -125,6 +125,26 @@ python serve.py                       # http://127.0.0.1:8765/dashboard
 Discovery finds and ranks; the extension fills; you review and submit. Same contract as the
 rest of the tool: nothing leaves the machine, nothing auto-submits.
 
+## Import your answer history
+
+If a year of job-application questions and answers is buried in a ChatGPT (or any AI)
+thread, import them so Penates can reuse them. Export the chat, convert it to a small JSON
+with any AI (the dashboard **Settings** tab has the exact conversion prompt), then:
+
+```
+python import_qa.py my_export.json          # heuristic cleaning
+python import_qa.py my_export.json --llm     # + a local-Ollama pass for the stragglers
+```
+
+Schema: `{"items":[{"question":"...","answer":"...","category":"..."}]}` (Markdown `## Q` /
+answer also works). The importer strips the AI's "here is a great answer / Option A/B"
+wrapper, splits multi-option answers into variants, and writes `data/imported_answers.json`.
+
+These are an **untrusted reference**, not facts. When the same or a very similar question
+appears, the cleaned answer surfaces as a review-flagged draft you edit before inserting;
+approving it (insert) promotes it to your learned store. The gap-guard still governs
+anything generated fresh, and nothing imported is auto-inserted or auto-submitted.
+
 ## What it is not
 
 - Not an auto-apply bot.
@@ -219,6 +239,7 @@ the iCIMS runner page through, still stopping before the last step.
 | `application.yaml` | The current job's company blurb | `.example` only; real is git-ignored |
 | `stories.yaml` | Your story bank (interview-grade experiences the answer engine uses) | `.example` only; real is git-ignored |
 | `config/companies.yml` | ATS boards to scan (Greenhouse/Lever/Ashby slugs) | `.example` only; real is git-ignored |
+| `data/imported_answers.json` | Imported AI-chat answers (reference) | git-ignored (runtime) |
 | `fields.yaml` | Field-label to profile mapping rules | shipped |
 | `config.json` | Dashboard search terms + source toggles | `.example` only; runtime is git-ignored |
 | `answers.yaml` | Intent templates for essays | shipped |
