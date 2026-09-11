@@ -193,22 +193,23 @@ def do_answer(payload):
             print("[imported skip] " + str(e), flush=True)
 
     # tier 1.5: genre router - project / hypothetical / gap questions go to the genre
-    # engine (essay.py), NOT the flat answers.yaml templates. why_company / why_role /
-    # technical_experience / definition still flow to the tier-2 templates below.
+    # engine (essay.py), NOT the flat answers.yaml templates. why_company / why_role also
+    # route here so they name the real company and invent no company facts. technical_experience
+    # / definition still flow to the tier-2 templates below.
     try:
         import essay as _essay
         _c = _essay.parse_constraints(q, limit)
         _genre = _essay.classify_genre(q, _c)
         _gaps = _essay.detect_gaps(q)
         _is_gap = bool(_gaps["hard"] or _gaps["limited"])
-        if _genre in ("owned_project", "hypothetical", "behavioral", "short_text") or _is_gap:
+        if _genre in ("owned_project", "hypothetical", "behavioral", "short_text", "why_company", "why_role") or _is_gap:
             if not fresh:
                 _la = learned_lookup(q)
                 if _la:
                     return _shape({"kind": "answer", "method": "learned", "chars": len(_la),
                                    "gaps": [], "text": _la})
             out = _essay.answer_essay(q, limit=limit, company=payload.get("company"),
-                                      url=payload.get("url"))
+                                      url=payload.get("url"), page_context=payload.get("page_context"))
             out.setdefault("ok", out.get("kind") in ("answer", "field"))
             return out
     except Exception as e:
@@ -216,7 +217,7 @@ def do_answer(payload):
 
     # tier 2: intent template
     try:
-        r = _apply.answer(question=q, max_chars=limit)
+        r = _apply.answer(question=q, max_chars=limit, cli_company=(payload.get("company") or None))
         if r.get("kind") == "answer":
             return _shape(r)
     except Exception as e:
@@ -236,7 +237,7 @@ def do_answer(payload):
     try:
         import essay as _essay
         out = _essay.answer_essay(q, limit=limit, company=payload.get("company"),
-                                  url=payload.get("url"))
+                                  url=payload.get("url"), page_context=payload.get("page_context"))
         out.setdefault("ok", out.get("kind") in ("answer", "field"))
         return out
     except Exception as e:
@@ -312,6 +313,18 @@ class H(BaseHTTPRequestHandler):
                     return self._send(200, f.read(), "text/html; charset=utf-8")
             except Exception as e:
                 return self._send(500, str(e))
+        if parsed.path == "/api/queue-lite":
+            try:
+                import jobs_store
+                out = []
+                for r in jobs_store.load()["queue"]:
+                    out.append({"id": r.get("id"), "company": r.get("company", ""),
+                                "role": r.get("role", ""), "url": r.get("apply_url") or r.get("url", ""),
+                                "has_jd": len(r.get("desc") or "") > 200})
+                out.sort(key=lambda x: (not x["has_jd"], x["company"].lower()))
+                return self._json(200, {"count": len(out), "jobs": out})
+            except Exception as e:
+                return self._json(500, {"error": str(e)})
         if parsed.path == "/api/imports":
             try:
                 st = json.load(open(IMPORTED_PATH, encoding="utf-8"))
@@ -449,6 +462,45 @@ class H(BaseHTTPRequestHandler):
                 store.get("answers", {}).pop((payload.get("key") or "").strip(), None)
                 import_qa.save_store(store)
                 return self._json(200, {"ok": True, "count": len(store.get("answers", {}))})
+            except Exception as e:
+                return self._json(500, {"ok": False, "error": str(e)})
+        if parsed.path == "/api/tailor":
+            try:
+                payload = json.loads(raw or b"{}")
+                import tailor as _t
+                jd = payload.get("jd") or ""
+                company = payload.get("company") or ""
+                role = payload.get("role") or ""
+                if not jd and payload.get("job"):
+                    jd, row = _t._load_jd_from_job(payload["job"])
+                    if row:
+                        company = company or row.get("company", "")
+                        role = role or row.get("role", "")
+                if not jd:
+                    return self._json(400, {"ok": False, "error": "no job description (paste one or pick a job with a JD)"})
+                t = _t.tailor(jd)
+                return self._json(200, {"ok": True, "coverage": t["coverage"],
+                                        "html": _t.resume_html(t), "markdown": _t.to_markdown(t),
+                                        "company": company, "role": role})
+            except Exception as e:
+                print("[error] tailor: " + str(e), flush=True)
+                return self._json(500, {"ok": False, "error": str(e)})
+        if parsed.path == "/api/cover":
+            try:
+                payload = json.loads(raw or b"{}")
+                import tailor as _t
+                jd = payload.get("jd") or ""
+                company = payload.get("company") or ""
+                role = payload.get("role") or ""
+                if not jd and payload.get("job"):
+                    jd, row = _t._load_jd_from_job(payload["job"])
+                    if row:
+                        company = company or row.get("company", "")
+                        role = role or row.get("role", "")
+                if not jd:
+                    return self._json(400, {"ok": False, "error": "no job description"})
+                out = _t.cover_letter(jd, company=company, role=role)
+                return self._json(200, {"ok": True, **out})
             except Exception as e:
                 return self._json(500, {"ok": False, "error": str(e)})
         if parsed.path == "/api/import":

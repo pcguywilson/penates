@@ -180,9 +180,35 @@
   }
 
   function companyGuess() {
+    // The ATS URL slug is the most reliable company signal (page titles are noisy).
+    const h = location.hostname, path = location.pathname;
+    let m = null;
+    if (/ashbyhq\.com$/i.test(h)) m = path.match(/^\/([^\/]+)/);
+    else if (/greenhouse\.io$/i.test(h)) m = path.match(/^\/(?:embed\/job_app\?for=)?([^\/?]+)/);
+    else if (/lever\.co$/i.test(h)) m = path.match(/^\/([^\/]+)/);
+    else if (/myworkdayjobs\.com$/i.test(h)) m = h.match(/^([^.]+)\./);
+    if (m && m[1] && !/^(embed|www|jobs|job-boards|boards|apply)$/i.test(m[1])) {
+      let sname = decodeURIComponent(m[1]).replace(/[-_]+/g, " ").trim();
+      if (sname && sname.length <= 40) {
+        if (sname === sname.toLowerCase()) sname = sname.replace(/\b\w/g, (c) => c.toUpperCase());
+        return sname;
+      }
+    }
     const og = document.querySelector('meta[property="og:site_name"], meta[property="og:title"]');
     const t = clean((og && og.content) || document.title);
-    return t.split(/[|\-–—·:]/)[0].trim().slice(0, 80);
+    return t.split(/[|\-\u2013\u2014\u00b7:]/)[0].trim().slice(0, 80);
+  }
+
+  // A capped snapshot of the posting text so the engine can ground "why this company"
+  // answers in REAL page facts instead of the model's guesses. Prefers the main content.
+  function pageContext() {
+    try {
+      const root = document.querySelector('main, [role="main"], article') || document.body;
+      let txt = (root && root.innerText) ? root.innerText : "";
+      const md = document.querySelector('meta[name="description"], meta[property="og:description"]');
+      txt = clean(document.title + ". " + ((md && md.content) || "") + ". " + txt);
+      return txt.slice(0, 4000);
+    } catch (_) { return ""; }
   }
 
   function roleGuess() {
@@ -208,7 +234,7 @@
 
   // ---- server call (via background: dodges CORS / mixed-content / private-network) ----
   async function askEngine(question, limit, fresh) {
-    const payload = { question, company: companyGuess(), url: location.href, limit: limit || null, fresh: !!fresh };
+    const payload = { question, company: companyGuess(), url: location.href, page_context: pageContext(), limit: limit || null, fresh: !!fresh };
     try {
       const resp = await chrome.runtime.sendMessage({ type: "FETCH_ANSWER", payload });
       if (resp && resp.ok) return resp.data || null;
@@ -301,6 +327,19 @@
 
   const CONSENT_RE = /consent|i agree|i acknowledge|terms|certif|i have read|authorize|electronic signature|e-?sign|privacy/i;
 
+  // Fields the bulk fill must NOT auto-answer. Two kinds:
+  //  - CONDITIONAL: "If you responded 'yes'/'other'..." follow-ups. The controlling Yes/No is
+  //    usually unset, and answering them blind produces wrong-context matches (a "describe the
+  //    relationship" box pulled an unrelated AI-tools answer) and fabricated specifics (an
+  //    invented "how I found this posting").
+  //  - LEAVE_BLANK: open optional prompts (accommodations, "anything else", additional info).
+  //    These have no grounded answer; matching leaks the wrong value (race "White" landed in an
+  //    accommodations box that merely said "other than your ethnicity") or dumps a random story.
+  // Both are left for the human; the per-field popup still drafts one on demand.
+  const CONDITIONAL_RE = /\bif you (responded|answered|selected|indicated|checked|chose)\b|\bif (yes|no|other|so|applicable|not|the above|you did)\b/i;
+  const LEAVE_BLANK_RE = /accommodat|other than your|is there anything|anything (else|you.?d like|we should know)|additional (information|comments|details)|feel free to (add|share|include)|anything you would like to (share|add|tell)/i;
+  function skipQuestion(q) { return !!q && (CONDITIONAL_RE.test(q) || LEAVE_BLANK_RE.test(q)); }
+
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   function isCombobox(el) {
@@ -376,6 +415,7 @@
         const gkey = (el.name || q || "").trim();
         if (!q) { continue; } // no question resolved: skip silently (avoid random toggles)
         if (gkey && groupsDone.has(gkey)) continue;
+        if (CONDITIONAL_RE.test(q)) { rows.push([q.slice(0, 60), "skip", "conditional -> you"]); skipped++; if (gkey) groupsDone.add(gkey); continue; }
 
         // required consent / single acknowledgement checkbox -> tick it
         const optlab = optionLabel(el);
@@ -412,6 +452,7 @@
       if (tag === "SELECT") {
         const q = questionFor(el);
         if (!q) { continue; }
+        if (skipQuestion(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; continue; }
         if (el.value && el.selectedIndex > 0 && clean(el.options[el.selectedIndex].text)) { continue; } // already set
         const data = await askEngine(q, 40);
         if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", "no value -> you"]); skipped++; continue; }
@@ -425,11 +466,15 @@
       if (tag === "TEXTAREA" || (tag === "INPUT" && /^(text|email|tel|url|search|number|)$/i.test(typ)) || el.isContentEditable) {
         const q = questionFor(el);
         if (!q) { continue; }                        // unlabeled (site search etc.) -> skip
+        if (skipQuestion(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; continue; }
         const cur = (el.value || el.textContent || "").trim();
         if (cur) { continue; }                        // don't clobber prefilled
         const limit = el.maxLength && el.maxLength > 0 ? el.maxLength : null;
         const data = await askEngine(q, limit);
         if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", data && data.__error ? "engine: " + data.__error : "no answer -> you"]); skipped++; continue; }
+        // a bare structured value (tier-1 field match) belongs in an input/select, never a prose
+        // box: this is where a demographic token leaks into a free-text field. Leave it for you.
+        if (tag === "TEXTAREA" && data.method === "field") { rows.push([q.slice(0, 60), "skip", "structured value not for a text box -> you"]); skipped++; continue; }
         const isCombo = isCombobox(el);
         const singleLine = tag !== "TEXTAREA" && !el.isContentEditable;
         const isEssay = data.method && data.method !== "field" && data.method !== "learned";
@@ -585,6 +630,8 @@
     const chk = data.checks && data.checks.length;
     const parts = [];
     if (data.genre) parts.push(data.genre);
+    if (data.grounding && data.grounding !== "none") parts.push("grounded: " + data.grounding);
+    else if (data.grounding === "none" && (data.genre === "why_company" || data.genre === "why_role")) parts.push("no company facts");
     if (data.story) parts.push("story: " + data.story);
     parts.push((data.words ? data.words + "w" : ((data.chars || (data.text || "").length) + " chars")));
     if (chk) parts.push("review: " + data.checks.join(", "));

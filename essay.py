@@ -24,6 +24,7 @@ a fabricated project.
 """
 import os, re, json, hashlib
 import apply as _a          # reuse load(), ollama(), ollama_up(), enforce_length(), gap helpers
+import job_context as _jc   # source chain + fact extraction for why-company grounding
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -73,7 +74,7 @@ def parse_constraints(question, limit=None):
 
 # ---------------------------------------------------------------- genre
 _GENRE_RULES = [
-    ("why_company",  r"why (do you want|are you interested|us\b|here\b|this (company|organization|team))|what (excites|interests|draws|appeals to) you|why (would you like )?work(ing)? (here|with us|for us)|interested in (working|joining)"),
+    ("why_company",  r"why (do you want|are you interested|us\b|here\b|this (company|organization|team))|what (excites|interests|draws|appeals to) you|what makes you (excited|want)|excited to (work|join|be part)|want to work (at|for|here)|why (would you like )?work(ing)? (here|with us|for us)|interested in (working|joining)|^\s*why \S+\s*\??\s*$"),
     ("why_role",     r"why this (position|role|job)|why (are you interested in )?(this )?(devops|sre|cloud|platform|the) (role|position)|why do you want this (role|position|job)"),
     ("hypothetical", r"what would you build|if you (were|had|could|got)|imagine (you|that)|suppose you|given (a|the).{0,20}(month|week|opportunity|chance)|spend a (month|week|day)|how would you (design|build|approach|architect)|greenfield|from scratch, what|blue ?sky"),
     ("owned_project",r"describe (a|the|your).{0,40}(project|time|situation|example)|tell (us|me) about (a|the|your)|most (complex|challenging|difficult|impactful)|(a|one) (project|time|situation) (you|where you)|walk (us|me) through|you (personally )?(owned|led|built|architected)|give (us|me) an example|share an example"),
@@ -200,7 +201,7 @@ def _star_block(st):
             % (s.get("situation", ""), s.get("task", ""), s.get("action", ""),
                s.get("result", ""), ", ".join(st.get("tools", []))))
 
-def build_prompt(genre, question, c, story, gaps, company):
+def build_prompt(genre, question, c, story, gaps, company, page_context=None, facts=None):
     limit = c.get("max_chars") or 900
     length_line = ""
     if c.get("min_words") or c.get("max_words"):
@@ -236,15 +237,37 @@ def build_prompt(genre, question, c, story, gaps, company):
 
     if genre in ("why_company", "why_role"):
         blurb = (company or "the company")
-        sysp = base + (" Give a concrete reason tied to the role and to your real experience. "
-                       "Do NOT invent product names, customers, or company facts you were not given.")
         stack = ""
         try:
             stack = _a._real_stack(_a.load("profile.yaml"))
         except Exception:
             pass
-        user = ("QUESTION:\n%s\n\nCompany: %s\nYour real experience to connect to: %s\n\nAnswer:"
-                % (question, blurb, stack))
+        if facts:
+            # extract-then-write: the model gets 1-3 VERIFIED clauses from the posting and
+            # must open with one. A small model ignores "use a page fact" when handed the
+            # raw JD, so we hand it only the facts and enforce the opening in code.
+            factlist = "\n".join("- " + f for f in facts)
+            sysp = base + (" You are given VERIFIED FACTS about this company/role, taken from the job "
+                           "posting. Your FIRST sentence must lead with ONE of those facts, copied closely "
+                           "(quote or near-verbatim), and make it the reason this role fits. Then ONE or "
+                           "TWO sentences connecting it to the candidate's real experience below. Do NOT "
+                           "add any company product, customer, metric, award, or claim that is not in the "
+                           "facts. Refer to the company by name.")
+            user = ("QUESTION:\n%s\n\nCompany: %s\n\nVERIFIED FACTS (open with one, copy it closely; add "
+                    "no company fact beyond these):\n%s\n\nThe candidate's real experience: %s\n\nAnswer:"
+                    % (question, blurb, factlist, stack))
+        else:
+            # no verified job text -> honest, obviously non-researched. Role title is a role
+            # fact and may be used; what the company sells may not be invented.
+            sysp = base + (" You were given NO verified facts about the company, so you must not state, "
+                           "describe, or guess anything about what it does, sells, or builds, or about its "
+                           "products, features, technology, or reputation. Refer to the company ONLY by "
+                           "name. Ground every sentence in the candidate's real experience and the role "
+                           "title. Never write 'their product' or any capability of the company. If you "
+                           "cannot say something specific and true, keep it about the candidate.")
+            user = ("QUESTION:\n%s\n\nCompany name (use as a name only, invent no facts about it): %s\n"
+                    "The candidate's real experience to ground every sentence in: %s\n\nAnswer:"
+                    % (question, blurb, stack))
         return sysp, user
 
     if genre == "definition":
@@ -268,11 +291,15 @@ _DEF_OPENER = re.compile(r"^\s*(to me,|.{0,30}\b(devops|sre|cloud|automation)\b[
 def _wordcount(t): return len(re.findall(r"\S+", t or ""))
 def _sentcount(t): return len([x for x in re.split(r"(?<=[.!?])\s+", (t or "").strip()) if x.strip()])
 
-def validate(text, genre, c, gaps):
+def validate(text, genre, c, gaps, facts=None):
     fails = []
     t = (text or "").strip()
     if len(t) < 15:
         return ["empty"]
+    # why-company grounding: if we handed the model verified facts, the draft must actually
+    # use one (shares a distinctive token). Otherwise it went generic and ignored the posting.
+    if genre in ("why_company", "why_role") and facts and not _jc.overlaps(t, facts):
+        fails.append("ignored_jd")
     if genre in ("owned_project", "technical_experience", "behavioral", "hypothetical", "why_company", "why_role"):
         if _BANNED_PREFIX.match(t):
             fails.append("banned_opening")
@@ -323,7 +350,7 @@ def _honest_gap(question, gaps, story, c):
     return _a.enforce_length(ans, {}, limit, False).strip()
 
 # ---------------------------------------------------------------- main entry
-def answer_essay(question, limit=None, company=None, url=None, model=None, want_meta=True):
+def answer_essay(question, limit=None, company=None, url=None, model=None, want_meta=True, page_context=None):
     q = (question or "").strip()
     if not q:
         return {"ok": False, "kind": "pause", "method": "essay", "chars": 0, "gaps": [],
@@ -374,7 +401,21 @@ def answer_essay(question, limit=None, company=None, url=None, model=None, want_
         return {"ok": False, "kind": "pause", "method": "essay", "genre": genre, "chars": 0,
                 "gaps": [], "story": None, "text": "[PAUSE] Ollama offline and no story to fall back on."}
 
-    sysp, user = build_prompt(genre, q, c, story, gaps, company)
+    # why-company grounding: resolve REAL text about the exact job (stored desc -> public
+    # posting -> scored page snapshot), then extract 1-3 verified facts for the writer to
+    # open with. No facts -> honest candidate-only. Never invents company facts.
+    facts, grounding = [], "none"
+    if genre in ("why_company", "why_role"):
+        try:
+            src_text, grounding = _jc.resolve_job_text(url, page_context)
+            if src_text:
+                facts = _jc.extract_facts(src_text, company)
+            if not facts:
+                grounding = "none"
+        except Exception:
+            facts, grounding = [], "none"
+
+    sysp, user = build_prompt(genre, q, c, story, gaps, company, page_context, facts)
     model = model or _a.ESSAY_MODEL
 
     def _gen(extra=""):
@@ -382,19 +423,23 @@ def answer_essay(question, limit=None, company=None, url=None, model=None, want_
         return _a.enforce_length(out, {"max_sentences": c.get("max_sent")}, c.get("max_chars"), False).strip()
 
     text = _gen()
-    fails = validate(text, genre, c, gaps)
+    fails = validate(text, genre, c, gaps, facts)
     if fails:
         nudge = ("\n\nYour previous draft failed these checks: %s. Fix them. "
                  "Answer the question directly in the first sentence." % ", ".join(fails))
+        if "ignored_jd" in fails and facts:
+            nudge += (" You ignored the verified facts. Your FIRST sentence must start with one of "
+                      "these, copied closely: " + " | ".join(facts))
         text2 = _gen(nudge)
-        f2 = validate(text2, genre, c, gaps)
+        f2 = validate(text2, genre, c, gaps, facts)
         if len(f2) <= len(fails):
             text, fails = text2, f2
 
     review = bool(fails)
     return {"ok": True, "kind": "answer",
             "method": ("review:" if review else "essay:") + genre,
-            "genre": genre, "story": (story or {}).get("id") if story else None,
+            "genre": genre, "grounding": grounding,
+            "story": ((story or {}).get("id") if (story and genre in ("owned_project", "technical_experience", "behavioral")) else None),
             "chars": len(text), "words": _wordcount(text), "gaps": [],
             "review": review, "checks": fails, "text": text}
 
