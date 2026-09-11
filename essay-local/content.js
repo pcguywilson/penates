@@ -233,15 +233,20 @@
   }
 
   // ---- server call (via background: dodges CORS / mixed-content / private-network) ----
-  async function askEngine(question, limit, fresh) {
+  async function askEngine(question, limit, fresh, timeoutMs) {
     const payload = { question, company: companyGuess(), url: location.href, page_context: pageContext(), limit: limit || null, fresh: !!fresh };
-    try {
-      const resp = await chrome.runtime.sendMessage({ type: "FETCH_ANSWER", payload });
-      if (resp && resp.ok) return resp.data || null;
-      return { __error: (resp && resp.error) || "serve.py unreachable on :8765" };
-    } catch (err) {
-      return { __error: String(err) };
-    }
+    const call = (async () => {
+      try {
+        const resp = await chrome.runtime.sendMessage({ type: "FETCH_ANSWER", payload });
+        if (resp && resp.ok) return resp.data || null;
+        return { __error: (resp && resp.error) || "serve.py unreachable on :8765" };
+      } catch (err) {
+        return { __error: String(err) };
+      }
+    })();
+    // A single field must never hang the whole fill. Cap it and move on.
+    if (!timeoutMs) return call;
+    return Promise.race([call, sleep(timeoutMs).then(() => ({ __error: "timeout (" + Math.round(timeoutMs / 1000) + "s) -> you" }))]);
   }
 
   // ============================ WHOLE-PAGE FILL ============================
@@ -405,9 +410,14 @@
     const rows = [];
     const groupsDone = new Set();
     let filled = 0, review = 0, skipped = 0;
+    const t0 = Date.now();
+    const elapsed = () => ((Date.now() - t0) / 1000).toFixed(0);
+    let seen = 0;
 
     for (const el of fields) {
       const tag = el.tagName, typ = (el.type || "").toLowerCase();
+      seen++;
+      setReport("Filling " + seen + "/" + fields.length + " ... " + elapsed() + "s elapsed. NOTHING submitted.", rows);
 
       // ---- radio / checkbox: resolve on the GROUP question, click matching option ----
       if (tag === "INPUT" && (typ === "radio" || typ === "checkbox")) {
@@ -427,7 +437,7 @@
           continue;
         }
 
-        const data = await askEngine(q, 25);
+        const data = await askEngine(q, 25, false, 40000);
         if (!data || data.__error) { rows.push([q.slice(0, 60), "skip", data && data.__error ? "engine: " + data.__error : "no answer"]); skipped++; continue; }
         const ans = (data.text || "").trim();
         if (!ans) { rows.push([q.slice(0, 60), "skip", "no grounded answer -> you"]); skipped++; if (gkey) groupsDone.add(gkey); continue; }
@@ -454,7 +464,7 @@
         if (!q) { continue; }
         if (skipQuestion(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; continue; }
         if (el.value && el.selectedIndex > 0 && clean(el.options[el.selectedIndex].text)) { continue; } // already set
-        const data = await askEngine(q, 40);
+        const data = await askEngine(q, 40, false, 40000);
         if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", "no value -> you"]); skipped++; continue; }
         const ok = fillSelect(el, data.text);
         rows.push([q.slice(0, 60), ok ? "filled" : "skip", ok ? data.text : "'" + data.text + "' not an option"]);
@@ -470,7 +480,7 @@
         const cur = (el.value || el.textContent || "").trim();
         if (cur) { continue; }                        // don't clobber prefilled
         const limit = el.maxLength && el.maxLength > 0 ? el.maxLength : null;
-        const data = await askEngine(q, limit);
+        const data = await askEngine(q, limit, false, 40000);
         if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", data && data.__error ? "engine: " + data.__error : "no answer -> you"]); skipped++; continue; }
         // a bare structured value (tier-1 field match) belongs in an input/select, never a prose
         // box: this is where a demographic token leaks into a free-text field. Leave it for you.
@@ -498,7 +508,7 @@
     }
 
     fillBusy = false;
-    const summary = "Filled " + filled + " . " + review + " to review . " + skipped + " left for you . NOTHING submitted.";
+    const summary = "Filled " + filled + " . " + review + " to review . " + skipped + " left for you . " + elapsed() + "s total . NOTHING submitted.";
     setReport(summary, rows);
     try {
       chrome.runtime.sendMessage({ type: "FETCH_FILLLOG", payload: {

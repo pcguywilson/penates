@@ -54,25 +54,35 @@ def _match_job(rows, ats, board, jid):
     return None
 
 
-def fetch_public_posting(url, timeout=5):
+def fetch_public_posting(url, timeout=6):
     """Fetch the ONE public posting named in the URL and return its plain-text description.
-    Reuses the proven sources/ adapters (same endpoints scan_ats uses) rather than a second
-    HTTP stack. Best-effort: any failure returns "". Scoped to a single parseable job."""
+    Same public endpoints scan_ats uses, but a single job and a hard timeout so the fill never
+    stalls on it. Best-effort: any failure returns "". Greenhouse/Lever have per-job endpoints;
+    Ashby needs the board, filtered by id."""
+    from sources import base
     ats, board, jid = parse_ats_url(url)
     if not ats:
         return ""
     try:
+        if ats == "greenhouse":
+            d = base.http_json(
+                "https://boards-api.greenhouse.io/v1/boards/%s/jobs/%s?content=true" % (board, jid),
+                timeout=timeout)
+            return base.strip_html(d.get("content") or "")
+        if ats == "lever":
+            d = base.http_json(
+                "https://api.lever.co/v0/postings/%s/%s?mode=json" % (board, jid), timeout=timeout)
+            if isinstance(d, list):
+                d = d[0] if d else {}
+            return base.strip_html(d.get("descriptionPlain") or d.get("description") or "")
         if ats == "ashby":
-            from sources import ashby as mod
-        elif ats == "greenhouse":
-            from sources import greenhouse as mod
-        elif ats == "lever":
-            from sources import lever as mod
-        else:
-            return ""
-        rows = mod.fetch(board)          # adapter already strips HTML into desc
-        r = _match_job(rows, ats, board, jid)
-        return (r.get("desc") or "") if r else ""
+            d = base.http_json(
+                "https://api.ashbyhq.com/posting-api/job-board/%s?includeCompensation=true" % board,
+                timeout=timeout)
+            for j in d.get("jobs", []) or []:
+                if str(j.get("id")) == str(jid):
+                    return base.strip_html(j.get("descriptionPlain") or j.get("descriptionHtml") or "")
+        return ""
     except Exception:
         return ""
 
@@ -100,9 +110,26 @@ def score_page_context(text):
     return ""
 
 
+_JD_CACHE = {}   # url -> (text, source); one network fetch per posting per server run
+
 def resolve_job_text(url, page_context=None):
     """The source chain. Returns (text, source_label) where source_label is one of
     'jobs.json', 'fetch:<ats>', 'page', or ''."""
+    key = (url or "").split("#")[0]
+    if key in _JD_CACHE:
+        text, src = _JD_CACHE[key]
+        if src == "page":      # page snapshot can differ per call; re-score it, keep cached fetch
+            d = score_page_context(page_context)
+            if d:
+                return d, "page"
+        elif text:
+            return text, src
+    out = _resolve_job_text(url, page_context)
+    if out[1] in ("jobs.json", "fetch:ashby", "fetch:greenhouse", "fetch:lever"):
+        _JD_CACHE[key] = out    # only cache the durable network/db sources
+    return out
+
+def _resolve_job_text(url, page_context=None):
     # 1. already-stored clean desc (free, no network)
     try:
         import jobs_store
