@@ -142,8 +142,27 @@ def _shape(r):
         "text": r.get("text", ""),
     }
 
+# Server-side field guards - the single chokepoint every field passes through, so they hold
+# even if the extension is stale. Order matters: SKIP beats the yaml matcher beats the essay.
+#  - _SKIP_CONDITIONAL: "If you responded 'yes'/'other'..." follow-ups. The controlling Yes/No
+#    is usually unset, and answering blind pulls a wrong-context match or invents specifics.
+#  - _SKIP_LEAVEBLANK: open optional prompts (accommodations, "anything else", additional info).
+#    No grounded answer exists; matching here leaked race "White" into an accommodations box that
+#    merely said "other than your ethnicity".
+#  - _COI_NO: a personal-relationship / conflict-of-interest Yes/No -> deterministic No.
+_SKIP_CONDITIONAL = re.compile(
+    r"\bif you (responded|answered|selected|indicated|checked|chose)\b|"
+    r"\bif (yes|no|other|so|applicable|not|the above|you did)\b", re.I)
+_SKIP_LEAVEBLANK = re.compile(
+    r"accommodat|other than your|is there anything|anything (else|you.?d like|we should know)|"
+    r"additional (information|comments|details)|feel free to (add|share|include)", re.I)
+_COI_NO = re.compile(
+    r"(close personal|personal relationship|family member|domestic partner|friend)"
+    r"[^.?]{0,80}(working|employed|currently at|conflict)|conflict of interest", re.I)
+
 def do_answer(payload):
     """Tiered. Imported lazily so a broken import can't stop the server.
+      0. field guards               -> skip conditional/optional; deterministic COI = No
       1. structured/identity/salary  -> match_field (fields.yaml -> profile.yaml)
       2. intent template             -> answer(question=...)  (why_company etc)
       2.5 learned                    -> your vetted past answer for this question
@@ -160,6 +179,14 @@ def do_answer(payload):
     except Exception:
         limit = None
     fresh = bool(payload.get("fresh"))
+
+    # tier 0: field guards (beat every other tier)
+    if _SKIP_CONDITIONAL.search(q) or _SKIP_LEAVEBLANK.search(q):
+        return {"ok": False, "kind": "pause", "method": "leave-blank",
+                "chars": 0, "gaps": [], "text": ""}
+    if _COI_NO.search(q):
+        return {"ok": True, "kind": "field", "method": "field",
+                "chars": 2, "gaps": [], "text": "No"}
 
     # tier 1: deterministic structured field (salary, country, links, yes/no...)
     try:
