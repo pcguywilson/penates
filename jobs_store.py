@@ -96,6 +96,32 @@ def find_by_url(queue, url):
             return r
     return None
 
+def desc_for(url):
+    """Return a stored clean job description for this URL, or "". The free, no-network
+    priority-1 source for grounding "why company" answers. Matches on normalized url,
+    apply_url, or the job id embedded in the URL (the apply page often adds /application
+    or query params the stored url lacks)."""
+    if not url:
+        return ""
+    q = load()["queue"]
+    n = _norm_url(url)
+    for r in q:
+        if _norm_url(r.get("url")) == n or _norm_url(r.get("apply_url")) == n:
+            return r.get("desc") or ""
+    # fall back to the ats:board:jobid key parsed from the URL
+    try:
+        import job_context
+        ats, board, jid = job_context.parse_ats_url(url)
+        if ats:
+            aid = "%s:%s:%s" % (ats, board, jid)
+            for r in q:
+                if r.get("ats_id") == aid or (jid and jid in (r.get("url") or "")):
+                    return r.get("desc") or ""
+    except Exception:
+        pass
+    return ""
+
+
 def upsert_applied(url, company=None, role=None, ats=None, when=None):
     """Mark a job applied (create the row if it's new). Returns the row."""
     when = when or datetime.date.today().isoformat()
