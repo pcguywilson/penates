@@ -235,6 +235,11 @@ def do_answer(payload):
                 if _la:
                     return _shape({"kind": "answer", "method": "learned", "chars": len(_la),
                                    "gaps": [], "text": _la})
+            # bulk fill: don't spend 30-60s per field generating an essay inline. Leave it for
+            # the per-field popup (reviewed anyway). Gap disclosures are deterministic and fast.
+            if payload.get("bulk") and not _is_gap:
+                return {"ok": False, "kind": "pause", "method": "essay-skip",
+                        "genre": _genre, "chars": 0, "gaps": [], "text": ""}
             out = _essay.answer_essay(q, limit=limit, company=payload.get("company"),
                                       url=payload.get("url"), page_context=payload.get("page_context"))
             out.setdefault("ok", out.get("kind") in ("answer", "field"))
@@ -244,7 +249,8 @@ def do_answer(payload):
 
     # tier 2: intent template
     try:
-        r = _apply.answer(question=q, max_chars=limit, cli_company=(payload.get("company") or None))
+        r = _apply.answer(question=q, max_chars=limit, cli_company=(payload.get("company") or None),
+                          url=payload.get("url"), page_context=payload.get("page_context"))
         if r.get("kind") == "answer":
             return _shape(r)
     except Exception as e:

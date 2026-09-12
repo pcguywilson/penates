@@ -12,6 +12,7 @@
 (() => {
   if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
   window.__penatesInit = true;
+  const PENATES_BUILD = "build 10";   // shown in the report header; if you don't see it after a reload, the extension didn't update
   const IS_TOP = window.top === window;
   let currentEl = null, currentQuestion = "", lastEditable = null, chip = null;
 
@@ -179,6 +180,21 @@
     return "";
   }
 
+  // For a radio/checkbox OPTION, questionFor() returns the option's own label (e.g. ">100"),
+  // not the group's question. That sends the wrong text to the engine. Climb to the container
+  // that holds the group's question heading and return that instead.
+  function groupQuestion(el) {
+    let p = el;
+    for (let i = 0; i < 9 && p; i++) {
+      p = p.parentElement; if (!p) break;
+      const t = clean(p.innerText || "");
+      if (t.length > 15 && /\?|do you|are you|have you|which|what|size of|authoriz|identify|select|how (did|do|would)|please (select|describe)|describe/i.test(t)) {
+        return t.replace(/\s*(Yes\s*No|No\s*Yes)\s*$/i, "").slice(0, 240);
+      }
+    }
+    return questionFor(el);   // fallback
+  }
+
   function companyGuess() {
     // The ATS URL slug is the most reliable company signal (page titles are noisy).
     const h = location.hostname, path = location.pathname;
@@ -233,8 +249,8 @@
   }
 
   // ---- server call (via background: dodges CORS / mixed-content / private-network) ----
-  async function askEngine(question, limit, fresh, timeoutMs) {
-    const payload = { question, company: companyGuess(), url: location.href, page_context: pageContext(), limit: limit || null, fresh: !!fresh };
+  async function askEngine(question, limit, fresh, timeoutMs, bulk) {
+    const payload = { question, company: companyGuess(), url: location.href, page_context: pageContext(), limit: limit || null, fresh: !!fresh, bulk: !!bulk };
     const call = (async () => {
       try {
         const resp = await chrome.runtime.sendMessage({ type: "FETCH_ANSWER", payload });
@@ -372,26 +388,53 @@
     }
   }
   async function fillCombobox(el, value) {
-    const want = norm(value);
-    const ctrl = (el.closest && el.closest('[class*="control"]')) || el.parentElement;
-    // react-select v5 opens on mousedown (not click); open, then read rendered options
-    for (const t of ["pointerdown", "mousedown", "mouseup"]) {
-      try { (ctrl || el).dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })); } catch (_) {}
-    }
+    // Ashby (and most react-select) comboboxes: open with ArrowDown, type to filter, then
+    // click the option. Two things the old version missed and this handles: async typeahead
+    // menus that show "Loading..." first (poll for real options), and picking the RIGHT
+    // option among near-duplicates (token overlap, not first-substring - so "St. Albans,
+    // West Virginia" beats the UK / Vermont "St Albans").
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    const query = (String(value).split(",")[0] || value).trim();
+    const nv = norm(value);
+    const vtokens = nv.split(" ").filter((w) => w.length >= 2);
     el.focus();
-    await sleep(300);
-    let hit = matchOption(want);
-    if (!hit) {
-      // long lists (e.g. Country): type to filter, then re-scan
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-      try { setter.call(el, value); el.dispatchEvent(new InputEvent("input", { bubbles: true, data: value, inputType: "insertText" })); } catch (_) {}
-      await sleep(550);
-      hit = matchOption(want);
+    try { el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); } catch (_) {}
+    await sleep(120);
+    try { setter.call(el, query); el.dispatchEvent(new InputEvent("input", { bubbles: true, data: query, inputType: "insertText" })); } catch (_) {}
+    let opts = [];
+    for (let i = 0; i < 16; i++) {
+      await sleep(250);
+      const menu = document.getElementById(el.getAttribute("aria-controls") || "__none__") || document.querySelector('[role="listbox"]');
+      opts = menu ? [...menu.querySelectorAll('[role="option"]')] : [];
+      if (!opts.length) { try { opts = [...document.querySelectorAll('[role="option"]')].filter((o) => o.offsetParent); } catch (_) {} }
+      if (opts.length) break;
     }
-    if (hit) { fireMouse(hit); await sleep(240); if (comboCommitted(el)) return true; }
-    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    await sleep(160);
-    return comboCommitted(el);
+    if (!opts.length) return false;
+    // pick the option sharing the most tokens with the wanted value (exact full match wins)
+    let best = null, bestScore = -1;
+    for (const o of opts) {
+      const ot = norm(o.textContent);
+      let score = 0;
+      for (const t of vtokens) if ((" " + ot + " ").includes(" " + t + " ")) score++;
+      if (ot === nv) score += 100;
+      if (score > bestScore) { bestScore = score; best = o; }
+    }
+    const targetText = norm((best || opts[0]).textContent);
+    // Synthetic mouse events don't reliably select in react-select v5; keyboard does. ArrowDown
+    // until the intended option is the active descendant, then Enter. Only commit if we actually
+    // reached it - never blind-Enter onto whatever happens to be highlighted.
+    let found = false;
+    for (let k = 0; k < opts.length + 3; k++) {
+      el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+      await sleep(110);
+      const act = el.getAttribute("aria-activedescendant");
+      const actEl = act ? document.getElementById(act) : null;
+      if (actEl && norm(actEl.textContent) === targetText) { found = true; break; }
+    }
+    if (!found) { try { el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); } catch (_) {} return false; }
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    await sleep(240);
+    return el.getAttribute("aria-expanded") === "false" || comboCommitted(el) || norm(el.value) === targetText;
   }
 
   async function runFillAll() {
@@ -421,11 +464,18 @@
 
       // ---- radio / checkbox: resolve on the GROUP question, click matching option ----
       if (tag === "INPUT" && (typ === "radio" || typ === "checkbox")) {
-        const q = questionFor(el);
+        // Button-backed Yes/No render as a display:none checkbox behind visible <button>s.
+        // Skip anything with no layout box so it can't preempt (and mis-resolve) the group;
+        // the button pass clicks the real buttons.
+        const _r = el.getBoundingClientRect();
+        if (el.offsetParent === null || getComputedStyle(el).display === "none" || (!_r.width && !_r.height)) continue;
+        const q = groupQuestion(el);
         const gkey = (el.name || q || "").trim();
         if (!q) { continue; } // no question resolved: skip silently (avoid random toggles)
         if (gkey && groupsDone.has(gkey)) continue;
-        if (CONDITIONAL_RE.test(q)) { rows.push([q.slice(0, 60), "skip", "conditional -> you"]); skipped++; if (gkey) groupsDone.add(gkey); continue; }
+        // NOTE: no CONDITIONAL_RE skip here. A radio/checkbox group is the primary question,
+        // even when its text contains "if so, what capacity" (the veteran question). Conditional
+        // follow-ups that must be left blank are text boxes, handled in the text branch.
 
         // required consent / single acknowledgement checkbox -> tick it
         const optlab = optionLabel(el);
@@ -437,7 +487,7 @@
           continue;
         }
 
-        const data = await askEngine(q, 25, false, 40000);
+        const data = await askEngine(q, 25, false, 40000, true);
         if (!data || data.__error) { rows.push([q.slice(0, 60), "skip", data && data.__error ? "engine: " + data.__error : "no answer"]); skipped++; continue; }
         const ans = (data.text || "").trim();
         if (!ans) { rows.push([q.slice(0, 60), "skip", "no grounded answer -> you"]); skipped++; if (gkey) groupsDone.add(gkey); continue; }
@@ -445,13 +495,26 @@
         const groupEls = fields.filter((o) => o.tagName === "INPUT" && (o.type || "").toLowerCase() === typ &&
           ((el.name && o.name === el.name) || (!el.name && questionFor(o) === q)));
         const na = norm(ans);
-        let clicked = null;
+        // Score every option and pick the BEST, so an exact match always beats a loose
+        // substring one. Without this, answer "1000-2499" (norm "10002499") wrongly matched
+        // ">100" (norm "100") because "10002499" starts with "100", and "Man" could match
+        // inside "Woman".
+        const scoreOf = (ol) => {
+          if (!ol) return -1;
+          if (ol === na) return 100;
+          if (na && ol.startsWith(na)) return 70;
+          if (na && na.startsWith(ol) && ol.length >= 3) return 60;
+          if (na.length >= 3 && (" " + ol + " ").includes(" " + na + " ")) return 50;  // whole word
+          if (na.length >= 5 && ol.includes(na)) return 20;                              // loose, long only
+          return -1;
+        };
+        let best = null, bestS = 0;
         for (const o of (groupEls.length ? groupEls : [el])) {
-          const ol = norm(optionLabel(o));
-          if (ol === na || (na && ol.startsWith(na)) || (na.length >= 3 && ol.includes(na)) || (ol.length >= 3 && na.includes(ol))) {
-            if (commitOption(o)) { clicked = optionLabel(o); break; }
-          }
+          const s = scoreOf(norm(optionLabel(o)));
+          if (s > bestS) { bestS = s; best = o; }
         }
+        let clicked = null;
+        if (best && commitOption(best)) clicked = optionLabel(best);
         if (gkey) groupsDone.add(gkey);
         if (clicked) { rows.push([q.slice(0, 60), "filled", clicked]); filled++; }
         else { rows.push([q.slice(0, 60), "skip", "answer '" + ans + "' not among options"]); skipped++; }
@@ -464,7 +527,7 @@
         if (!q) { continue; }
         if (skipQuestion(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; continue; }
         if (el.value && el.selectedIndex > 0 && clean(el.options[el.selectedIndex].text)) { continue; } // already set
-        const data = await askEngine(q, 40, false, 40000);
+        const data = await askEngine(q, 40, false, 40000, true);
         if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", "no value -> you"]); skipped++; continue; }
         const ok = fillSelect(el, data.text);
         rows.push([q.slice(0, 60), ok ? "filled" : "skip", ok ? data.text : "'" + data.text + "' not an option"]);
@@ -480,7 +543,8 @@
         const cur = (el.value || el.textContent || "").trim();
         if (cur) { continue; }                        // don't clobber prefilled
         const limit = el.maxLength && el.maxLength > 0 ? el.maxLength : null;
-        const data = await askEngine(q, limit, false, 40000);
+        const data = await askEngine(q, limit, false, 40000, true);
+        if (data && data.method === "essay-skip") { rows.push([q.slice(0, 60), "review", "essay -> click the field to draft it"]); review++; continue; }
         if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", data && data.__error ? "engine: " + data.__error : "no answer -> you"]); skipped++; continue; }
         // a bare structured value (tier-1 field match) belongs in an input/select, never a prose
         // box: this is where a demographic token leaks into a free-text field. Leave it for you.
@@ -506,6 +570,63 @@
         continue;
       }
     }
+
+    // ---- second pass: choice questions rendered as <button> (Ashby Yes/No etc.) ----
+    // deepFields only walks input/textarea/select, so button-based Yes/No groups are never
+    // seen. Collect short-text option buttons, group them by their question, and click the
+    // one matching the engine's answer (e.g. the deterministic COI "No").
+    try {
+      const BTN_SKIP = /^(submit|next|back|previous|continue|upload|choose file|browse|add another|add|remove|delete|apply|save|autofill|fill|regenerate|insert|done|close|cancel|\+|\-|×|x)$/i;
+      const climbQ = (el) => {
+        let p = el;
+        for (let i = 0; i < 8 && p; i++) {
+          p = p.parentElement; if (!p) break;
+          const t = clean(p.innerText || "");
+          if (t.length > 15 && /\?|describe|do you|are you|have you|which|what|size of|authoriz|sponsor/i.test(t)) {
+            return t.replace(/\s*(Yes\s*No|No\s*Yes)\s*$/i, "").trim().slice(0, 160);
+          }
+        }
+        return "";
+      };
+      // NOTE: do NOT exclude type="submit" here. Ashby's Yes/No option buttons are
+      // <button type="submit"> (a button in a form defaults to submit), yet clicking one only
+      // toggles the choice (Ashby prevents default). The real Submit button is excluded by
+      // BTN_SKIP text ("Submit Application"), and only 2-8 button groups sharing a question are
+      // ever clicked, so a lone submit button is never touched.
+      const cand = [...document.querySelectorAll("button")].filter((b) => {
+        if (inPenates(b) || b.disabled || !shown(b)) return false;
+        const t = clean(b.textContent);
+        return t && t.length <= 40 && !BTN_SKIP.test(t);
+      });
+      const groups = new Map();
+      for (const b of cand) {
+        const q = climbQ(b); if (!q) continue;
+        if (!groups.has(q)) groups.set(q, []);
+        groups.get(q).push(b);
+      }
+      for (const [q, btns] of groups) {
+        if (btns.length < 2 || btns.length > 8) continue;      // a real choice set only
+        if (groupsDone.has(q)) continue;
+        groupsDone.add(q);
+        if (skipQuestion(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; continue; }
+        // already answered (Ashby marks the picked option aria-pressed=true)?
+        if (btns.some((b) => b.getAttribute("aria-pressed") === "true" || b.getAttribute("aria-checked") === "true")) continue;
+        seen++;
+        setReport("Filling " + seen + " (choice) ... " + elapsed() + "s elapsed. NOTHING submitted.", rows);
+        const data = await askEngine(q, 25, false, 40000, true);
+        if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", data && data.__error ? data.__error : "no answer -> you"]); skipped++; continue; }
+        const na = norm(data.text);
+        let clicked = null;
+        for (const b of btns) {
+          const bl = norm(b.textContent);
+          if (bl && (bl === na || (na.length >= 2 && bl === na) || (bl.length >= 2 && na.startsWith(bl)) || (na.length >= 2 && bl.startsWith(na)))) {
+            b.click(); clicked = clean(b.textContent); break;
+          }
+        }
+        if (clicked) { rows.push([q.slice(0, 60), "filled", clicked]); filled++; }
+        else { rows.push([q.slice(0, 60), "skip", "answer '" + clean(data.text).slice(0, 20) + "' not a choice -> you"]); skipped++; }
+      }
+    } catch (e) { rows.push(["(button choice pass)", "skip", String(e).slice(0, 60)]); }
 
     fillBusy = false;
     const summary = "Filled " + filled + " . " + review + " to review . " + skipped + " left for you . " + elapsed() + "s total . NOTHING submitted.";
@@ -539,16 +660,19 @@
     report = document.createElement("div");
     report.setAttribute("data-penates", "report");
     report.style.cssText =
-      "position:fixed;right:16px;top:16px;z-index:2147483647;width:430px;max-width:94vw;max-height:80vh;overflow:auto;" +
+      "position:fixed;right:16px;top:16px;z-index:2147483647;width:460px;max-width:94vw;max-height:82vh;overflow:auto;" +
       "background:#0f172a;color:#e5e7eb;border:1px solid #334155;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.45);" +
-      "font:12px/1.45 system-ui,sans-serif";
+      "font:12.5px/1.5 system-ui,sans-serif";
     report.innerHTML =
-      '<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:#111827;border-bottom:1px solid #334155;position:sticky;top:0">' +
-        '<span style="font-weight:600">Penates . Fill report</span>' +
-        '<span data-r="sum" style="flex:1;color:#94a3b8"></span>' +
-        '<button data-r="applied" title="Log this as an application after you submit" style="background:#166534;color:#fff;border:1px solid #14532d;border-radius:6px;padding:4px 8px;cursor:pointer;font:11px system-ui,sans-serif">Mark applied</button>' +
-        '<span data-r="x" title="Close" style="cursor:pointer;color:#94a3b8;padding:0 4px">✕</span>' +
-      '</div><div data-r="body" style="padding:8px 10px"></div>';
+      '<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:#111827;border-bottom:1px solid #334155;position:sticky;top:0;z-index:2">' +
+        '<span style="font-weight:700;font-size:13px">Penates</span>' +
+        '<span style="color:#64748b;font-size:11px">' + PENATES_BUILD + '</span>' +
+        '<span style="flex:1"></span>' +
+        '<button data-r="applied" title="Log this as an application after you submit" style="background:#166534;color:#fff;border:1px solid #14532d;border-radius:6px;padding:4px 9px;cursor:pointer;font:11px system-ui,sans-serif">Mark applied</button>' +
+        '<span data-r="x" title="Close" style="cursor:pointer;color:#94a3b8;padding:0 4px;font-size:14px">✕</span>' +
+      '</div>' +
+      '<div data-r="sum" style="padding:8px 12px;background:#0b1220;border-bottom:1px solid #1e293b;color:#fbbf24;font-weight:600"></div>' +
+      '<div data-r="body" style="padding:4px 10px 10px"></div>';
     document.documentElement.appendChild(report);
     report.querySelector('[data-r="x"]').onclick = () => (report.style.display = "none");
     report.querySelector('[data-r="applied"]').onclick = markApplied;
@@ -558,10 +682,12 @@
     report.querySelector('[data-r="sum"]').textContent = summary || "";
     const color = { filled: "#34d399", review: "#fbbf24", skip: "#94a3b8" };
     report.querySelector('[data-r="body"]').innerHTML = (rows || []).map((r) =>
-      '<div style="display:flex;gap:8px;padding:4px 2px;border-bottom:1px solid #1e293b">' +
-        '<span style="width:64px;flex:none;color:' + (color[r[1]] || "#e5e7eb") + '">' + r[1] + '</span>' +
-        '<span style="width:150px;flex:none;color:#cbd5e1">' + escapeHtml(r[0]) + '</span>' +
-        '<span style="flex:1;color:#94a3b8">' + escapeHtml(r[2] || "") + '</span>' +
+      '<div style="display:flex;gap:9px;padding:6px 2px;border-bottom:1px solid #1e293b;align-items:flex-start">' +
+        '<span style="width:48px;flex:none;color:' + (color[r[1]] || "#e5e7eb") + ';font-weight:700;text-transform:uppercase;font-size:10px;padding-top:2px;letter-spacing:.03em">' + escapeHtml(r[1]) + '</span>' +
+        '<span style="flex:1;min-width:0">' +
+          '<span style="color:#e2e8f0;display:block;word-break:break-word">' + escapeHtml(r[0]) + '</span>' +
+          (r[2] ? '<span style="color:#94a3b8;display:block;font-size:11px;word-break:break-word">' + escapeHtml(r[2]) + '</span>' : '') +
+        '</span>' +
       '</div>').join("") || '<div style="color:#94a3b8;padding:6px">No fields resolved.</div>';
   }
   function escapeHtml(s) { return (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }

@@ -162,6 +162,13 @@ def _sentences(text):
 def _wc(s):
     return len(re.findall(r"\S+", s or ""))
 
+def _clean_fact(s):
+    """Strip a section heading that got glued onto the sentence because it had no period
+    (e.g. 'About 1Password At 1Password, we're building...' -> 'At 1Password, we're building...')."""
+    s = re.sub(r"^(about (us|the (company|role|team|position)|[A-Z0-9][\w&.'-]*)|who we are|"
+               r"the (role|opportunity)|overview|what you'?ll do|the team)\s+(?=[A-Z])", "", s, flags=re.I)
+    return s.strip()
+
 def extract_facts(text, company=None):
     """Pull up to 3 near-verbatim, distinctive clauses from the posting: what the company
     does, one role/responsibility line, one distinctive constraint. Verbatim so the writer
@@ -173,7 +180,7 @@ def extract_facts(text, company=None):
             if s in facts:
                 continue
             if re.search(rx, s, re.I):
-                facts.append(s.strip()[:220])
+                facts.append(_clean_fact(s)[:220])
                 return
     # what they build / who they are
     take(r"\b(we build|we'?re building|we are building|is a|are a|provides|platform for|"
