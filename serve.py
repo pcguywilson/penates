@@ -22,6 +22,32 @@ PORT = 8765
 LEARN_PATH = os.path.join(HERE, "data", "learned_answers.json")
 IMPORTED_PATH = os.path.join(HERE, "data", "imported_answers.json")
 
+def _resume_path():
+    """Absolute path to the resume to attach. Precedence: RESUME_PATH env / profile.yaml
+    'resume_file', else the most recently modified .pdf/.docx under documents/resumes/."""
+    cand = os.environ.get("RESUME_PATH")
+    if cand and os.path.isfile(cand):
+        return cand
+    try:
+        import apply as _a
+        rf = (_a.load("profile.yaml") or {}).get("resume_file")
+        if rf:
+            rf = rf if os.path.isabs(rf) else os.path.join(HERE, rf)
+            if os.path.isfile(rf):
+                return rf
+    except Exception:
+        pass
+    rdir = os.path.join(HERE, "documents", "resumes")
+    try:
+        files = [os.path.join(rdir, f) for f in os.listdir(rdir)
+                 if f.lower().endswith((".pdf", ".docx"))]
+        files = [f for f in files if os.path.isfile(f)]
+        if files:
+            return max(files, key=os.path.getmtime)
+    except Exception:
+        pass
+    return None
+
 def imported_lookup(q):
     """A prior answer imported from an AI-chat export (import_qa.py). Untrusted reference:
     exact normalized-question match, else a high-overlap near match. Returned as a REVIEW
@@ -153,12 +179,27 @@ def _shape(r):
 _SKIP_CONDITIONAL = re.compile(
     r"\bif you (responded|answered|selected|indicated|checked|chose)\b|"
     r"\bif (yes|no|other|so|applicable|not|the above|you did)\b", re.I)
+def _is_conditional_followup(q):
+    """True only for a standalone follow-up field whose prompt IS the conditional ('If you
+    responded yes, describe...'). A primary question with a trailing conditional clause
+    (veteran: 'Are you a ... member ...? If so, what capacity?') is NOT a follow-up - the
+    conditional trails a complete question, so it must still be answered."""
+    m = _SKIP_CONDITIONAL.search(q or "")
+    if not m:
+        return False
+    # a complete question (its own '?') before the conditional marker => primary, not follow-up
+    return "?" not in (q or "")[:m.start()]
 _SKIP_LEAVEBLANK = re.compile(
     r"accommodat|other than your|is there anything|anything (else|you.?d like|we should know)|"
     r"additional (information|comments|details)|feel free to (add|share|include)", re.I)
+# Match the COI question robustly. The client truncates the question to ~160 chars and it
+# contains "e.g." periods, so a distance match on [^.?] breaks and "conflict of interest" can be
+# cut off. Anchor on the phrases that always survive: "close personal relationship(s)" or a
+# relationship word followed (anywhere, periods allowed) by a working/employed token.
 _COI_NO = re.compile(
-    r"(close personal|personal relationship|family member|domestic partner|friend)"
-    r"[^.?]{0,80}(working|employed|currently at|conflict)|conflict of interest", re.I)
+    r"conflict of interest|close personal relationship|"
+    r"(family member|domestic partner|friend)[\s\S]{0,140}(working|employed|currently (at|with|working))",
+    re.I)
 
 def do_answer(payload):
     """Tiered. Imported lazily so a broken import can't stop the server.
@@ -181,7 +222,7 @@ def do_answer(payload):
     fresh = bool(payload.get("fresh"))
 
     # tier 0: field guards (beat every other tier)
-    if _SKIP_CONDITIONAL.search(q) or _SKIP_LEAVEBLANK.search(q):
+    if _is_conditional_followup(q) or _SKIP_LEAVEBLANK.search(q):
         return {"ok": False, "kind": "pause", "method": "leave-blank",
                 "chars": 0, "gaps": [], "text": ""}
     if _COI_NO.search(q):
@@ -340,6 +381,23 @@ class H(BaseHTTPRequestHandler):
                     return self._send(200, f.read(), "text/html; charset=utf-8")
             except Exception as e:
                 return self._send(500, str(e))
+        if parsed.path == "/resume":
+            # Serve the resume bytes so the extension can attach the file on an application form
+            # (a content script cannot read the local disk; the background worker fetches this).
+            try:
+                import base64 as _b64
+                p = _resume_path()
+                if not p:
+                    return self._json(404, {"ok": False, "error": "no resume found under documents/resumes"})
+                with open(p, "rb") as f:
+                    raw = f.read()
+                mime = "application/pdf" if p.lower().endswith(".pdf") else \
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if p.lower().endswith(".docx") else \
+                    "application/octet-stream"
+                return self._json(200, {"ok": True, "filename": os.path.basename(p),
+                                        "mime": mime, "b64": _b64.b64encode(raw).decode()})
+            except Exception as e:
+                return self._json(500, {"ok": False, "error": str(e)})
         if parsed.path == "/stories":
             try:
                 with open(os.path.join(HERE, "stories.html"), "rb") as f:
@@ -617,12 +675,14 @@ class H(BaseHTTPRequestHandler):
             q = (payload.get("question") or "")[:600]
             print("[answer] " + q.replace("\n", " ")[:120], flush=True)
             try:
+                _t0 = time.time()
                 out = do_answer(payload)
-                print("       -> %s / %s chars / gaps=%s" % (out.get("method"), out.get("chars"), out.get("gaps")), flush=True)
+                _ms = int((time.time() - _t0) * 1000)
+                print("       -> %s / %s chars / gaps=%s / %dms" % (out.get("method"), out.get("chars"), out.get("gaps"), _ms), flush=True)
                 try:
                     _ANSWER_LOG.insert(0, {"q": q[:120], "method": out.get("method"),
                                            "chars": out.get("chars"), "gaps": out.get("gaps"),
-                                           "t": int(time.time())})
+                                           "ms": _ms, "t": int(time.time())})
                     del _ANSWER_LOG[60:]
                 except Exception:
                     pass

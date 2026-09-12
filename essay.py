@@ -164,6 +164,99 @@ def _domain_gap(question, story):
             return disp
     return None
 
+# A why-company/why-role draft must not claim a capability the gap-guard would block for an
+# owned-work question. If the draft asserts a domain/system the candidate has NO real evidence
+# of (endpoint/MDM/Intune/Jamf/device management, etc.), that is a fabricated qualification -
+# exactly what the endpoint gap analog on the same form correctly disclaims. Generic across
+# every such domain; not tied to any one company.
+_WHY_CLAIM_TERMS = list(_DOMAIN_HINTS.keys()) + [
+    "endpoint", "mdm", "intune", "jamf", "sccm", "workspace one", "airwatch", "device fleet",
+    "device lifecycle", "mobile device",
+]
+def why_claims_unowned(text):
+    t = (text or "").lower()
+    try:
+        cand = (_a._cand_text() or "").lower()
+    except Exception:
+        cand = ""
+    for term in _WHY_CLAIM_TERMS:
+        term = term.strip().lower()
+        if not term:
+            continue
+        rx = re.compile(r"(?<![a-z0-9])" + re.escape(term) + r"s?(?![a-z0-9])", re.I)
+        if rx.search(t) and not rx.search(cand):
+            return term
+    return None
+
+# The candidate half of a why-company answer must be first-person AND cite something from the
+# real stack, or the draft is just restated company text with no candidate connection.
+def _stack_tokens():
+    try:
+        s = _a._real_stack(_a.load("profile.yaml")) or ""
+    except Exception:
+        s = ""
+    return [x.strip() for x in s.split(",") if x.strip()]
+
+def _candidate_identity():
+    """A short, natural, TRUE sentence describing who the candidate is, assembled from
+    profile.yaml facts (never invented). Reads like a person, not a keyword list - this is
+    what a coherent why-company answer connects to. profile.yaml 'pitch' overrides it."""
+    try:
+        p = _a.load("profile.yaml") or {}
+    except Exception:
+        return ""
+    pitch = p.get("pitch")
+    if pitch:
+        return str(pitch).strip().rstrip(".")
+    ident = p.get("identity") or {}
+    title = ident.get("current_title") or "an infrastructure engineer"
+    bits = []
+    cloud = p.get("cloud") or []
+    if cloud:
+        bits.append("cloud infrastructure (" + ", ".join(str(c) for c in cloud[:2]) + ")")
+    sec = [str(s) for s in (p.get("monitoring_security") or [])]
+    if any("wazuh" in s.lower() for s in sec):
+        bits.append("a Wazuh SIEM")
+    elif sec:
+        bits.append("security monitoring")
+    comp = p.get("compliance_owned") or []
+    if comp:
+        bits.append(", ".join(str(x) for x in comp[:2]) + " compliance")
+    # plain join (NOT _human_list, which title-cases each item and mangles the prose)
+    if not bits:
+        focus = "cloud and security engineering"
+    elif len(bits) == 1:
+        focus = bits[0]
+    else:
+        focus = ", ".join(bits[:-1]) + ", and " + bits[-1]
+    return "a %s whose hands-on work centers on %s" % (title, focus)
+
+# words that count as a genuine candidate connection even without an exact stack token, so a
+# coherent answer isn't forced back to the template just because it didn't name a product.
+_IDENTITY_WORDS = re.compile(
+    r"\b(security|secur\w+|infrastructure|infra|cloud|compliance|complian\w+|reliab\w+|"
+    r"platform|systems?|devops|sre|engineer\w*|govcloud|hardening|automation)\b", re.I)
+def why_has_candidate_link(text):
+    t = (text or "")
+    first_person = bool(re.search(r"\b(I|I'?ve|I'?m|my|me)\b", t))
+    has_substance = any(re.search(r"(?<![a-z0-9])" + re.escape(s.lower()) + r"(?![a-z0-9])", t.lower())
+                        for s in _stack_tokens()) or bool(_IDENTITY_WORDS.search(t))
+    return first_person and has_substance
+
+def _why_candidate_only(facts, c):
+    """Coherent, honest fallback: one verified company fact + a specific, real candidate
+    identity + a genuine motivation. Invents nothing; no keyword dump; no unowned-domain claim."""
+    limit = c.get("max_chars") or 700
+    ident = _candidate_identity() or "an engineer focused on building reliable, secure systems"
+    parts = []
+    if facts:
+        parts.append(facts[0].rstrip(". ") + ".")
+    parts.append("I'm %s." % ident)
+    parts.append("Building secure, reliable systems is what I already do every day, so contributing "
+                 "to that is what draws me here.")
+    ans = " ".join(parts)
+    return _a.enforce_length(ans, {}, limit, False).strip()
+
 # ---------------------------------------------------------------- retrieval
 def _tokens(s):
     return set(re.findall(r"[a-z0-9]+", (s or "").lower())) - {
@@ -237,37 +330,38 @@ def build_prompt(genre, question, c, story, gaps, company, page_context=None, fa
 
     if genre in ("why_company", "why_role"):
         blurb = (company or "the company")
-        stack = ""
-        try:
-            stack = _a._real_stack(_a.load("profile.yaml"))
-        except Exception:
-            pass
+        identity = _candidate_identity()
         if facts:
-            # extract-then-write: the model gets 1-3 VERIFIED clauses from the posting and
-            # must open with one. A small model ignores "use a page fact" when handed the
-            # raw JD, so we hand it only the facts and enforce the opening in code.
+            # extract-then-write: the model gets 1-3 VERIFIED clauses from the posting and a
+            # COHERENT one-line candidate identity (not a tech list, which makes small models
+            # keyword-dump). It writes a genuine, specific reason connecting the two.
             factlist = "\n".join("- " + f for f in facts)
-            sysp = base + (" You are given VERIFIED FACTS about this company/role, taken from the job "
-                           "posting. Your FIRST sentence must lead with ONE of those facts, copied closely "
-                           "(quote or near-verbatim), and make it the reason this role fits. Then ONE or "
-                           "TWO sentences connecting it to the candidate's real experience below. Do NOT "
-                           "add any company product, customer, metric, award, or claim that is not in the "
-                           "facts. Refer to the company by name.")
-            user = ("QUESTION:\n%s\n\nCompany: %s\n\nVERIFIED FACTS (open with one, copy it closely; add "
-                    "no company fact beyond these):\n%s\n\nThe candidate's real experience: %s\n\nAnswer:"
-                    % (question, blurb, factlist, stack))
+            sysp = base + (" Write a genuine, specific reason this candidate is excited about THIS company. "
+                           "Three sentences, first person, and it must read like a real person talking - "
+                           "NOT a list of technologies. Sentence 1: lead with ONE of the verified facts, "
+                           "copied closely, as what appeals. Sentences 2-3: connect it to the candidate's "
+                           "actual work using the identity line below, and say plainly why that makes this a "
+                           "fit. Do NOT list tools or name more than one or two technologies. Do NOT add any "
+                           "company product, customer, metric, or claim beyond the verified facts. Do NOT "
+                           "claim work the candidate has not done. Name the company.")
+            user = ("QUESTION:\n%s\n\nCompany: %s\n\nVERIFIED FACTS (open with one, copy it closely; add no "
+                    "company fact beyond these):\n%s\n\nWHO THE CANDIDATE IS (connect to this in your own "
+                    "words; do not just repeat it, and do not turn it into a tech list):\n%s\n\nAnswer:"
+                    % (question, blurb, factlist, identity or "an infrastructure and security engineer"))
         else:
             # no verified job text -> honest, obviously non-researched. Role title is a role
             # fact and may be used; what the company sells may not be invented.
             sysp = base + (" You were given NO verified facts about the company, so you must not state, "
                            "describe, or guess anything about what it does, sells, or builds, or about its "
                            "products, features, technology, or reputation. Refer to the company ONLY by "
-                           "name. Ground every sentence in the candidate's real experience and the role "
-                           "title. Never write 'their product' or any capability of the company. If you "
-                           "cannot say something specific and true, keep it about the candidate.")
-            user = ("QUESTION:\n%s\n\nCompany name (use as a name only, invent no facts about it): %s\n"
-                    "The candidate's real experience to ground every sentence in: %s\n\nAnswer:"
-                    % (question, blurb, stack))
+                           "name. Write a genuine, specific, first-person reason grounded in the candidate's "
+                           "actual work (the identity line below) and the role title - three sentences that "
+                           "read like a person, NOT a list of technologies. Never write 'their product' or "
+                           "any capability of the company.")
+            user = ("QUESTION:\n%s\n\nCompany name (use as a name only, invent no facts about it): %s\n\n"
+                    "WHO THE CANDIDATE IS (ground every sentence in this; do not turn it into a tech "
+                    "list):\n%s\n\nAnswer:"
+                    % (question, blurb, identity or "an infrastructure and security engineer"))
         return sysp, user
 
     if genre == "definition":
@@ -300,6 +394,12 @@ def validate(text, genre, c, gaps, facts=None):
     # use one (shares a distinctive token). Otherwise it went generic and ignored the posting.
     if genre in ("why_company", "why_role") and facts and not _jc.overlaps(t, facts):
         fails.append("ignored_jd")
+    if genre in ("why_company", "why_role"):
+        _bad = why_claims_unowned(t)
+        if _bad:
+            fails.append("claims_unowned(%s)" % _bad)
+        if not why_has_candidate_link(t):
+            fails.append("no_candidate_link")
     if genre in ("owned_project", "technical_experience", "behavioral", "hypothetical", "why_company", "why_role"):
         if _BANNED_PREFIX.match(t):
             fails.append("banned_opening")
@@ -430,10 +530,27 @@ def answer_essay(question, limit=None, company=None, url=None, model=None, want_
         if "ignored_jd" in fails and facts:
             nudge += (" You ignored the verified facts. Your FIRST sentence must start with one of "
                       "these, copied closely: " + " | ".join(facts))
+        if any(f.startswith("claims_unowned") for f in fails):
+            nudge += (" Your second sentence described the CANDIDATE, not the company, and claimed "
+                      "work you have not done. Do NOT claim endpoint/MDM/device-management or any "
+                      "system not in the candidate's real stack. Connect the fact ONLY to the "
+                      "candidate's real experience.")
+        if "no_candidate_link" in fails:
+            nudge += (" Add one first-person sentence tying the fact to the candidate's real stack.")
         text2 = _gen(nudge)
         f2 = validate(text2, genre, c, gaps, facts)
         if len(f2) <= len(fails):
             text, fails = text2, f2
+
+    # why-company still dishonest (claims unowned domain) or still no candidate link ->
+    # deterministic candidate-only template. Never ship a why box that contradicts the gap
+    # analog on the same form.
+    if genre in ("why_company", "why_role") and (
+            any(f.startswith("claims_unowned") for f in fails) or "no_candidate_link" in fails):
+        text = _why_candidate_only(facts, c)
+        grounding = ("fact+template" if facts else "template")
+        fails = [f for f in validate(text, genre, c, gaps, facts)
+                 if not f.startswith("claims_unowned") and f != "no_candidate_link"]
 
     review = bool(fails)
     return {"ok": True, "kind": "answer",
