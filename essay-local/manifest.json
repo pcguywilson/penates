@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Penates Apply",
-  "version": "0.4.0",
+  "version": "0.4.7",
   "description": "Fill job applications from your local, grounded engine (serve.py). The fill bubble auto-appears only on known ATS application forms; the per-field helper works anywhere on demand (right-click / Alt+A). Stops before Submit. Runs in normal Chrome, next to Simplify.",
   "permissions": ["contextMenus", "storage", "activeTab", "scripting"],
   "host_permissions": ["http://127.0.0.1:8765/*"],

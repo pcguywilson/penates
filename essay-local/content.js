@@ -12,7 +12,7 @@
 (() => {
   if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
   window.__penatesInit = true;
-  const PENATES_BUILD = "build 10";   // shown in the report header; if you don't see it after a reload, the extension didn't update
+  const PENATES_BUILD = "build 16";   // shown in the report header; if you don't see it after a reload, the extension didn't update
   const IS_TOP = window.top === window;
   let currentEl = null, currentQuestion = "", lastEditable = null, chip = null;
 
@@ -135,6 +135,17 @@
   }
 
   // ---- question / label text for ANY field (light DOM + shadow climb for SLDS) ----
+  // Generic: some ATSes glue a section heading to the front of the first question in the
+  // section (e.g. "Application Questions Do you have any close personal relationship..."). Strip
+  // a leading section-heading phrase so the real question reaches the matcher/engine. This is
+  // heading-shape based, not tied to any one form.
+  const _SECTION_HEAD = /^\s*(application|screening|additional|general|voluntary|candidate|demographic|equal employment|eeo|self[- ]?identification|personal|contact|profile|background|compliance|legal|diversity)?[\s,]*(questions?|information|survey|self[- ]?identification|disclosures?|details?|section)\s+(?=(do|are|have|did|which|what|how|please|would|will|is|were|can|may)\b)/i;
+  function stripSectionHead(s) {
+    if (!s) return s;
+    let out = s.replace(_SECTION_HEAD, "");
+    return out.length >= 8 ? out.trim() : s;
+  }
+
   function questionFor(el) {
     const sel = clean(window.getSelection && String(window.getSelection()));
     if (el === (currentEl || lastEditable) && sel.length >= 12 && sel.length <= 500) return sel;
@@ -176,7 +187,7 @@
       p = p.previousElementSibling; hh++;
     }
     if (el.placeholder) tries.push(el.placeholder);
-    for (const t of tries) { const c = clean(t); if (c && c.length >= 3) return c.slice(0, 400); }
+    for (const t of tries) { const c = stripSectionHead(clean(t)); if (c && c.length >= 3) return c.slice(0, 400); }
     return "";
   }
 
@@ -189,10 +200,10 @@
       p = p.parentElement; if (!p) break;
       const t = clean(p.innerText || "");
       if (t.length > 15 && /\?|do you|are you|have you|which|what|size of|authoriz|identify|select|how (did|do|would)|please (select|describe)|describe/i.test(t)) {
-        return t.replace(/\s*(Yes\s*No|No\s*Yes)\s*$/i, "").slice(0, 240);
+        return stripSectionHead(t.replace(/\s*(Yes\s*No|No\s*Yes)\s*$/i, "")).slice(0, 240);
       }
     }
-    return questionFor(el);   // fallback
+    return questionFor(el);   // fallback (already section-stripped)
   }
 
   function companyGuess() {
@@ -263,6 +274,64 @@
     // A single field must never hang the whole fill. Cap it and move on.
     if (!timeoutMs) return call;
     return Promise.race([call, sleep(timeoutMs).then(() => ({ __error: "timeout (" + Math.round(timeoutMs / 1000) + "s) -> you" }))]);
+  }
+
+  // ---- resume attach ----------------------------------------------------------------
+  // A content script can't read the local disk, but the background worker fetches the resume
+  // bytes from serve.py (/resume) and we build a File and set it on the form's file input via
+  // DataTransfer + change/drop events (the only script-driven way a browser accepts a file).
+  async function askResume() {
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: "FETCH_RESUME" });
+      if (resp && resp.ok && resp.data && resp.data.ok) return resp.data; // {filename, mime, b64}
+    } catch (_) {}
+    return null;
+  }
+  function _b64ToBytes(b64) {
+    const bin = atob(b64), len = bin.length, bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  }
+  function _nearText(el) {
+    try { return clean((el.closest("div,label,fieldset,section") || {}).innerText || "").slice(0, 90); }
+    catch (_) { return ""; }
+  }
+  async function attachResume(rows) {
+    // File inputs are usually visually hidden behind a styled dropzone, so do NOT require
+    // shown(); just find every type=file across the doc + shadow roots.
+    let inputs = [];
+    try {
+      inputs = deepFields().filter((el) => el.tagName === "INPUT" && (el.type || "").toLowerCase() === "file" && !inPenates(el) && !el.disabled);
+    } catch (_) {}
+    if (!inputs.length) return;
+    const data = await askResume();
+    if (!data || !data.b64) { rows.push(["Resume upload", "skip", "no resume on server -> attach manually"]); return; }
+    let file;
+    try { file = new File([_b64ToBytes(data.b64)], data.filename || "resume.pdf", { type: data.mime || "application/pdf" }); }
+    catch (e) { rows.push(["Resume upload", "skip", "build file: " + String(e).slice(0, 40)]); return; }
+    let done = 0, label = "";
+    for (const inp of inputs) {
+      const lbl = ((inp.getAttribute("aria-label") || "") + " " + (inp.name || "") + " " + _nearText(inp)).toLowerCase();
+      // when there are several file inputs, don't drop the resume into a cover-letter-only slot
+      if (inputs.length > 1 && /cover letter|transcript|portfolio|photo|headshot/.test(lbl) && !/resume|\bcv\b|curriculum/.test(lbl)) continue;
+      if (inp.files && inp.files.length) { done++; continue; } // already attached
+      try {
+        const dt = new DataTransfer(); dt.items.add(file);
+        inp.files = dt.files;
+        inp.dispatchEvent(new Event("input", { bubbles: true }));
+        inp.dispatchEvent(new Event("change", { bubbles: true }));
+        // some React dropzones only listen to 'drop', not the input's change
+        try {
+          const dz = inp.closest('[class*="drop" i],[class*="upload" i],[data-testid*="upload" i]') || inp.parentElement;
+          if (dz) { const dt2 = new DataTransfer(); dt2.items.add(file);
+            dz.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt2 })); }
+        } catch (_) {}
+        // verify it took
+        if (inp.files && inp.files.length) { done++; label = data.filename || "attached"; }
+      } catch (e) { rows.push(["Resume upload", "skip", String(e).slice(0, 50)]); }
+    }
+    if (done) rows.push(["Resume upload", "filled", label || (data.filename || "attached")]);
+    else rows.push(["Resume upload", "review", "found upload field but couldn't set file -> attach manually"]);
   }
 
   // ============================ WHOLE-PAGE FILL ============================
@@ -346,7 +415,7 @@
     return norm((el.selectedOptions[0] || {}).textContent) === norm(hit.textContent);
   }
 
-  const CONSENT_RE = /consent|i agree|i acknowledge|terms|certif|i have read|authorize|electronic signature|e-?sign|privacy/i;
+  const CONSENT_RE = /consent|i agree|i acknowledge|i understand|terms|certif|i have read|authorize|electronic signature|e-?sign|privacy|background check|conditional on/i;
 
   // Fields the bulk fill must NOT auto-answer. Two kinds:
   //  - CONDITIONAL: "If you responded 'yes'/'other'..." follow-ups. The controlling Yes/No is
@@ -391,8 +460,8 @@
     // Ashby (and most react-select) comboboxes: open with ArrowDown, type to filter, then
     // click the option. Two things the old version missed and this handles: async typeahead
     // menus that show "Loading..." first (poll for real options), and picking the RIGHT
-    // option among near-duplicates (token overlap, not first-substring - so "St. Albans,
-    // West Virginia" beats the UK / Vermont "St Albans").
+    // option among near-duplicates (token overlap, not first-substring - so a full
+    // "City, State, Country" match beats a same-named city in a different state/country).
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     const query = (String(value).split(",")[0] || value).trim();
     const nv = norm(value);
@@ -441,7 +510,29 @@
     if (fillBusy) return;
     fillBusy = true;
     openReport();
-    setReport("Scanning form...", []);
+
+    const rows = [];
+    const groupsDone = new Set();
+    const healMap = [];   // {q, value, kind} for text/radio fills, so a heal pass can re-fill
+    let filled = 0, review = 0, skipped = 0;                     // any that an Ashby re-render race cleared
+    const t0 = Date.now();
+    const elapsed = () => ((Date.now() - t0) / 1000).toFixed(0);
+    let seen = 0;
+
+    // Attach the resume FIRST. Setting a file makes Ashby re-render the WHOLE form (every input
+    // element is replaced). If we filled first, that re-render would intermittently wipe
+    // just-set fields (phone especially); if we captured field refs first, they'd be detached.
+    // So: attach resume, let the re-render settle, THEN capture fresh field refs and fill. No
+    // mass re-render happens after that (per-field edits only re-render their own control).
+    setReport("Attaching resume ... NOTHING submitted.", rows);
+    try {
+      const before = rows.length;
+      await attachResume(rows);
+      if (rows.length > before && rows[rows.length - 1][1] === "filled") filled++;
+    } catch (e) { rows.push(["Resume upload", "skip", String(e).slice(0, 50)]); }
+    await sleep(700); // let the file-triggered re-render finish before we grab element refs
+
+    setReport("Scanning form...", rows);
     const fields = deepFields().filter((el) => {
       if (inPenates(el)) return false;
       const t = (el.type || el.tagName).toLowerCase();
@@ -450,13 +541,6 @@
       return shown(el);
     });
 
-    const rows = [];
-    const groupsDone = new Set();
-    let filled = 0, review = 0, skipped = 0;
-    const t0 = Date.now();
-    const elapsed = () => ((Date.now() - t0) / 1000).toFixed(0);
-    let seen = 0;
-
     for (const el of fields) {
       const tag = el.tagName, typ = (el.type || "").toLowerCase();
       seen++;
@@ -464,18 +548,18 @@
 
       // ---- radio / checkbox: resolve on the GROUP question, click matching option ----
       if (tag === "INPUT" && (typ === "radio" || typ === "checkbox")) {
-        // Button-backed Yes/No render as a display:none checkbox behind visible <button>s.
-        // Skip anything with no layout box so it can't preempt (and mis-resolve) the group;
-        // the button pass clicks the real buttons.
+        // Skip inputs with no layout box (Ashby's hidden Yes/No backing checkboxes); the button
+        // pass clicks the real visible buttons.
         const _r = el.getBoundingClientRect();
         if (el.offsetParent === null || getComputedStyle(el).display === "none" || (!_r.width && !_r.height)) continue;
         const q = groupQuestion(el);
-        const gkey = (el.name || q || "").trim();
         if (!q) { continue; } // no question resolved: skip silently (avoid random toggles)
-        if (gkey && groupsDone.has(gkey)) continue;
-        // NOTE: no CONDITIONAL_RE skip here. A radio/checkbox group is the primary question,
-        // even when its text contains "if so, what capacity" (the veteran question). Conditional
-        // follow-ups that must be left blank are text boxes, handled in the text branch.
+        // Group by the QUESTION, so a "select all that apply" checkbox set (each option is a
+        // uniquely-named checkbox) is resolved ONCE, not one skip row per option. No
+        // CONDITIONAL_RE skip here: a radio/checkbox group is the primary question even when its
+        // text has "if so, what capacity" (veteran); conditional TEXT follow-ups are skipped in
+        // the text branch.
+        if (groupsDone.has(q)) continue;
 
         // required consent / single acknowledgement checkbox -> tick it
         const optlab = optionLabel(el);
@@ -483,22 +567,22 @@
           const ok = commitOption(el);
           rows.push([q.slice(0, 60), ok ? "filled" : "skip", ok ? "checked" : "couldn't check"]);
           ok ? filled++ : skipped++;
-          if (gkey) groupsDone.add(gkey);
+          groupsDone.add(q);
           continue;
         }
 
         const data = await askEngine(q, 25, false, 40000, true);
+        groupsDone.add(q);
         if (!data || data.__error) { rows.push([q.slice(0, 60), "skip", data && data.__error ? "engine: " + data.__error : "no answer"]); skipped++; continue; }
         const ans = (data.text || "").trim();
-        if (!ans) { rows.push([q.slice(0, 60), "skip", "no grounded answer -> you"]); skipped++; if (gkey) groupsDone.add(gkey); continue; }
-        // collect this group's option inputs (same name, or same question via shadow)
+        if (!ans) { rows.push([q.slice(0, 60), "skip", "no grounded answer -> you"]); skipped++; continue; }
+        // ALL options of this group (same radio name, or same climbed question - covers Ashby's
+        // uniquely-named checkboxes).
         const groupEls = fields.filter((o) => o.tagName === "INPUT" && (o.type || "").toLowerCase() === typ &&
-          ((el.name && o.name === el.name) || (!el.name && questionFor(o) === q)));
+          ((o.name && el.name && o.name === el.name) || groupQuestion(o) === q));
         const na = norm(ans);
-        // Score every option and pick the BEST, so an exact match always beats a loose
-        // substring one. Without this, answer "1000-2499" (norm "10002499") wrongly matched
-        // ">100" (norm "100") because "10002499" starts with "100", and "Man" could match
-        // inside "Woman".
+        // Exact match beats a loose substring one ("1000-2499" must not lose to ">100", "Man"
+        // must not match inside "Woman").
         const scoreOf = (ol) => {
           if (!ol) return -1;
           if (ol === na) return 100;
@@ -508,16 +592,19 @@
           if (na.length >= 5 && ol.includes(na)) return 20;                              // loose, long only
           return -1;
         };
-        let best = null, bestS = 0;
-        for (const o of (groupEls.length ? groupEls : [el])) {
-          const s = scoreOf(norm(optionLabel(o)));
-          if (s > bestS) { bestS = s; best = o; }
+        const opts = (groupEls.length ? groupEls : [el]);
+        if (typ === "checkbox") {
+          // select-all: check every option that matches the answer, log one row for the group
+          let n = 0, last = "";
+          for (const o of opts) { if (scoreOf(norm(optionLabel(o))) >= 50 && commitOption(o)) { n++; last = optionLabel(o); } }
+          if (n) { rows.push([q.slice(0, 60), "filled", n > 1 ? (n + " selected") : last]); filled++; }
+          else { rows.push([q.slice(0, 60), "skip", "answer '" + ans + "' not among options"]); skipped++; }
+        } else {
+          let best = null, bestS = 0;
+          for (const o of opts) { const s = scoreOf(norm(optionLabel(o))); if (s > bestS) { bestS = s; best = o; } }
+          if (best && commitOption(best)) { rows.push([q.slice(0, 60), "filled", optionLabel(best)]); filled++; healMap.push({ q, value: ans, kind: "radio" }); }
+          else { rows.push([q.slice(0, 60), "skip", "answer '" + ans + "' not among options"]); skipped++; }
         }
-        let clicked = null;
-        if (best && commitOption(best)) clicked = optionLabel(best);
-        if (gkey) groupsDone.add(gkey);
-        if (clicked) { rows.push([q.slice(0, 60), "filled", clicked]); filled++; }
-        else { rows.push([q.slice(0, 60), "skip", "answer '" + ans + "' not among options"]); skipped++; }
         continue;
       }
 
@@ -564,6 +651,10 @@
           continue;
         }
         setNative(el, data.text);
+        // record structured single-line values (phone/title/urls...) for the heal pass; those
+        // are the ones an intermittent re-render can wipe. Skip essays/gaps (long prose in
+        // textareas, unlikely to clear and expensive to re-verify).
+        if (singleLine && !gap && !isEssay) healMap.push({ q, value: data.text, kind: "text" });
         if (gap) { rows.push([q.slice(0, 60), "review", "gap: " + data.gaps.join(", ") + " | " + data.text.slice(0, 40)]); review++; }
         else if (isEssay) { rows.push([q.slice(0, 60), "review", "essay (" + (data.method || "") + ") - read it | " + data.text.slice(0, 40)]); review++; }
         else { rows.push([q.slice(0, 60), "filled", data.text.slice(0, 60)]); filled++; }
@@ -576,27 +667,29 @@
     // seen. Collect short-text option buttons, group them by their question, and click the
     // one matching the engine's answer (e.g. the deterministic COI "No").
     try {
+      // Anchored words to skip, PLUS any button whose text contains "submit"/"apply"
+      // (covers "Submit Application") so dropping the type=submit filter below can't ever
+      // click the real form-submit control.
       const BTN_SKIP = /^(submit|next|back|previous|continue|upload|choose file|browse|add another|add|remove|delete|apply|save|autofill|fill|regenerate|insert|done|close|cancel|\+|\-|×|x)$/i;
+      const BTN_SUBMITTY = /submit|^apply\b|apply now|application/i;
       const climbQ = (el) => {
         let p = el;
         for (let i = 0; i < 8 && p; i++) {
           p = p.parentElement; if (!p) break;
           const t = clean(p.innerText || "");
           if (t.length > 15 && /\?|describe|do you|are you|have you|which|what|size of|authoriz|sponsor/i.test(t)) {
-            return t.replace(/\s*(Yes\s*No|No\s*Yes)\s*$/i, "").trim().slice(0, 160);
+            return stripSectionHead(t.replace(/\s*(Yes\s*No|No\s*Yes)\s*$/i, "").trim()).slice(0, 160);
           }
         }
         return "";
       };
-      // NOTE: do NOT exclude type="submit" here. Ashby's Yes/No option buttons are
-      // <button type="submit"> (a button in a form defaults to submit), yet clicking one only
-      // toggles the choice (Ashby prevents default). The real Submit button is excluded by
-      // BTN_SKIP text ("Submit Application"), and only 2-8 button groups sharing a question are
-      // ever clicked, so a lone submit button is never touched.
       const cand = [...document.querySelectorAll("button")].filter((b) => {
+        // Ashby renders Yes/No choice buttons as type="submit" too, so we do NOT exclude by
+        // type; the real "Submit Application" button is kept out by text (BTN_SKIP / BTN_SUBMITTY)
+        // and by the 2-8-per-question group check below.
         if (inPenates(b) || b.disabled || !shown(b)) return false;
         const t = clean(b.textContent);
-        return t && t.length <= 40 && !BTN_SKIP.test(t);
+        return t && t.length <= 40 && !BTN_SKIP.test(t) && !BTN_SUBMITTY.test(t);
       });
       const groups = new Map();
       for (const b of cand) {
@@ -627,6 +720,43 @@
         else { rows.push([q.slice(0, 60), "skip", "answer '" + clean(data.text).slice(0, 20) + "' not a choice -> you"]); skipped++; }
       }
     } catch (e) { rows.push(["(button choice pass)", "skip", String(e).slice(0, 60)]); }
+
+    // ---- heal pass ----------------------------------------------------------------
+    // Ashby intermittently re-renders the form (a stray effect, the file attach, a sibling
+    // update) and wipes a value we already set - phone was the repeat offender. Re-scan on
+    // FRESH element refs and re-apply any text/radio value that is now empty. No server calls
+    // (we saved the values), so it's cheap and can't make anything worse.
+    if (healMap.length) {
+      try {
+        await sleep(500);
+        const fresh = deepFields();
+        let healed = 0;
+        for (const item of healMap) {
+          try {
+            if (item.kind === "text") {
+              const el = fresh.find((o) => (o.tagName === "TEXTAREA" || o.tagName === "INPUT") &&
+                !inPenates(o) && !o.disabled && questionFor(o) === item.q);
+              if (el && !((el.value || "").trim())) { setNative(el, item.value); healed++; }
+            } else if (item.kind === "radio") {
+              const opts = fresh.filter((o) => o.tagName === "INPUT" && (o.type || "").toLowerCase() === "radio" && groupQuestion(o) === item.q);
+              if (opts.length && !opts.some((o) => o.checked)) {
+                const na = norm(item.value);
+                let best = null, bestS = 0;
+                for (const o of opts) {
+                  const ol = norm(optionLabel(o));
+                  let s = -1;
+                  if (ol === na) s = 100; else if (ol && ol.startsWith(na)) s = 70;
+                  else if (na && na.startsWith(ol) && ol.length >= 3) s = 60;
+                  if (s > bestS) { bestS = s; best = o; }
+                }
+                if (best) { commitOption(best); healed++; }
+              }
+            }
+          } catch (_) {}
+        }
+        if (healed) rows.push(["Re-filled after re-render", "filled", healed + " field(s)"]);
+      } catch (_) {}
+    }
 
     fillBusy = false;
     const summary = "Filled " + filled + " . " + review + " to review . " + skipped + " left for you . " + elapsed() + "s total . NOTHING submitted.";
@@ -659,6 +789,22 @@
     if (report) { report.style.display = "block"; return; }
     report = document.createElement("div");
     report.setAttribute("data-penates", "report");
+    // Defensive reset so the host page's CSS (global *-rules, !important line-height/position/
+    // white-space) can't squish the panel. We reset only the box/inheritance props a hostile
+    // page overrides and leave layout (display/flex/color/font-size/padding set inline) alone.
+    if (!document.getElementById("penates-report-css")) {
+      const st = document.createElement("style");
+      st.id = "penates-report-css";
+      st.textContent =
+        '[data-penates="report"], [data-penates="report"] *{' +
+          'box-sizing:border-box!important;line-height:1.5!important;white-space:normal!important;' +
+          'float:none!important;transform:none!important;letter-spacing:normal!important;' +
+          'text-indent:0!important;vertical-align:baseline!important;min-height:0!important;' +
+          'max-width:none!important;margin:0!important;text-shadow:none!important;' +
+          'position:static!important;font-family:system-ui,sans-serif!important}' +
+        '[data-penates="report"]{position:fixed!important}';   // container itself must stay fixed
+      (document.head || document.documentElement).appendChild(st);
+    }
     report.style.cssText =
       "position:fixed;right:16px;top:16px;z-index:2147483647;width:460px;max-width:94vw;max-height:82vh;overflow:auto;" +
       "background:#0f172a;color:#e5e7eb;border:1px solid #334155;border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.45);" +
