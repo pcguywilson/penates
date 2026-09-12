@@ -370,7 +370,7 @@ def answer_essay(question, limit=None, company=None, url=None, model=None, want_
 
     # domain gap (e.g. 'endpoint management' with no endpoint story) -> treat as a gap
     dgap = _domain_gap(q, story) if genre in ("owned_project", "technical_experience") else None
-    if dgap and (score is None or score < 2):
+    if dgap:
         gaps = dict(gaps)
         if dgap.title() not in gaps["hard"]:
             gaps["hard"] = gaps["hard"] + [dgap]

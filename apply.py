@@ -139,11 +139,23 @@ def strip_stem(s):
     s = STEM_RE.sub("", s).strip()
     return s
 
-def make_hook(app, use_llm):
+def make_hook(app, use_llm, url=None, page_context=None):
     company = app.get("company", "the company")
-    desc = (app.get("company_description") or "").strip()
+    # Ground the company sentence in the REAL posting via the single generic path
+    # (job_context.resolve_job_text -> extract_facts -> _clean_fact), NOT a hardcoded
+    # application.yaml blurb. Same source every question uses; no company-specific rules.
+    desc = ""
+    try:
+        import job_context as _jc
+        _text, _src = _jc.resolve_job_text(url, page_context)
+        if _text:
+            desc = " ".join(_jc.extract_facts(_text)[:2]).strip()
+    except Exception:
+        pass
     if not use_llm or not ollama_up():
         return None
+    if not desc:
+        return None   # no verified company facts from the posting -> pause, never invent
     sys_p = (f"Complete this sentence with a reason clause: 'I'm interested in {company} because ...'. "
              f"Output ONLY the clause that comes AFTER the word 'because' — do not repeat the "
              f"company name, 'I'm interested', 'drawn to', or 'because'. Describe ONLY {company} — "
@@ -208,7 +220,8 @@ def log_unmatched(question):
         f.write(question.strip() + "\n")
 
 def answer(question=None, field=None, cli_company=None, polish=True,
-           use_llm=True, max_chars=None, app=None, required=False):
+           use_llm=True, max_chars=None, app=None, required=False,
+           url=None, page_context=None):
     profile = load("profile.yaml"); intents = load("answers.yaml")["intents"]
     if app is None:
         app = load("application.yaml")
@@ -241,7 +254,7 @@ def answer(question=None, field=None, cli_company=None, polish=True,
         text = spec["answer"]
 
     if "{{WHY_COMPANY}}" in text:
-        hook = make_hook(app, use_llm)
+        hook = make_hook(app, use_llm, url=url, page_context=page_context)
         if hook is None:
             return {"kind": "pause", "intent": intent,
                     "text": "[PAUSE] company_interest needs Ollama for the company sentence "
