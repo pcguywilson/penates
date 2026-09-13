@@ -6,6 +6,12 @@ Routes:
   /answer  (POST)  -> JSON {question, limit?, company?, url?, fresh?} -> grounded
                       answer. Tiers: structured field -> intent template ->
                       LEARNED (your vetted past answers) -> compose (LLM + gap guard).
+  /answer-batch (POST) -> JSON {questions: [str|{q|question, limit?}], company?,
+                      role?, url?, page_context?, bulk?, fresh?, bulk_skip_essays?}
+                      -> {ok, answers: [{q, .../answer fields} | {q, ok:false, __error}]}.
+                      answers[i] matches questions[i]. One item failing never fails the
+                      batch. Defaults bulk=true and bulk_skip_essays=true (essays stay
+                      click-to-draft). page_context is sent once and applied to every item.
   /learn   (POST)  -> JSON {question, answer, company?} -> remember YOUR final
                       answer, keyed by the normalized question, so the same
                       essay question returns your vetted words next time.
@@ -276,13 +282,17 @@ def do_answer(payload):
                 if _la:
                     return _shape({"kind": "answer", "method": "learned", "chars": len(_la),
                                    "gaps": [], "text": _la})
-            # bulk fill: don't spend 30-60s per field generating an essay inline. Leave it for
-            # the per-field popup (reviewed anyway). Gap disclosures are deterministic and fast.
-            if payload.get("bulk") and not _is_gap:
+            # Full fill ATTEMPTS every essay inline (drafts it), so the user can read each answer
+            # in the field and confirm it makes sense before submitting. The engine validates and
+            # marks each one "review"; nothing auto-submits. Set bulk_skip_essays:true in the
+            # payload to restore the old fast behavior (defer essays to click-to-draft).
+            if payload.get("bulk") and payload.get("bulk_skip_essays") and not _is_gap:
                 return {"ok": False, "kind": "pause", "method": "essay-skip",
                         "genre": _genre, "chars": 0, "gaps": [], "text": ""}
             out = _essay.answer_essay(q, limit=limit, company=payload.get("company"),
-                                      url=payload.get("url"), page_context=payload.get("page_context"))
+                                      url=payload.get("url"), page_context=payload.get("page_context"),
+                                      role=payload.get("role"),
+                                      why_hybrid=(bool(payload.get("fresh")) and not payload.get("bulk")))
             out.setdefault("ok", out.get("kind") in ("answer", "field"))
             return out
     except Exception as e:
@@ -311,12 +321,93 @@ def do_answer(payload):
     try:
         import essay as _essay
         out = _essay.answer_essay(q, limit=limit, company=payload.get("company"),
-                                  url=payload.get("url"), page_context=payload.get("page_context"))
+                                  url=payload.get("url"), page_context=payload.get("page_context"),
+                                  role=payload.get("role"),
+                                  why_hybrid=(bool(payload.get("fresh")) and not payload.get("bulk")))
         out.setdefault("ok", out.get("kind") in ("answer", "field"))
         return out
     except Exception as e:
         print("[essay tier3 skip] " + str(e), flush=True)
         return _shape(_apply.compose(q, max_chars=limit))
+
+def _log_answer(q, out, ms):
+    try:
+        _ANSWER_LOG.insert(0, {"q": (q or "")[:120], "method": (out or {}).get("method"),
+                               "chars": (out or {}).get("chars"), "gaps": (out or {}).get("gaps"),
+                               "ms": ms, "t": int(time.time())})
+        del _ANSWER_LOG[60:]
+    except Exception:
+        pass
+
+
+def do_answer_batch(payload):
+    """Resolve many questions in one request. answers[i] corresponds to questions[i].
+
+    Shared company/role/url/page_context/fresh/bulk/bulk_skip_essays apply to every
+    item. Per-item limit is taken from the item when present. A throw in do_answer
+    becomes {q, ok:False, __error} for that slot only.
+    """
+    payload = payload or {}
+    raw_qs = payload.get("questions")
+    if raw_qs is None:
+        raw_qs = payload.get("items")
+    if not isinstance(raw_qs, list):
+        return {"ok": False, "error": "questions must be a list", "answers": []}
+    if len(raw_qs) > 200:
+        raw_qs = raw_qs[:200]
+
+    bulk = True if payload.get("bulk") is None else bool(payload.get("bulk"))
+    skip_essays = True if payload.get("bulk_skip_essays") is None else bool(payload.get("bulk_skip_essays"))
+    shared = {
+        "company": payload.get("company"),
+        "role": payload.get("role"),
+        "url": payload.get("url"),
+        "page_context": payload.get("page_context"),
+        "fresh": bool(payload.get("fresh")),
+        "bulk": bulk,
+        "bulk_skip_essays": skip_essays,
+    }
+
+    answers = []
+    t_all = time.time()
+    for item in raw_qs:
+        limit = payload.get("limit")
+        if isinstance(item, str):
+            q = item
+        elif isinstance(item, dict):
+            q = item.get("question") or item.get("q") or ""
+            if "limit" in item:
+                limit = item.get("limit")
+        else:
+            q = ""
+        q = (q or "").strip()[:600]
+        if not q:
+            answers.append({"q": q, "ok": False, "__error": "missing question"})
+            continue
+        one = dict(shared)
+        one["question"] = q
+        one["limit"] = limit
+        print("[answer] " + q.replace("\n", " ")[:120], flush=True)
+        _t0 = time.time()
+        try:
+            out = do_answer(one)
+            rec = dict(out) if isinstance(out, dict) else {"ok": False, "text": str(out)}
+            rec["q"] = q
+            answers.append(rec)
+            _ms = int((time.time() - _t0) * 1000)
+            print("       -> %s / %s chars / gaps=%s / %dms" % (
+                rec.get("method"), rec.get("chars"), rec.get("gaps"), _ms), flush=True)
+            _log_answer(q, rec, _ms)
+        except Exception as e:
+            _ms = int((time.time() - _t0) * 1000)
+            print("[error] batch item %s: %s" % (q[:80], e), flush=True)
+            rec = {"q": q, "ok": False, "__error": str(e)}
+            answers.append(rec)
+            _log_answer(q, {"method": "error", "chars": 0, "gaps": []}, _ms)
+
+    total_ms = int((time.time() - t_all) * 1000)
+    print("[answer-batch] n=%d / %dms" % (len(answers), total_ms), flush=True)
+    return {"ok": True, "answers": answers, "n": len(answers), "ms": total_ms}
 
 # ---- refresh pipeline (dashboard "Refresh jobs" button) --------------------
 _PIPE = {"running": False, "log": [], "started": 0, "finished": 0}
@@ -679,23 +770,34 @@ class H(BaseHTTPRequestHandler):
                 out = do_answer(payload)
                 _ms = int((time.time() - _t0) * 1000)
                 print("       -> %s / %s chars / gaps=%s / %dms" % (out.get("method"), out.get("chars"), out.get("gaps"), _ms), flush=True)
-                try:
-                    _ANSWER_LOG.insert(0, {"q": q[:120], "method": out.get("method"),
-                                           "chars": out.get("chars"), "gaps": out.get("gaps"),
-                                           "ms": _ms, "t": int(time.time())})
-                    del _ANSWER_LOG[60:]
-                except Exception:
-                    pass
+                _log_answer(q, out, _ms)
                 return self._json(200, out)
             except Exception as e:
                 print("[error] " + str(e), flush=True)
                 return self._json(500, {"ok": False, "text": "[ERROR] " + str(e)})
+        if parsed.path == "/answer-batch":
+            try:
+                payload = json.loads(raw or b"{}")
+            except Exception:
+                return self._json(400, {"ok": False, "error": "bad json", "answers": []})
+            qs = payload.get("questions")
+            if qs is None:
+                qs = payload.get("items")
+            n = len(qs) if isinstance(qs, list) else 0
+            print("[answer-batch] %d questions" % n, flush=True)
+            try:
+                out = do_answer_batch(payload)
+                code = 200 if out.get("ok") else 400
+                return self._json(code, out)
+            except Exception as e:
+                print("[error] " + str(e), flush=True)
+                return self._json(500, {"ok": False, "error": str(e), "answers": []})
         return self._send(404, b"not found")
     def log_message(self, *a):
         pass
 
 if __name__ == "__main__":
-    print("Apply autofill server on http://127.0.0.1:%d  (/apply, /answer, /learn)" % PORT)
+    print("Apply autofill server on http://127.0.0.1:%d  (/apply, /answer, /answer-batch, /learn)" % PORT)
     print("Leave this window open.")
     try:
         ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()

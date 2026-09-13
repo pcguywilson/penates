@@ -87,6 +87,42 @@ def fetch_public_posting(url, timeout=6):
         return ""
 
 
+_TITLE_CACHE = {}
+def fetch_public_title(url, timeout=6):
+    """The posting's ROLE TITLE for the exact job named in the URL (this job id only), cached.
+    Same public endpoints as fetch_public_posting. Used to pin the applied-for role. Best-effort:
+    any failure returns ""."""
+    if not url:
+        return ""
+    if url in _TITLE_CACHE:
+        return _TITLE_CACHE[url]
+    from sources import base
+    title = ""
+    try:
+        ats, board, jid = parse_ats_url(url)
+        if ats == "greenhouse":
+            d = base.http_json(
+                "https://boards-api.greenhouse.io/v1/boards/%s/jobs/%s" % (board, jid), timeout=timeout)
+            title = (d.get("title") or "").strip()
+        elif ats == "lever":
+            d = base.http_json(
+                "https://api.lever.co/v0/postings/%s/%s?mode=json" % (board, jid), timeout=timeout)
+            if isinstance(d, list):
+                d = d[0] if d else {}
+            title = (d.get("text") or "").strip()
+        elif ats == "ashby":
+            d = base.http_json(
+                "https://api.ashbyhq.com/posting-api/job-board/%s" % board, timeout=timeout)
+            for j in d.get("jobs", []) or []:
+                if str(j.get("id")) == str(jid):
+                    title = (j.get("title") or "").strip()
+                    break
+    except Exception:
+        title = ""
+    _TITLE_CACHE[url] = title
+    return title
+
+
 # ------------------------------------------------------------------ page_context scoring
 # A real JD has prose sections and role language; a form has field labels and questions.
 _JD_SIGNAL = re.compile(
