@@ -96,6 +96,28 @@ def find_by_url(queue, url):
             return r
     return None
 
+def role_for(url):
+    """Return the stored role/title for this URL, or "". Same matching as desc_for. Used to
+    pin the APPLIED-FOR role so an answer never calls the job by the candidate's current title."""
+    if not url:
+        return ""
+    q = load()["queue"]
+    n = _norm_url(url)
+    for r in q:
+        if _norm_url(r.get("url")) == n or _norm_url(r.get("apply_url")) == n:
+            return (r.get("role") or r.get("title") or "").strip()
+    try:
+        import job_context
+        ats, board, jid = job_context.parse_ats_url(url)
+        if ats:
+            aid = "%s:%s:%s" % (ats, board, jid)
+            for r in q:
+                if r.get("ats_id") == aid or (jid and jid in (r.get("url") or "")):
+                    return (r.get("role") or r.get("title") or "").strip()
+    except Exception:
+        pass
+    return ""
+
 def desc_for(url):
     """Return a stored clean job description for this URL, or "". The free, no-network
     priority-1 source for grounding "why company" answers. Matches on normalized url,

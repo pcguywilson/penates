@@ -1,83 +1,205 @@
-#!/usr/bin/env python3
-"""Regression tests for the genre answer engine. Deterministic only (no Ollama):
-covers the three live failures. Run: python tests/test_essay.py"""
-import os, sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+"""Deterministic tests for the answer engine's role-pinning and STAR fallback (build 17).
+No Ollama, no network. Run: python -m pytest tests/test_essay.py  (or python tests/test_essay.py)
+
+Covers Grok's Priority-1 spec:
+  - current-title-as-role validator: true and false cases
+  - why-company fallback names the TARGET role, not the current title
+  - resolve_target_role rejects form chrome ("Application") and passes a real title
+  - _compose_star contains Action + Result and passes validate (no no_action_verb)
+"""
+import os, sys, unittest
+
+# import the engine whether this file lives in tests/ (repo root is the parent) or alongside it
+_here = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(_here))
+sys.path.insert(0, _here)
 import essay
 
-Q1 = ("In three to four sentences describe the most complex endpoint management or device "
-      "automation project you personally owned. What was your role, what tools or systems did "
-      "you use, and what changed as a result?")
-Q2 = ("If you were given the opportunity to spend a month building a software application with "
-      "an AI coding agent for use at home or at work, what would you build, and why? (100-250 words)")
-Q3 = ("Tell us about a time you worked with Salesforce or another brittle business-automation "
-      "platform and had to balance stakeholder tradeoffs.")
-QW = "Describe a time you rebuilt or fixed a broken monitoring or SIEM system that you owned."
 
-fails = []
-def check(name, cond, extra=""):
-    print(("PASS " if cond else "FAIL ") + name + ("" if cond else "  <-- " + str(extra)))
-    if not cond: fails.append(name)
+class RoleValidator(unittest.TestCase):
+    CT = "Systems Analyst II"
+    TR = "Senior IT Engineer"
 
-# --- constraints ---
-c1 = essay.parse_constraints(Q1)
-check("Q1 sentence range 3-4", c1["min_sent"] == 3 and c1["max_sent"] == 4, c1)
-check("Q1 owned flag", c1["owned"] is True, c1)
-c2 = essay.parse_constraints(Q2)
-check("Q2 word range 100-250", c2["min_words"] == 100 and c2["max_words"] == 250, c2)
+    def test_flags_current_title_as_the_job(self):
+        bad = ("I am particularly drawn to the Systems Analyst II role at 1Password "
+               "because it aligns with my hands-on experience in cloud infrastructure.")
+        self.assertTrue(essay.why_uses_title_as_role(bad, self.CT, self.TR))
 
-# --- genre (all three hit deterministic rules; no model) ---
-check("Q1 genre owned_project", essay.classify_genre(Q1, c1) == "owned_project", essay.classify_genre(Q1, c1))
-check("Q2 genre hypothetical (beats definition)", essay.classify_genre(Q2, c2) == "hypothetical", essay.classify_genre(Q2, c2))
-c3 = essay.parse_constraints(Q3)
-check("Q3 genre owned_project", essay.classify_genre(Q3, c3) == "owned_project", essay.classify_genre(Q3, c3))
+    def test_allows_current_title_as_background(self):
+        good = ("At 1Password, we're building a safe digital future. As a Network Systems "
+                "Analyst 4 with hands-on cloud and compliance experience, this role is a fit.")
+        self.assertFalse(essay.why_uses_title_as_role(good, self.CT, self.TR))
 
-# --- gap detection: Salesforce is a gap; endpoint management is a domain gap ---
-g3 = essay.detect_gaps(Q3)
-check("Q3 flags Salesforce as gap", any("salesforce" in x.lower() for x in g3["hard"]), g3)
-g1 = essay.detect_gaps(Q1)
-st1, sc1 = essay.retrieve_story(Q1, True)
-dg = essay._domain_gap(Q1, st1)
-check("Q1 endpoint management is a domain gap", dg is not None, (dg, (st1 or {}).get("id"), sc1))
+    def test_allows_when_target_role_also_named(self):
+        # mentions the current title as a role BUT also names the real target role -> background
+        both = ("Coming from a Systems Analyst II role, I am excited about the Senior IT "
+                "Engineer position at 1Password.")
+        self.assertFalse(essay.why_uses_title_as_role(both, self.CT, self.TR))
 
-# --- retrieval: a SIEM/monitoring question pulls a monitoring story (by domain, not a private id) ---
-stw, scw = essay.retrieve_story(QW, True)
-_doms = set((stw or {}).get("domains", []))
-check("SIEM question retrieves a monitoring/siem story",
-      bool(_doms & {"siem", "security monitoring", "observability", "monitoring"}),
-      ((stw or {}).get("id"), _doms))
+    def test_no_flag_when_applying_to_same_title(self):
+        same = "I am excited about the Systems Analyst II role at Acme."
+        self.assertFalse(essay.why_uses_title_as_role(same, self.CT, "Systems Analyst II"))
 
-# --- validator: catches the exact old failures ---
-bad1 = "I have experience with GitHub Actions and Ansible for deployment and operational automation."
-check("validator rejects skills-dump opening", "banned_opening" in essay.validate(bad1, "owned_project", c1, {"hard":[],"limited":[]}), essay.validate(bad1,"owned_project",c1,{"hard":[],"limited":[]}))
-bad2 = "To me, DevOps means bringing development and operations together with automation."
-v2 = essay.validate(bad2, "hypothetical", c2, {"hard":[],"limited":[]})
-check("validator rejects definition-as-hypothetical", "is_a_definition" in v2 or "not_a_proposal" in v2, v2)
-check("validator rejects under-min-words hypothetical", "under_min_words" in " ".join(essay.validate(bad2,"hypothetical",c2,{"hard":[],"limited":[]})), essay.validate(bad2,"hypothetical",c2,{"hard":[],"limited":[]}))
-bad3 = "I built a large Salesforce automation that streamlined the whole business."
-check("validator rejects gap not disclosed", "gap_not_disclosed" in essay.validate(bad3, "owned_project", c3, g3), essay.validate(bad3,"owned_project",c3,g3))
-good1 = "I rebuilt a dead Wazuh SIEM on Rocky Linux 9.7. I owned it end to end, fixed the indexer certs and agents, and captured a hardened image. Monitoring came back across the fleet."
-check("validator passes a good owned_project answer", essay.validate(good1, "owned_project", c1, {"hard":[],"limited":[]}) == [], essay.validate(good1,"owned_project",c1,{"hard":[],"limited":[]}))
+    def test_no_flag_without_current_title(self):
+        self.assertFalse(essay.why_uses_title_as_role("anything at all", "", self.TR))
 
-# --- gap_analog path is deterministic and honest (no model) ---
-honest = essay._honest_gap(Q3, g3, None, c3)
-check("gap answer opens with an honest denial", "have not worked" in honest.lower() or "not owned" in honest.lower(), honest[:80])
+    def test_validate_surfaces_current_title_as_role(self):
+        bad = ("I am drawn to the Systems Analyst II role at 1Password because I secure "
+               "cloud infrastructure and compliance every day.")
+        fails = essay.validate(bad, "why_company", {}, {"hard": [], "limited": []},
+                               facts=[], current_title=self.CT, target_role=self.TR)
+        self.assertIn("current_title_as_role", fails)
 
-print("\n%d/%d checks passed" % (12 - len(fails) + 0, 12) if False else "")
-# --- end-to-end: empty bank must NOT invent a project ---
-_orig = essay._load_stories
-essay._load_stories = lambda: []
-_r = essay.answer_essay("Describe the most complex project you personally owned. What changed?")
-check("empty story bank -> NEEDS_INPUT, no invented project",
-      (not _r.get("ok")) and "NEEDS INPUT" in (_r.get("text") or "").upper(), (_r.get("method"), _r.get("ok")))
-essay._load_stories = _orig
 
-# --- end-to-end: Salesforce question -> gap_analog genre + first-sentence denial (deterministic) ---
-_r3 = essay.answer_essay(Q3)
-check("Q3 final genre is gap_analog", _r3.get("genre") == "gap_analog", _r3.get("genre"))
-_t3 = (_r3.get("text") or "").lower()
-check("Q3 discloses the gap up front",
-      ("have not worked" in _t3[:150] or "not owned" in _t3[:150]) and "salesforce" in _t3[:150], _t3[:90])
+class ResolveTargetRole(unittest.TestCase):
+    def test_rejects_form_chrome(self):
+        # role chrome + no url -> no jobs.json / posting to fall back to -> empty
+        self.assertEqual(essay.resolve_target_role("Application", ""), "")
+        self.assertEqual(essay.resolve_target_role("Application Questions", ""), "")
 
-print(("ALL PASS" if not fails else ("FAILURES: " + ", ".join(fails))))
-sys.exit(1 if fails else 0)
+    def test_passes_real_title(self):
+        self.assertEqual(essay.resolve_target_role("Senior IT Engineer", ""), "Senior IT Engineer")
+
+
+class WhyFallback(unittest.TestCase):
+    # mission/slogan copy - the ONLY fact this fixture's ATS exposes
+    FACTS = ["At 1Password, we're building the foundation for a safe, productive digital future"]
+    # an operational posting detail (team/seniority/remote) - the kind worth citing
+    OP_FACTS = ["This is a senior role on the Infrastructure team, fully remote in the US"]
+
+    def test_template_names_target_role_not_current_title(self):
+        out = essay._why_candidate_only(self.FACTS, {"max_chars": 700}, "Senior IT Engineer", "1Password")
+        self.assertIn("Senior IT Engineer", out)
+        self.assertFalse(essay.why_uses_title_as_role(out, essay._current_title(), "Senior IT Engineer"))
+
+    def test_template_is_candidate_first_not_slogan(self):
+        # Grok correction: sentence 1 must be the candidate/role, never the company's About line.
+        out = essay._why_candidate_only(self.FACTS, {"max_chars": 700}, "Senior IT Engineer", "1Password")
+        first = out.split(".")[0].lower()
+        self.assertIn("i'm applying", first, "sentence 1 must be candidate-first, got %r" % first)
+        # the marketing slogan must not appear anywhere when it's the only fact
+        self.assertNotIn("safe, productive digital future", out.lower())
+        self.assertNotIn("building the foundation", out.lower())
+        self.assertNotIn("drew me to the company", out.lower())
+
+    def test_marketing_fact_is_dropped(self):
+        self.assertFalse(essay._fact_is_operational(essay._fact_phrase(self.FACTS[0], "1Password")))
+        self.assertEqual(essay._operational_facts(self.FACTS, "1Password"), [])
+
+    def test_operational_fact_is_kept_and_cited(self):
+        self.assertTrue(essay._fact_is_operational(essay._fact_phrase(self.OP_FACTS[0], "1Password")))
+        out = essay._why_candidate_only(self.OP_FACTS, {"max_chars": 700}, "Senior IT Engineer", "1Password")
+        self.assertIn("posting", out.lower(), "an operational fact should be cited, got %r" % out)
+        # still candidate-first
+        self.assertIn("i'm applying", out.split(".")[0].lower())
+
+    def test_template_is_clean(self):
+        out = essay._why_candidate_only(self.FACTS, {"max_chars": 700}, "Senior IT Engineer", "1Password").lower()
+        for bad in ("seamless", "aws govcloud", "you're building", "aligns perfectly", "strong fit", "my focus"):
+            self.assertNotIn(bad, out, "template must not contain %r" % bad)
+
+    def test_template_passes_its_own_validators(self):
+        out = essay._why_candidate_only(self.FACTS, {"max_chars": 700}, "Senior IT Engineer", "1Password")
+        fails = essay.validate(out, "why_company", {}, {"hard": [], "limited": []},
+                               facts=self.FACTS, current_title="Systems Analyst II",
+                               target_role="Senior IT Engineer")
+        self.assertEqual(fails, [], "clean template should pass validate, got %r" % fails)
+
+    def test_template_with_operational_fact_passes_validators(self):
+        out = essay._why_candidate_only(self.OP_FACTS, {"max_chars": 700}, "Senior IT Engineer", "1Password")
+        fails = essay.validate(out, "why_company", {}, {"hard": [], "limited": []},
+                               facts=self.OP_FACTS, current_title="Systems Analyst II",
+                               target_role="Senior IT Engineer")
+        self.assertEqual(fails, [], "template citing an operational fact should pass, got %r" % fails)
+
+
+class GarbageRejection(unittest.TestCase):
+    # the exact build-17 live draft the user rejected
+    GARBAGE = ("At 1Password, you're building the foundation for a safe, productive digital future, "
+               "which aligns perfectly with my hands-on experience in cloud infrastructure, "
+               "particularly with AWS and AWS GovCloud. My focus on ensuring secure and compliant "
+               "environments will help drive best practices and seamless user experiences, making "
+               "me a strong fit for this Senior IT Engineer role.")
+    FACTS = ["At 1Password, we're building the foundation for a safe, productive digital future"]
+
+    def test_live_garbage_draft_is_rejected(self):
+        fails = essay.validate(self.GARBAGE, "why_company", {}, {"hard": [], "limited": []},
+                               facts=self.FACTS, current_title="Systems Analyst II",
+                               target_role="Senior IT Engineer")
+        self.assertTrue(fails, "the garbage draft must NOT validate clean")
+        # it fails for the right reasons
+        joined = " ".join(fails)
+        self.assertTrue("fluff" in joined or "claims_unowned" in joined or "rewrote_fact" in joined)
+
+    def test_individual_gates(self):
+        self.assertIsNotNone(essay.why_fluff("this aligns perfectly with my work"))
+        self.assertIsNone(essay.why_fluff("the compliance work I do aligns with this role"))  # bare 'aligns' is fine now
+        self.assertIsNotNone(essay.why_fluff("resonates with my passion"))
+        self.assertIsNotNone(essay.why_fluff("a seamless user experience"))
+        self.assertTrue(essay.why_rewrote_fact("you're building a great future", self.FACTS))
+        self.assertFalse(essay.why_rewrote_fact("1Password's focus on building the future", self.FACTS))
+
+    def test_fact_words_are_not_fluff(self):
+        # a word that appears inside the verified fact is grounding, not fluff (Grok's allowlist)
+        facts = ["we thrive in a fast-paced, dynamic environment"]
+        self.assertIsNone(essay.why_fluff("I want to thrive there", facts))
+        self.assertIsNotNone(essay.why_fluff("I want to thrive there", []))   # no fact -> fluff
+
+    def test_clean_model_draft_passes(self):
+        # what a future hybrid would be ALLOWED to ship: dry, first-person, fact-led, no echo
+        clean = ("1Password's focus on building the foundation for a safe, productive digital future "
+                 "is what draws me. My work is in cloud infrastructure and compliance, which is why the "
+                 "Senior IT Engineer role is a fit.")
+        fails = essay.validate(clean, "why_company", {}, {"hard": [], "limited": []},
+                               facts=self.FACTS, current_title="Systems Analyst II",
+                               target_role="Senior IT Engineer")
+        self.assertEqual(fails, [], "a clean model draft must pass, got %r" % fails)
+
+    def test_model_draft_that_slipped_the_gate_is_now_caught(self):
+        # a real qwen2.5:7b draft that passed the first-cut gate: soft fluff + product echo
+        draft = ("1Password's focus on building the foundation for a safe, productive digital future "
+                 "resonates with my passion for infrastructure and security engineering. In my current "
+                 "role, I have experience in cloud environments and security monitoring, which aligns "
+                 "well with the need to ensure every device is trusted and every application sign-in is "
+                 "secure. This opportunity allows me to contribute to these critical areas and support "
+                 "the company's mission.")
+        fails = essay.validate(draft, "why_company", {}, {"hard": [], "limited": []},
+                               facts=self.FACTS, current_title="Systems Analyst II",
+                               target_role="Senior IT Engineer")
+        self.assertTrue(fails, "the product-echo/fluff draft must be rejected")
+
+
+class GapOpener(unittest.TestCase):
+    def test_gap_opener_is_professional(self):
+        story = {"id": "s", "hero": "Rebuilt a broken Wazuh SIEM",
+                 "star": {"action": "I rebuilt it on Rocky Linux.", "result": "Monitoring came back."}}
+        out = essay._honest_gap("endpoint?", {"hard": ["endpoint management"], "limited": []}, story, {"max_chars": 700})
+        self.assertFalse(out.lower().startswith("to be straight"))
+        self.assertIn("have not worked directly", out.lower())
+
+
+class ComposeStar(unittest.TestCase):
+    STORY = {
+        "id": "wazuh-rebuild",
+        "hero": "Rebuilt a broken Wazuh SIEM",
+        "star": {
+            "situation": "Inherited a Wazuh SIEM that was down: indexer certs, /tmp noexec, agents offline.",
+            "action": "Rebuilt it on Rocky Linux 9.7, restored monitoring, and deployed Windows and Linux agents.",
+            "result": "Monitoring was restored, agents reported again, and I captured a hardened reusable AMI.",
+        },
+    }
+
+    def test_compose_has_action_and_result(self):
+        out = essay._compose_star(self.STORY)
+        self.assertTrue(essay._ACTION_VERB.search(out), "composed answer must contain an action verb")
+        self.assertIn("restored", out.lower())      # result content present
+        self.assertIn("deployed", out.lower())       # action content present
+
+    def test_compose_passes_validate_no_action_verb(self):
+        out = essay._compose_star(self.STORY)
+        fails = essay.validate(out, "owned_project", {}, {"hard": [], "limited": []})
+        self.assertNotIn("no_action_verb", fails)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

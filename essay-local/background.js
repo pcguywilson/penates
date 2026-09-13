@@ -33,8 +33,9 @@ chrome.commands.onCommand.addListener((cmd) => {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => send(tabs[0] && tabs[0].id, type));
 });
 
-// Content script -> serve.py: /answer for a value/draft, /learn to remember an edit, and
-// /resume (GET) for the resume bytes so the content script can attach the file.
+// Content script -> serve.py: /answer for a value/draft, /answer-batch for the whole-page
+// fill (one round-trip), /learn to remember an edit, and /resume (GET) for the resume bytes
+// so the content script can attach the file.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg) return;
   // Resume is a GET that returns {ok, filename, mime, b64}; the content script builds a File.
@@ -47,6 +48,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   let path = null;
   if (msg.type === "FETCH_ANSWER") path = "/answer";
+  else if (msg.type === "FETCH_ANSWER_BATCH") path = "/answer-batch";
   else if (msg.type === "FETCH_LEARN") path = "/learn";
   else if (msg.type === "FETCH_APPLIED") path = "/applied";
   else if (msg.type === "FETCH_FILLLOG") path = "/fill-log";

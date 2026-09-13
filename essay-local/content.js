@@ -12,7 +12,7 @@
 (() => {
   if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
   window.__penatesInit = true;
-  const PENATES_BUILD = "build 16";   // shown in the report header; if you don't see it after a reload, the extension didn't update
+  const PENATES_BUILD = "build 21";   // shown in the report header; if you don't see it after a reload, the extension didn't update
   const IS_TOP = window.top === window;
   let currentEl = null, currentQuestion = "", lastEditable = null, chip = null;
 
@@ -238,13 +238,16 @@
     } catch (_) { return ""; }
   }
 
+  const _ROLE_JUNK = /^(application|apply|apply now|application questions|job application|careers?|open positions?|overview|home|jobs?)$/i;
   function roleGuess() {
     const t = clean(document.title);
+    let r = "";
     let m = t.match(/(?:application|apply)\s+(?:for|:)\s+(.+?)\s+(?:at|@|-|\|)\s+/i);
-    if (m) return m[1].slice(0, 100);
-    m = t.match(/^(.+?)\s+(?:at|@)\s+/i);
-    if (m) return m[1].slice(0, 100);
-    return t.split(/[|\-–—·]/)[0].trim().slice(0, 100);
+    if (m) r = m[1];
+    else { m = t.match(/^(.+?)\s+(?:at|@)\s+/i); if (m) r = m[1]; }
+    if (!r) r = t.split(/[|\-–—·]/)[0].trim();
+    r = clean(r).slice(0, 100);
+    return _ROLE_JUNK.test(r) ? "" : r;   // don't send form chrome as the role
   }
 
   async function markApplied() {
@@ -261,7 +264,7 @@
 
   // ---- server call (via background: dodges CORS / mixed-content / private-network) ----
   async function askEngine(question, limit, fresh, timeoutMs, bulk) {
-    const payload = { question, company: companyGuess(), url: location.href, page_context: pageContext(), limit: limit || null, fresh: !!fresh, bulk: !!bulk };
+    const payload = { question, company: companyGuess(), role: roleGuess(), url: location.href, page_context: pageContext(), limit: limit || null, fresh: !!fresh, bulk: !!bulk };
     const call = (async () => {
       try {
         const resp = await chrome.runtime.sendMessage({ type: "FETCH_ANSWER", payload });
@@ -274,6 +277,37 @@
     // A single field must never hang the whole fill. Cap it and move on.
     if (!timeoutMs) return call;
     return Promise.race([call, sleep(timeoutMs).then(() => ({ __error: "timeout (" + Math.round(timeoutMs / 1000) + "s) -> you" }))]);
+  }
+
+  // ---- batch resolve --------------------------------------------------------------------
+  // One request resolves EVERY question, instead of one content->service-worker round-trip per
+  // field. 28+ sequential SW round-trips were the failure class: any one could stall on an MV3
+  // service-worker eviction and freeze the whole fill (the "What brought you" combobox hang). One
+  // call is ~28x less exposed, carries page_context once, and Promise-races a hard timeout.
+  // serve.py /answer-batch returns {ok, answers:[{q, ...do_answer}|{q,ok:false,__error}], n, ms},
+  // answers[i] === questions[i]. background.js proxies it as FETCH_ANSWER_BATCH.
+  let _answerCache = null;   // Map<question, answer-record> for this fill; verify/heal reuse it
+  async function askEngineBatch(questions, timeoutMs) {
+    const payload = { questions, company: companyGuess(), role: roleGuess(), url: location.href,
+                      page_context: pageContext(), bulk: true };
+    const call = (async () => {
+      try {
+        const resp = await chrome.runtime.sendMessage({ type: "FETCH_ANSWER_BATCH", payload });
+        if (resp && resp.ok) return resp.data || null;
+        return { __error: (resp && resp.error) || "serve.py unreachable on :8765" };
+      } catch (err) {
+        return { __error: String(err) };
+      }
+    })();
+    if (!timeoutMs) return call;
+    return Promise.race([call, sleep(timeoutMs).then(() => ({ __error: "batch timeout" }))]);
+  }
+  // Cache-first single ask: the batch pre-pass fills _answerCache, so the apply loop / verify pass
+  // read it with NO round-trip. A miss (a question the pre-pass didn't collect, e.g. a Yes/No
+  // button group) or fresh:true (per-field Regenerate) falls back to the single /answer call.
+  async function askCached(q, limit, fresh, timeoutMs, bulk) {
+    if (!fresh && _answerCache && _answerCache.has(q)) return _answerCache.get(q);
+    return askEngine(q, limit, fresh, timeoutMs, bulk);
   }
 
   // ---- resume attach ----------------------------------------------------------------
@@ -380,6 +414,11 @@
       ? scope.querySelector('.slds-radio__label, .slds-checkbox__label, .slds-radio_faux, .slds-checkbox_faux, [class*="faux"]') : null;
     if (faux) { faux.click(); if (input.checked) return true; }
     if (host) { host.click(); if (input.checked) return true; }
+    // Ashby radios/checkboxes are the real native inputs styled opacity:0 but 24x24 with
+    // pointer-events:auto (verified live on the fixture - NOT 0x0, so they are never layout-
+    // skipped). A native input.click() toggles and fires the React change handler directly; this
+    // is what actually ticks them when the label association above doesn't reach the input.
+    try { input.click(); if (input.checked) return true; } catch (_) {}
     try {
       input.checked = true;
       input.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -489,9 +528,19 @@
       if (score > bestScore) { bestScore = score; best = o; }
     }
     const targetText = norm((best || opts[0]).textContent);
-    // Synthetic mouse events don't reliably select in react-select v5; keyboard does. ArrowDown
-    // until the intended option is the active descendant, then Enter. Only commit if we actually
-    // reached it - never blind-Enter onto whatever happens to be highlighted.
+    // Commit order matters. Ashby's own autocomplete (role=combobox, class
+    // ashby-application-form-input-autocomplete) renders results as clickable [role=option] divs
+    // and leaves aria-activedescendant null, so the react-select keyboard path never "reaches" the
+    // option and we would blind-skip it (this is why Current Location stayed empty). A real mouse
+    // click on the chosen option element commits it, and the token-scored pick above avoids the
+    // default-active foreign match (e.g. a same-named city abroad) - both verified live on the fixture. Click
+    // first; fall back to keyboard nav for true react-select v5 widgets that ignore synthetic clicks.
+    const clickTarget = best || opts[0];
+    fireMouse(clickTarget);
+    await sleep(260);
+    if (comboCommitted(el) || norm(el.value) === targetText || el.getAttribute("aria-expanded") === "false") return true;
+    // fallback: keyboard nav until the intended option is the active descendant, then Enter. Only
+    // commit if we actually reached it - never blind-Enter onto whatever happens to be highlighted.
     let found = false;
     for (let k = 0; k < opts.length + 3; k++) {
       el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
@@ -510,6 +559,13 @@
     if (fillBusy) return;
     fillBusy = true;
     openReport();
+
+    // Keep the MV3 service worker alive for the whole fill. An open port prevents Chrome's idle
+    // shutdown of the worker, so the batch resolve (and any per-field fallback) can't stall on a
+    // mid-fill eviction - the class of hang that froze earlier builds. Cheap insurance; content
+    // side only. Disconnected in the finally-style cleanup at the end of the fill.
+    let _keepPort = null;
+    try { _keepPort = chrome.runtime.connect({ name: "penates-fill" }); if (_keepPort) _keepPort.onDisconnect.addListener(() => {}); } catch (_) {}
 
     const rows = [];
     const groupsDone = new Set();
@@ -541,11 +597,60 @@
       return shown(el);
     });
 
+    // ---- resolve EVERY question in ONE batch (kills the per-field SW round-trip stalls) --------
+    // Walk the fields, collect the questions the apply loop below will ask (same resolvers, same
+    // skip rules), and ask them all in a single /answer-batch. _answerCache holds question->answer;
+    // the apply loop and the verify/heal passes read it with NO round-trip (askCached). A question
+    // the collector missed, or a per-field Regenerate (fresh:true), falls back to a single /answer -
+    // so a collect/apply mismatch is at worst slower, never wrong. essays are skipped in the batch
+    // (bulk_skip_essays) and stay click-to-draft, exactly as before.
+    _answerCache = new Map();
+    try {
+      const want = new Set();
+      const seenG = new Set();
+      for (const el of fields) {
+        const tag = el.tagName, typ = (el.type || "").toLowerCase();
+        if (tag === "INPUT" && (typ === "radio" || typ === "checkbox")) {
+          const r = el.getBoundingClientRect();
+          if (el.offsetParent === null || getComputedStyle(el).display === "none" || (!r.width && !r.height)) continue;
+          const q = groupQuestion(el);
+          if (!q || seenG.has(q)) continue; seenG.add(q);
+          const optlab = optionLabel(el);
+          if (typ === "checkbox" && CONSENT_RE.test(q + " " + optlab) && !/which|select all|open to|settings/i.test(q)) continue; // consent tick is deterministic, no engine
+          want.add(q);
+        } else if (tag === "SELECT") {
+          const q = questionFor(el);
+          if (!q || skipQuestion(q)) continue;
+          if (el.value && el.selectedIndex > 0 && clean(el.options[el.selectedIndex].text)) continue;
+          want.add(q);
+        } else if (tag === "TEXTAREA" || (tag === "INPUT" && /^(text|email|tel|url|search|number|)$/i.test(typ)) || el.isContentEditable) {
+          const q = questionFor(el);
+          if (!q || skipQuestion(q)) continue;
+          if ((el.value || el.textContent || "").trim()) continue;
+          want.add(q);
+        }
+      }
+      const questions = [...want];
+      if (questions.length) {
+        setReport("Resolving " + questions.length + " fields in one batch ... NOTHING submitted.", rows);
+        const batch = await askEngineBatch(questions, 60000);
+        const answers = (batch && batch.answers) || [];
+        for (let i = 0; i < questions.length; i++) {
+          if (answers[i]) _answerCache.set(questions[i], answers[i]);   // answers[i] === questions[i]
+        }
+        if (batch && batch.__error) rows.push(["Batch resolve", "skip", batch.__error + " - falling back per-field"]);
+      }
+    } catch (e) { rows.push(["Batch resolve", "skip", String(e).slice(0, 50)]); }
+
     for (const el of fields) {
       const tag = el.tagName, typ = (el.type || "").toLowerCase();
       seen++;
       setReport("Filling " + seen + "/" + fields.length + " ... " + elapsed() + "s elapsed. NOTHING submitted.", rows);
 
+      // One field must NEVER abort the whole fill. A throw here (usually touching an element the
+      // Ashby re-render just detached) would otherwise skip the rest of the loop AND the heal +
+      // verify passes, leaving earlier fields wiped and unrestored. Isolate every field.
+      try {
       // ---- radio / checkbox: resolve on the GROUP question, click matching option ----
       if (tag === "INPUT" && (typ === "radio" || typ === "checkbox")) {
         // Skip inputs with no layout box (Ashby's hidden Yes/No backing checkboxes); the button
@@ -571,7 +676,7 @@
           continue;
         }
 
-        const data = await askEngine(q, 25, false, 40000, true);
+        const data = await askCached(q, 25, false, 40000, true);
         groupsDone.add(q);
         if (!data || data.__error) { rows.push([q.slice(0, 60), "skip", data && data.__error ? "engine: " + data.__error : "no answer"]); skipped++; continue; }
         const ans = (data.text || "").trim();
@@ -614,7 +719,7 @@
         if (!q) { continue; }
         if (skipQuestion(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; continue; }
         if (el.value && el.selectedIndex > 0 && clean(el.options[el.selectedIndex].text)) { continue; } // already set
-        const data = await askEngine(q, 40, false, 40000, true);
+        const data = await askCached(q, 40, false, 40000, true);
         if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", "no value -> you"]); skipped++; continue; }
         const ok = fillSelect(el, data.text);
         rows.push([q.slice(0, 60), ok ? "filled" : "skip", ok ? data.text : "'" + data.text + "' not an option"]);
@@ -630,7 +735,7 @@
         const cur = (el.value || el.textContent || "").trim();
         if (cur) { continue; }                        // don't clobber prefilled
         const limit = el.maxLength && el.maxLength > 0 ? el.maxLength : null;
-        const data = await askEngine(q, limit, false, 40000, true);
+        const data = await askCached(q, limit, false, 40000, true);
         if (data && data.method === "essay-skip") { rows.push([q.slice(0, 60), "review", "essay -> click the field to draft it"]); review++; continue; }
         if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", data && data.__error ? "engine: " + data.__error : "no answer -> you"]); skipped++; continue; }
         // a bare structured value (tier-1 field match) belongs in an input/select, never a prose
@@ -659,6 +764,9 @@
         else if (isEssay) { rows.push([q.slice(0, 60), "review", "essay (" + (data.method || "") + ") - read it | " + data.text.slice(0, 40)]); review++; }
         else { rows.push([q.slice(0, 60), "filled", data.text.slice(0, 60)]); filled++; }
         continue;
+      }
+      } catch (e) {
+        try { rows.push([(questionFor(el) || el.name || "field").slice(0, 60), "skip", "error, skipped: " + String(e).slice(0, 40)]); skipped++; } catch (_) {}
       }
     }
 
@@ -706,7 +814,7 @@
         if (btns.some((b) => b.getAttribute("aria-pressed") === "true" || b.getAttribute("aria-checked") === "true")) continue;
         seen++;
         setReport("Filling " + seen + " (choice) ... " + elapsed() + "s elapsed. NOTHING submitted.", rows);
-        const data = await askEngine(q, 25, false, 40000, true);
+        const data = await askCached(q, 25, false, 40000, true);
         if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", data && data.__error ? data.__error : "no answer -> you"]); skipped++; continue; }
         const na = norm(data.text);
         let clicked = null;
@@ -758,6 +866,83 @@
       } catch (_) {}
     }
 
+    // ---- final verify-and-retry pass ------------------------------------------------
+    // The Ashby form re-renders during filling (resume attach + each per-field commit), so a
+    // control can be transiently DETACHED (offsetParent null) exactly when the main loop reaches
+    // it. The radio/checkbox skip-guard then drops it with NO row, and healMap never learned about
+    // it, so it is never re-tried - this is how company size, the "I understand" acknowledgement,
+    // and the location combobox were silently lost. This pass runs once the form has settled,
+    // re-scans on FRESH refs, and re-attempts anything required that is still empty/unchecked. It
+    // only ACTS on a control that is currently unsatisfied, so it can never clobber a good value.
+    try {
+      await sleep(600);
+      const fresh2 = deepFields().filter((el) => {
+        if (inPenates(el)) return false;
+        if (el.tagName === "INPUT" && SKIP_TYPES.test(el.type || "")) return false;
+        if (el.disabled || el.readOnly) return false;
+        return shown(el);
+      });
+      const verifiedGroups = new Set();
+      let fixed = 0;
+      for (const el of fresh2) {
+        const tag = el.tagName, typ = (el.type || "").toLowerCase();
+        try {
+          // radio / checkbox still unsatisfied in its group
+          if (tag === "INPUT" && (typ === "radio" || typ === "checkbox")) {
+            const r = el.getBoundingClientRect();
+            if (el.offsetParent === null || getComputedStyle(el).display === "none" || (!r.width && !r.height)) continue;
+            const q = groupQuestion(el);
+            if (!q || verifiedGroups.has(q)) continue;
+            verifiedGroups.add(q);
+            const group = fresh2.filter((o) => o.tagName === "INPUT" && (o.type || "").toLowerCase() === typ &&
+              ((o.name && el.name && o.name === el.name) || groupQuestion(o) === q));
+            if (group.some((o) => o.checked)) continue;          // already satisfied - leave it
+            const optlab = optionLabel(el);
+            // lone required acknowledgement checkbox (e.g. "I understand ...conditional on
+            // background check"). Its groupQuestion can bleed into a neighboring block, so tick on
+            // CONSENT_RE BEFORE the conditional skip check, keyed on the option's own label.
+            if (typ === "checkbox" && CONSENT_RE.test(q + " " + optlab) && !/which|select all|open to|settings/i.test(q)) {
+              if (commitOption(el)) { fixed++; rows.push([(optlab || q).slice(0, 60), "filled", "checked (verify)"]); }
+              continue;
+            }
+            if (skipQuestion(q)) continue;                        // genuinely meant for you
+            const data = await askCached(q, 25, false, 40000, true);
+            if (!data || data.__error || !data.text) continue;
+            const na = norm(data.text);
+            const scoreOf = (ol) => {
+              if (!ol) return -1;
+              if (ol === na) return 100;
+              if (na && ol.startsWith(na)) return 70;
+              if (na && na.startsWith(ol) && ol.length >= 3) return 60;
+              if (na.length >= 3 && (" " + ol + " ").includes(" " + na + " ")) return 50;
+              if (na.length >= 5 && ol.includes(na)) return 20;
+              return -1;
+            };
+            if (typ === "checkbox") {
+              let n = 0; for (const o of group) { if (scoreOf(norm(optionLabel(o))) >= 50 && commitOption(o)) n++; }
+              if (n) { fixed++; rows.push([q.slice(0, 60), "filled", (n > 1 ? n + " selected" : optionLabel(el)) + " (verify)"]); }
+            } else {
+              let best = null, bestS = 0; for (const o of group) { const s = scoreOf(norm(optionLabel(o))); if (s > bestS) { bestS = s; best = o; } }
+              if (best && commitOption(best)) { fixed++; rows.push([q.slice(0, 60), "filled", optionLabel(best) + " (verify)"]); }
+            }
+            continue;
+          }
+          // combobox still empty (Ashby autocomplete that lost the fill-time timing/re-render race)
+          if (tag === "INPUT" && isCombobox(el)) {
+            if ((el.value || "").trim()) continue;
+            const q = questionFor(el);
+            if (!q || skipQuestion(q)) continue;
+            const data = await askCached(q, null, false, 40000, true);
+            if (!data || data.__error || !data.text) continue;
+            if (await fillCombobox(el, data.text)) { fixed++; rows.push([q.slice(0, 60), "filled", data.text.slice(0, 50) + " (verify)"]); }
+          }
+        } catch (_) {}
+      }
+      if (fixed) { filled += fixed; rows.push(["Verify pass recovered", "filled", fixed + " control(s)"]); }
+    } catch (_) {}
+
+    try { if (_keepPort) _keepPort.disconnect(); } catch (_) {}   // release the service-worker keep-alive
+    _answerCache = null;
     fillBusy = false;
     const summary = "Filled " + filled + " . " + review + " to review . " + skipped + " left for you . " + elapsed() + "s total . NOTHING submitted.";
     setReport(summary, rows);
