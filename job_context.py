@@ -39,6 +39,17 @@ def parse_ats_url(url):
     m = re.search(r"lever\.co/([^/?#]+)/([0-9a-fA-F-]{8,})", u)
     if m:
         return ("lever", m.group(1), m.group(2))
+    # workday: {tenant}.{dc}.myworkdayjobs.com/{site}/job/{jobpath}
+    # board_slug = tenant; job_id = jobpath (may include a location segment)
+    if "myworkdayjobs.com" in u.lower():
+        try:
+            from sources import workday as _wd
+            parts = _wd.parse_url(u)
+            if parts:
+                tenant, _dc, _site, jobpath = parts
+                return ("workday", tenant, jobpath)
+        except Exception:
+            pass
     return (None, None, None)
 
 
@@ -82,6 +93,9 @@ def fetch_public_posting(url, timeout=6):
             for j in d.get("jobs", []) or []:
                 if str(j.get("id")) == str(jid):
                     return base.strip_html(j.get("descriptionPlain") or j.get("descriptionHtml") or "")
+        if ats == "workday":
+            from sources import workday as _wd
+            return _wd.fetch_description(url, timeout=timeout)
         return ""
     except Exception:
         return ""
@@ -161,7 +175,7 @@ def resolve_job_text(url, page_context=None):
         elif text:
             return text, src
     out = _resolve_job_text(url, page_context)
-    if out[1] in ("jobs.json", "fetch:ashby", "fetch:greenhouse", "fetch:lever"):
+    if out[1] in ("jobs.json", "fetch:ashby", "fetch:greenhouse", "fetch:lever", "fetch:workday"):
         _JD_CACHE[key] = out    # only cache the durable network/db sources
     return out
 

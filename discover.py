@@ -13,6 +13,8 @@ NEW ones (deduped by URL against everything already in the store) as status
 import argparse, sys, re, math
 import jobs_store
 
+DESC_CAP = 20000
+
 def _clean(x):
     if x is None: return ""
     if isinstance(x, float) and math.isnan(x): return ""
@@ -71,13 +73,17 @@ def discover(terms, results, hours, sites, include_easy=False):
                 continue
             if TITLE_NO.search(title) or not TITLE_OK.search(title):
                 continue
-            batch.append({"url": url, "company": str(r.get("company") or ""),
-                          "role": title[:120], "source": "jobspy:" + site,
-                          "posted": _clean(r.get("date_posted")),
-                          "location": _clean(r.get("location")),
-                          "workplace": "Remote" if r.get("is_remote") else "",
-                          "salary": _salary(r),
-                          "desc": _clean(r.get("description"))[:1500]})
+            desc = _clean(r.get("description"))
+            row = {"url": url, "company": str(r.get("company") or ""),
+                   "role": title[:120], "source": "jobspy:" + site,
+                   "posted": _clean(r.get("date_posted")),
+                   "location": _clean(r.get("location")),
+                   "workplace": "Remote" if r.get("is_remote") else "",
+                   "salary": _salary(r),
+                   "desc": desc[:DESC_CAP]}
+            if len(desc) > DESC_CAP:
+                row["desc_truncated"] = True
+            batch.append(row)
             n_kept += 1
         print("  %-32s %d in-lane" % (term, n_kept))
 

@@ -17,6 +17,10 @@ Routes:
                       essay question returns your vetted words next time.
                       Company-specific "why this company" answers are NOT stored
                       (they don't transfer across postings).
+  /ranked  (GET)   -> scored job list. Optional filters (AND, post-sort):
+                      remote_only=0|1, us_only=0|1, salary_min=<int annual USD>.
+                      Structured fields first; text fallback only when empty.
+                      Missing/unknown salary or location is KEPT (not hidden).
 
 Leave this window running in the background.
 """
@@ -27,6 +31,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = 8765
 LEARN_PATH = os.path.join(HERE, "data", "learned_answers.json")
 IMPORTED_PATH = os.path.join(HERE, "data", "imported_answers.json")
+# Bump when essay/apply answer behavior changes so stale learned entries miss.
+ENGINE_REV = 1
 
 def _resume_path():
     """Absolute path to the resume to attach. Precedence: RESUME_PATH env / profile.yaml
@@ -107,6 +113,14 @@ def _norm_q(q):
     collapse whitespace. 'Describe a time...' == 'describe a time'."""
     return re.sub(r"[^a-z0-9]+", " ", (q or "").lower()).strip()
 
+def _norm_answer(t):
+    """Normalize answer text for near-equality: lowercase, punct -> spaces, collapse ws."""
+    return re.sub(r"[^a-z0-9]+", " ", (t or "").lower()).strip()
+
+def _content_hash(t):
+    import hashlib
+    return hashlib.sha256(_norm_answer(t).encode("utf-8")).hexdigest()[:16]
+
 def _load_learned():
     try:
         with open(LEARN_PATH, encoding="utf-8") as f:
@@ -122,6 +136,27 @@ def _save_learned(store):
     except Exception as e:
         print("[learn] save failed: %s" % e, flush=True)
 
+_WHY_COMPANY_STOP = frozenset(
+    ("do", "are", "would", "you", "us", "this", "the", "our", "i", "here", "there",
+     "that", "they", "we", "a", "an", "my", "your", "their", "role", "job", "team",
+     "position", "company", "organization", "work", "join"))
+
+def _question_company_token(q):
+    """Company token from a 'why <Company>' / 'work at <Company>' question, or None."""
+    # re.I so 'Why 1Password?' matches; stop-list filters 'why do/are/this/...'.
+    m = re.search(r"\bwhy\s+([A-Z0-9][\w&.\-]*(?:\s+[A-Z0-9][\w&.\-]*){0,3})", q or "", re.I)
+    if not m:
+        m = re.search(
+            r"(?:work (?:at|for)|join|part of)\s+([A-Z0-9][\w&.\-]*(?:\s+[A-Z0-9][\w&.\-]*){0,3})",
+            q or "", re.I)
+    if not m:
+        return None
+    cand = re.sub(r"\s+(there|out|here|today).*$", "", m.group(1).strip().rstrip("?.,!"),
+                  flags=re.I).strip()
+    if cand and cand.lower() not in _WHY_COMPANY_STOP:
+        return cand
+    return None
+
 def _company_specific(q, answer, company):
     """True if the answer is tied to a specific company and must NOT be reused
     across postings (the cross-contamination guard, at the learning layer)."""
@@ -129,6 +164,12 @@ def _company_specific(q, answer, company):
     if re.search(r"why.*(this )?(company|us|here|role|team|position|job)|"
                  r"interested in (working|this)|want to (work|join)|drew you|"
                  r"excites you about|why do you want", ql):
+        return True
+    # why-<Company> by company TOKEN in the question (not keyword-list alone)
+    if _question_company_token(q):
+        return True
+    if company and len(company) >= 2 and re.search(
+            r"\bwhy\s+" + re.escape(company) + r"\b", q or "", re.I):
         return True
     if company and len(company) >= 4 and company.lower() in (answer or "").lower():
         return True
@@ -139,6 +180,9 @@ def learned_lookup(q):
     e = store.get(_norm_q(q))
     if not e:
         return None
+    # Version gate: missing or mismatched engine_rev => stale, fall through to live engine.
+    if e.get("engine_rev") != ENGINE_REV:
+        return None
     # bump usage counter (best-effort)
     try:
         e["uses"] = int(e.get("uses", 0)) + 1
@@ -146,6 +190,25 @@ def learned_lookup(q):
     except Exception:
         pass
     return e.get("answer") or None
+
+def _engine_draft_text(payload):
+    """Fresh engine answer for the same question (no learned/imported), for learn-diff."""
+    p = {
+        "question": payload.get("question"),
+        "limit": payload.get("limit"),
+        "company": payload.get("company"),
+        "role": payload.get("role"),
+        "url": payload.get("url"),
+        "page_context": payload.get("page_context"),
+        "fresh": True,
+        "_engine_only": True,
+    }
+    try:
+        out = do_answer(p)
+        return (out or {}).get("text") or ""
+    except Exception as e:
+        print("[learn] engine draft failed: %s" % e, flush=True)
+        return ""
 
 def do_learn(payload):
     q = (payload.get("question") or "").strip()
@@ -155,11 +218,19 @@ def do_learn(payload):
         return {"ok": False, "skipped": "too short or empty (structured values aren't learned)"}
     if _company_specific(q, a, company):
         return {"ok": False, "skipped": "company-specific answer (not reused across postings)"}
+    # Learn ONLY on a real correction: inserted text must meaningfully differ from the
+    # engine's own draft (normalized). Near-identical insert = no-op (stop re-caching us).
+    draft = _engine_draft_text(payload)
+    if draft and _norm_answer(a) == _norm_answer(draft):
+        return {"ok": False, "skipped": "identical to engine draft (not a correction)"}
     store = _load_learned()
     k = _norm_q(q)
     prev = store.get(k, {})
     store[k] = {"question": q[:400], "answer": a, "company_seen": company[:80],
-                "uses": int(prev.get("uses", 0)), "updated": int(time.time())}
+                "uses": int(prev.get("uses", 0)), "updated": int(time.time()),
+                "engine_rev": ENGINE_REV,
+                "content_hash": _content_hash(a),
+                "draft_hash": _content_hash(draft) if draft else ""}
     _save_learned(store)
     return {"ok": True, "key": k, "count": len(store)}
 
@@ -211,10 +282,13 @@ def do_answer(payload):
     """Tiered. Imported lazily so a broken import can't stop the server.
       0. field guards               -> skip conditional/optional; deterministic COI = No
       1. structured/identity/salary  -> match_field (fields.yaml -> profile.yaml)
-      2. intent template             -> answer(question=...)  (why_company etc)
-      2.5 learned                    -> your vetted past answer for this question
+      1.2 imported (Regenerate only) -> fresh:true review suggestion; never default fill
+      1.5 genre router               -> essay.py (incl. definition / technical_experience)
+      2. intent template             -> answer(question=...)  short-field bank only
+      2.5 learned                    -> your vetted past answer (version-stamped)
       3. open-ended essay            -> compose()             (grounded LLM + gap guard)
     Pass fresh:true to skip the learned tier and force a new compose.
+    Pass _engine_only:true (internal) to skip imported too (learn-diff draft).
     """
     import apply as _apply
     q = (payload.get("question") or "").strip()
@@ -226,6 +300,7 @@ def do_answer(payload):
     except Exception:
         limit = None
     fresh = bool(payload.get("fresh"))
+    engine_only = bool(payload.get("_engine_only"))
 
     # tier 0: field guards (beat every other tier)
     if _is_conditional_followup(q) or _SKIP_LEAVEBLANK.search(q):
@@ -249,9 +324,9 @@ def do_answer(payload):
     except Exception as e:
         print("[tier1 skip] " + str(e), flush=True)
 
-    # tier 1.2: imported reference (your prior AI-chat answers) - a REVIEW draft, not trusted.
-    # Skipped on fresh so Regenerate falls through to a newly generated answer.
-    if not fresh:
+    # tier 1.2: imported reference — Regenerate-only (fresh:true). Never on default
+    # non-fresh fill (was a pre-engine override of live drafts). Skipped for learn-diff.
+    if fresh and not engine_only:
         try:
             rec = imported_lookup(q)
             if rec:
@@ -266,17 +341,16 @@ def do_answer(payload):
         except Exception as e:
             print("[imported skip] " + str(e), flush=True)
 
-    # tier 1.5: genre router - project / hypothetical / gap questions go to the genre
-    # engine (essay.py), NOT the flat answers.yaml templates. why_company / why_role also
-    # route here so they name the real company and invent no company facts. technical_experience
-    # / definition still flow to the tier-2 templates below.
+    # tier 1.5: genre router — project / hypothetical / behavioral / gap / why_* AND
+    # definition / technical_experience go to essay.py BEFORE apply.py's keyword bank.
     try:
         import essay as _essay
         _c = _essay.parse_constraints(q, limit)
         _genre = _essay.classify_genre(q, _c)
         _gaps = _essay.detect_gaps(q)
         _is_gap = bool(_gaps["hard"] or _gaps["limited"])
-        if _genre in ("owned_project", "hypothetical", "behavioral", "short_text", "why_company", "why_role") or _is_gap:
+        if _genre in ("owned_project", "hypothetical", "behavioral", "short_text",
+                      "why_company", "why_role", "definition", "technical_experience") or _is_gap:
             if not fresh:
                 _la = learned_lookup(q)
                 if _la:
@@ -298,7 +372,7 @@ def do_answer(payload):
     except Exception as e:
         print("[essay route skip] " + str(e), flush=True)
 
-    # tier 2: intent template
+    # tier 2: intent template (short-field bank; definition/experience already routed above)
     try:
         r = _apply.answer(question=q, max_chars=limit, cli_company=(payload.get("company") or None),
                           url=payload.get("url"), page_context=payload.get("page_context"))
@@ -410,6 +484,168 @@ def do_answer_batch(payload):
     return {"ok": True, "answers": answers, "n": len(answers), "ms": total_ms}
 
 # ---- refresh pipeline (dashboard "Refresh jobs" button) --------------------
+# ---- /ranked list filters (structured-first; post score-sort; AND) ----------
+_REMOTE_OK_RE = re.compile(
+    r"\bremote\b|work[\s-]?from[\s-]?home|\bwfh\b|distributed\s+team", re.I)
+_ONSITE_RE = re.compile(
+    r"\bonsite\b|\bon-site\b|\bin-office\b|\bhybrid\b|office[\s-]?based|"
+    r"must\s+relocate|relocation\s+required", re.I)
+_US_POS_RE = re.compile(
+    r"\bunited\s+states(?:\s+of\s+america)?\b|\busa\b|\bu\.?\s*s\.?\s*a\.?\b|"
+    r"\bu\.s\.\b|\bremote\s*[-–—]?\s*us\b|\bremote\s*[-–—]?\s*americas\b|"
+    r"\bamericas\b|\bus\s+only\b|\bus-based\b|\bbased\s+in\s+the\s+us\b", re.I)
+# Explicit non-US geo. Canada/UK/etc alone DROP; "USA, Canada" still KEEP via _US_POS_RE.
+_NON_US_RE = re.compile(
+    r"\bindia\b|\bbangalore\b|\bbengaluru\b|\bemea\b|\beurope\b|"
+    r"\bunited\s+kingdom\b|\buk\b|\blondon\b|\bcanada\b|\btoronto\b|"
+    r"\bapac\b|\basia[\s-]?pacific\b|\baustralia\b|\bsydney\b|\bmelbourne\b|"
+    r"\bgermany\b|\bberlin\b|\bfrance\b|\bparis\b|\bnetherlands\b|\bamsterdam\b|"
+    r"\bireland\b|\bdublin\b|\bisrael\b|\btel\s+aviv\b|\bsingapore\b|"
+    r"\bphilippines\b|\bmexico\b|\bbrazil\b|\blatam\b|\blatin\s+america\b|"
+    r"\bpakistan\b|\bwarsaw\b|\bpoland\b", re.I)
+_US_STATES = {
+    "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", "hi", "id", "il",
+    "in", "ia", "ks", "ky", "la", "me", "md", "ma", "mi", "mn", "ms", "mo", "mt",
+    "ne", "nv", "nh", "nj", "nm", "ny", "nc", "nd", "oh", "ok", "or", "pa", "ri",
+    "sc", "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv", "wi", "wy", "dc",
+}
+_US_STATE_NAMES = {
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana", "maine",
+    "maryland", "massachusetts", "michigan", "minnesota", "mississippi",
+    "missouri", "montana", "nebraska", "nevada", "new hampshire", "new jersey",
+    "new mexico", "new york", "north carolina", "north dakota", "ohio",
+    "oklahoma", "oregon", "pennsylvania", "rhode island", "south carolina",
+    "south dakota", "tennessee", "texas", "utah", "vermont", "virginia",
+    "washington", "west virginia", "wisconsin", "wyoming", "district of columbia",
+}
+_SAL_NAN_RE = re.compile(r"\$?\s*nan\b", re.I)
+_SAL_NUM_RE = re.compile(
+    r"(\d+(?:,\d{3})*(?:\.\d+)?)\s*(k)?", re.I)
+_SAL_HR_RE = re.compile(r"/\s*hr|per\s*hour|\bhourly\b|\bhour\b", re.I)
+
+def _qs_flag(qs, name):
+    """Optional 0/1 filter flag. Absent, empty, or 0 => False (no filter)."""
+    raw = (qs.get(name) or [""])[0].strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+def _qs_int(qs, name):
+    """Optional int query param; absent/empty/invalid => None."""
+    raw = (qs.get(name) or [""])[0].strip()
+    if not raw:
+        return None
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError):
+        return None
+
+def _text_has_us(text):
+    if not text:
+        return False
+    if _US_POS_RE.search(text):
+        return True
+    low = text.lower()
+    for name in _US_STATE_NAMES:
+        if re.search(r"\b%s\b" % re.escape(name), low):
+            return True
+    # State abbrev only in address form: "City, TX" / "City, TX," / "City, TX US"
+    # (bare "or"/"in"/"me" in prose must NOT count as Oregon/Indiana/Maine)
+    for ab in _US_STATES:
+        if re.search(r",\s*%s\b" % ab, low):
+            return True
+    return False
+
+def _text_has_non_us(text):
+    return bool(text and _NON_US_RE.search(text))
+
+def _passes_remote_only(r):
+    """KEEP by default; DROP only when clearly not remote.
+
+    Unknown remote/workplace (common in discovery) stay; only explicit
+    onsite/hybrid structured values or onsite-only text signals drop.
+    """
+    remote = r.get("remote")
+    workplace = r.get("workplace")
+    if remote is False:
+        return False
+    wp = workplace.strip() if isinstance(workplace, str) else workplace
+    if wp not in (None, ""):
+        if str(wp).strip().lower() != "remote":
+            return False
+    # Structured empty: text fallback. DROP only onsite/hybrid with no remote signal.
+    # Include role — many rows carry '(remote)' only in the title.
+    structured_empty = remote is None and wp in (None, "")
+    if structured_empty:
+        blob = "%s\n%s\n%s" % (
+            r.get("role") or "", r.get("location") or "", r.get("desc") or "")
+        has_remote = bool(_REMOTE_OK_RE.search(blob))
+        has_onsite = bool(_ONSITE_RE.search(blob))
+        if has_onsite and not has_remote:
+            return False
+    return True
+
+def _passes_us_only(r):
+    """KEEP US / US-inclusive; KEEP unknowns; DROP explicit non-US-only."""
+    loc = (r.get("location") or "").strip()
+    blob = loc if loc else (r.get("desc") or "")
+    if not (blob or "").strip():
+        return True  # no location info
+    if _text_has_us(blob):
+        return True
+    if _text_has_non_us(blob):
+        return False
+    return True  # unknown geo wording — keep
+
+def _salary_top_annual(s):
+    """Parse salary string -> top-of-range annual USD, or None if unknown/junk."""
+    if s is None:
+        return None
+    text = str(s).strip()
+    if not text or _SAL_NAN_RE.search(text):
+        return None
+    nums = []
+    for m in _SAL_NUM_RE.finditer(text):
+        raw, k = m.group(1), m.group(2)
+        try:
+            v = float(raw.replace(",", ""))
+        except ValueError:
+            continue
+        if k:
+            v *= 1000.0
+        nums.append(v)
+    if not nums:
+        return None
+    top = max(nums)
+    if _SAL_HR_RE.search(text):
+        top *= 2080.0
+    return int(top)
+
+def _passes_salary_min(r, minimum):
+    """KEEP when top-of-range annual >= minimum; KEEP missing/nan salary."""
+    top = _salary_top_annual(r.get("salary"))
+    if top is None:
+        return True
+    return top >= minimum
+
+def _filter_ranked(rows, qs):
+    """Apply optional remote_only / us_only / salary_min after score-sort (AND)."""
+    want_remote = _qs_flag(qs, "remote_only")
+    want_us = _qs_flag(qs, "us_only")
+    sal_min = _qs_int(qs, "salary_min")
+    if not want_remote and not want_us and sal_min is None:
+        return rows
+    out = []
+    for r in rows:
+        if want_remote and not _passes_remote_only(r):
+            continue
+        if want_us and not _passes_us_only(r):
+            continue
+        if sal_min is not None and not _passes_salary_min(r, sal_min):
+            continue
+        out.append(r)
+    return out
+
 _PIPE = {"running": False, "log": [], "started": 0, "finished": 0}
 _ANSWER_LOG = []   # local-model reasoning: recent /answer resolutions
 _FILL_LOG = []     # form-fill reports posted by the extension
@@ -472,6 +708,21 @@ class H(BaseHTTPRequestHandler):
                     return self._send(200, f.read(), "text/html; charset=utf-8")
             except Exception as e:
                 return self._send(500, str(e))
+        if parsed.path == "/qa":
+            try:
+                with open(os.path.join(HERE, "qa.html"), "rb") as f:
+                    return self._send(200, f.read(), "text/html; charset=utf-8")
+            except Exception as e:
+                return self._send(500, str(e))
+        if parsed.path == "/qa/questions":
+            try:
+                p = os.path.join(HERE, "data", "qa_questions.json")
+                if os.path.exists(p):
+                    with open(p, encoding="utf-8") as f:
+                        return self._json(200, json.load(f))
+                return self._json(200, {"questions": []})
+            except Exception as e:
+                return self._json(500, {"error": str(e)})
         if parsed.path == "/resume":
             # Serve the resume bytes so the extension can attach the file on an application form
             # (a content script cannot read the local disk; the background worker fetches this).
@@ -534,11 +785,13 @@ class H(BaseHTTPRequestHandler):
         if parsed.path == "/ranked":
             try:
                 import jobs_store
-                rows = jobs_store.ranked()
+                qs = urllib.parse.parse_qs(parsed.query)
+                rows = _filter_ranked(jobs_store.ranked(), qs)
                 out = [{"company": r.get("company", ""), "role": r.get("role", ""),
                         "score": r.get("score") or 0, "ats": r.get("ats", ""),
                         "status": r.get("status"), "source": r.get("source", ""),
                         "posted": r.get("posted", ""),
+                        "discovered_at": r.get("discovered_at"),
                         "location": r.get("location") or r.get("workplace", ""),
                         "workplace": r.get("workplace", ""),
                         "salary": r.get("salary", ""), "desc": r.get("desc", ""),
@@ -792,6 +1045,21 @@ class H(BaseHTTPRequestHandler):
             except Exception as e:
                 print("[error] " + str(e), flush=True)
                 return self._json(500, {"ok": False, "error": str(e), "answers": []})
+        if parsed.path == "/qa/questions":
+            try:
+                payload = json.loads(raw or b"{}")
+                qs = payload.get("questions")
+                if not isinstance(qs, list):
+                    return self._json(400, {"ok": False, "error": "questions must be a list"})
+                os.makedirs(os.path.join(HERE, "data"), exist_ok=True)
+                _qp = os.path.join(HERE, "data", "qa_questions.json")
+                _clean = [str(q)[:2000] for q in qs if str(q).strip()][:500]
+                with open(_qp + ".tmp", "w", encoding="utf-8") as f:
+                    json.dump({"questions": _clean}, f, indent=1, ensure_ascii=False)
+                os.replace(_qp + ".tmp", _qp)
+                return self._json(200, {"ok": True, "count": len(_clean)})
+            except Exception as e:
+                return self._json(500, {"ok": False, "error": str(e)})
         return self._send(404, b"not found")
     def log_message(self, *a):
         pass

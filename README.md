@@ -27,9 +27,14 @@ No account. No cloud LLM required. Nothing leaves the machine by default.
   the "here's a great answer / Option A" wrapper, splits variants, and offers your own wording
   as a review-flagged draft when the question comes back. Browse, edit, and prune them in the
   Imports tab.
-- **Jobs from the company's ATS, not job-board soup.** Greenhouse, Lever, and Ashby boards into
-  one local queue with title, location, and a real apply URL, ranked to your lane. Every source
+- **Jobs from the company's ATS, not job-board soup.** Greenhouse, Lever, Ashby, and Workday
+  boards into one local queue with title, location, salary, and a real apply URL. Every source
   is a toggle; switch the noisy aggregators off if you only want direct-ATS.
+- **A fit score you can argue with.** Each posting is scored against your own profile by
+  required-skill coverage, not keyword bingo: a one-of-many requirement (AWS *or* GCP) counts
+  as covered when you have any of them, honest gaps are named, and no title or buzzword inflates
+  the number. Every row shows its reasoning. Remote-only, US-only, and minimum salary are
+  filters on the list, never fudge factors in the score.
 - **Fills the form. You submit.** Identity and common screening fields, plus essays drafted in
   the overlay for you to review. It mounts on application forms only, and the extension requests
   ATS hosts, not every site.
@@ -104,7 +109,8 @@ your lane, and shows them in a dashboard so you stop checking five sites by hand
 
 ![Penates dashboard cycling color themes](docs/img/penates-colors.gif)
 
-*The dashboard, with selectable color themes (Slate, Nord, Light, and more).*
+*The dashboard cycling through its color themes. The toolbar's Remote-only, US-only and
+minimum-salary filters and the per-row profile-relative fit score are visible throughout.*
 
 Click any row for a preview pane with the posting's details and a one-click path to the
 real apply page:
@@ -115,7 +121,7 @@ real apply page:
 
 | Source | How | Notes |
 |---|---|---|
-| **Company ATS boards** | **direct public APIs (Greenhouse, Lever, Ashby)** | **the reliable spine: clean titles, locations, posted dates, real apply URLs; from `config/companies.yml`** |
+| **Company ATS boards** | **direct public APIs (Greenhouse, Lever, Ashby, Workday)** | **the reliable spine: clean titles, locations, posted dates, real apply URLs; from `config/companies.yml`** |
 | LinkedIn / Indeed / Google | JobSpy (MIT) | Easy Apply on LinkedIn is skipped (no employer link to fill) |
 | hiring.cafe | public `_next/data` JSON | direct employer apply URLs, salary, posted date |
 | Built In | server-rendered HTML | Easy Apply cards skipped; resolves to the employer ATS |
@@ -132,13 +138,13 @@ store, deduped by URL. Then `resolve.py` turns listing links into real apply URL
 can, and `rank.py` scores each row against your lane.
 
 ```
-python scan_ats.py       # company ATS boards (Greenhouse/Lever/Ashby) - the spine
+python scan_ats.py       # company ATS boards (Greenhouse/Lever/Ashby/Workday) - the spine
 python discover.py       # LinkedIn / Indeed / Google via JobSpy
 python hiringcafe.py     # hiring.cafe
 python builtin.py        # Built In (employer-direct only)
 python remoteok.py       # RemoteOK
 python remotive.py       # Remotive
-python resolve.py        # listing URL -> employer apply URL
+python resolve.py        # listing URL -> employer apply URL; fetch full JD text
 python rank.py           # score against your lane
 ```
 
@@ -153,8 +159,9 @@ in the background and respects the source toggles in **Settings**.
 python serve.py                       # http://127.0.0.1:8765/dashboard
 ```
 
-- **Jobs** - ranked, filterable, sortable list; each row opens a preview pane with an
-  Apply + autofill button that hands off to the extension.
+- **Jobs** - a list scored against your profile, with a per-row fit score and the reason
+  behind it. Filter to remote-only, US-only and a minimum salary; sort by score or newest;
+  each row opens a preview pane with an Apply + autofill button that hands off to the extension.
 - **Settings** - edit your search terms and turn sources on or off (saved to `config.json`).
 - **Logs** - discovery runs, fills, and answer generations.
 - **Profile** - a read-only view of the facts the answer helper draws on.
@@ -318,8 +325,10 @@ the same local store, all in a normal browser. The discovery side (`sources/`,
 
 - **Done:** genre-aware answer engine with a user-owned story bank and a code validator
   (no skills dumps, honest gaps, enforced word/sentence counts); ATS-API job discovery
-  (Greenhouse/Lever/Ashby) with dedupe; application-form-only overlay gating with a Settings
-  page; a Stories tab to grow the bank without editing YAML.
+  (Greenhouse/Lever/Ashby/Workday) with dedupe; full-JD enrichment so scoring reads the real
+  requirements; a profile-relative fit score (required-coverage with one-of-many credit and
+  named gaps) plus remote/US/salary list filters; application-form-only overlay gating with a
+  Settings page; a Stories tab to grow the bank without editing YAML.
 - **Now (answer path):** better question-label detection (aria, headings, selected text),
   native value setter with `InputEvent` for React/LWC fields, per-intent length caps.
 - **Next (structured fill without lying):** identity fields for Greenhouse/Rippling/Ashby directly in the extension (no CDP), strict Yes/No polarity, never pick "Decline to self-identify" when a real answer exists, Workday account and experience from `work_history.yaml`, Salesforce Flow shadow-DOM handling.

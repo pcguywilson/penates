@@ -56,13 +56,20 @@ def _fetch_category(s, cat):
     return r.json().get("jobs", [])
 
 
+DESC_CAP = 20000
+
+
 def _row(j):
-    return {"url": j.get("url", ""), "company": j.get("company_name", ""),
-            "role": (j.get("title") or "")[:120], "source": "remotive",
-            "posted": (j.get("publication_date") or "")[:10],
-            "location": j.get("candidate_required_location", ""),
-            "workplace": "Remote", "salary": (j.get("salary") or "").strip(),
-            "desc": _strip(j.get("description"))[:1500]}
+    desc = _strip(j.get("description"))
+    row = {"url": j.get("url", ""), "company": j.get("company_name", ""),
+           "role": (j.get("title") or "")[:120], "source": "remotive",
+           "posted": (j.get("publication_date") or "")[:10],
+           "location": j.get("candidate_required_location", ""),
+           "workplace": "Remote", "salary": (j.get("salary") or "").strip(),
+           "desc": desc[:DESC_CAP]}
+    if len(desc) > DESC_CAP:
+        row["desc_truncated"] = True
+    return row
 
 
 def main():
