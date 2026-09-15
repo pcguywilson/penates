@@ -107,7 +107,7 @@ Applying is only half the grind. The other half is finding the postings worth ap
 Penates now pulls openings from several sources into one local queue, ranks them against
 your lane, and shows them in a dashboard so you stop checking five sites by hand every day.
 
-![Penates dashboard cycling color themes](docs/img/penates-colors.gif)
+![Penates dashboard cycling color themes](docs/img/penates-themes.gif)
 
 *The dashboard cycling through its color themes. The toolbar's Remote-only, US-only and
 minimum-salary filters and the per-row profile-relative fit score are visible throughout.*
