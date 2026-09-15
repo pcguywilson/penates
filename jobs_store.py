@@ -173,7 +173,7 @@ def add_discovered(jobs):
         have_fp = {_fp(r.get("company"), r.get("role"), r.get("location") or r.get("workplace"))
                    for r in q}
         added = enriched = 0
-        today = datetime.date.today().isoformat()
+        today = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")  # full UTC ISO so within-day order is stable (date-only for legacy rows still sorts below)
         for j in jobs:
             u = j.get("url")
             if not u:

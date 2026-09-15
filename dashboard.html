@@ -33,6 +33,8 @@
   .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:140px}
   .stat .n{font:700 24px/1 Georgia,serif;color:var(--accent)} .stat .l{color:var(--muted);font-size:12px;margin-top:4px}
   .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+  .ftchk{display:inline-flex;gap:6px;align-items:center;color:var(--text);font:13px system-ui;white-space:nowrap}
+  .ftchk input[type=number]{width:84px;min-width:0;padding:6px 8px;background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--text)}
   input[type=search],input[type=text]{background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:8px 12px;font:14px system-ui;min-width:260px}
   table{width:100%;border-collapse:collapse}
   th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
@@ -90,6 +92,7 @@ tr.jobrow:hover{background:var(--panel2)}
     <button data-tab="profile">Profile</button>
     <button data-tab="stories">Stories</button>
     <button data-tab="imports">Imports</button>
+    <button data-tab="resume">Resume</button>
   </nav>
   <span class="ts" id="lastAdded"></span>
   <span class="grow"></span>
@@ -108,6 +111,9 @@ tr.jobrow:hover{background:var(--panel2)}
     <div class="stats" id="stats"></div>
     <div class="toolbar">
       <input type="search" id="q" placeholder="Filter by company, role, ATS...">
+      <label class="ftchk"><input type="checkbox" id="fRemote" checked> Remote only</label>
+      <label class="ftchk"><input type="checkbox" id="fUS" checked> US only</label>
+      <label class="ftchk">Min $<input type="number" id="fSalary" min="0" step="5000" placeholder="0"></label>
       <span class="muted" id="count"></span>
       <span class="grow"></span>
       <span class="muted" id="reflog" style="font:12px ui-monospace,monospace"></span>
@@ -115,7 +121,7 @@ tr.jobrow:hover{background:var(--panel2)}
     <table>
       <thead><tr>
         <th data-sort="score">Score</th><th data-sort="company">Company</th>
-        <th data-sort="role">Role</th><th data-sort="posted">Posted</th>
+        <th data-sort="role">Role</th><th data-sort="discovered_at">Discovered</th><th data-sort="posted">Posted</th>
         <th data-sort="location">Location</th><th data-sort="salary">Salary</th>
         <th data-sort="ats">ATS</th><th></th>
       </tr></thead>
@@ -212,6 +218,34 @@ Rules: one object per distinct question. Put ONLY the final answer text in "answ
       <div id="impList" style="margin-top:12px"></div>
     </div>
   </section>
+  <section data-panel="resume" hidden>
+    <p class="hint" style="margin:0 0 12px">Tailor your resume to a job: pick one from your queue (or paste a JD). Penates selects and reorders your <b>real</b> bullets to fit, leads skills with the matches, and shows what you cover vs what is missing. It never invents a bullet or adds a skill you do not have.</p>
+    <div class="card">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div style="flex:2;min-width:260px"><label class="stl">Pick a job from your queue</label>
+          <select id="rsJob" class="sti"></select></div>
+        <div style="flex:1;min-width:130px"><label class="stl">Company</label><input class="sti" id="rsCompany"></div>
+        <div style="flex:1;min-width:130px"><label class="stl">Role</label><input class="sti" id="rsRole"></div>
+      </div>
+      <label class="stl" style="margin-top:8px">...or paste a job description (for a job not in your queue)</label>
+      <textarea class="stt" id="rsJD" style="min-height:90px" placeholder="paste the JD text here"></textarea>
+      <div style="margin-top:8px"><button class="btn" id="rsTailor">Tailor resume</button> <span class="muted" id="rsMsg"></span></div>
+    </div>
+    <div class="card" id="rsResult" hidden>
+      <div id="rsCov" style="margin-bottom:10px"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="btn" id="rsPrint">Print / Save PDF</button>
+        <button class="btn ghost" id="rsHtml">Download .html</button>
+        <button class="btn ghost" id="rsMd">Copy Markdown</button>
+        <button class="btn ghost" id="rsCover">Draft cover letter</button>
+      </div>
+      <iframe id="rsFrame" style="width:100%;height:860px;border:1px solid var(--line,#334155);border-radius:8px;background:#fff"></iframe>
+      <div id="rsCoverBox" hidden style="margin-top:12px;border-top:1px solid var(--line,#334155);padding-top:12px">
+        <div style="display:flex;align-items:center;gap:10px"><b>Cover letter</b> <span class="muted" id="rsCoverMeta" style="font-size:12px"></span> <button class="btn ghost" id="rsCoverCopy" style="margin-left:auto">Copy</button></div>
+        <textarea class="stt" id="rsCoverText" style="min-height:200px;margin-top:8px"></textarea>
+      </div>
+    </div>
+  </section>
 </main>
 <div class="drawer-ov" id="drov"></div>
 <aside class="drawer" id="drawer" aria-hidden="true">
@@ -231,7 +265,7 @@ Rules: one object per distinct question. Put ONLY the final answer text in "answ
 </aside>
 <script>
 const $=id=>document.getElementById(id), esc=s=>(s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let JOBS=[], sortKey="score", sortDir=-1, STORIES=[];
+let JOBS=[], sortKey="discovered_at", sortDir=-1, STORIES=[];
 
 // theme
 function applyTheme(t){ document.documentElement.setAttribute('data-theme',t); try{localStorage.setItem('penates-theme',t);}catch(_){}}
@@ -247,6 +281,7 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   if(b.dataset.tab==='logs') loadLogs();
   if(b.dataset.tab==='settings') loadCfg();
   if(b.dataset.tab==='imports'){ loadImports(); loadImportsList(); }
+  if(b.dataset.tab==='resume') loadResumeJobs();
   if(b.dataset.tab==='profile') loadProfile();
   if(b.dataset.tab==='stories') loadStories();
 });
@@ -258,13 +293,23 @@ function ago(iso){ if(!iso) return 'never';
   return d.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '+d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
 }
 function scCls(n){return n>=65?'hi':n>=45?'mid':'lo';}
-function postedFmt(p){ if(!p) return ''; const d=new Date(String(p).replace(' ','T')); if(isNaN(d.getTime())) return p;
+function postedFmt(p){ if(!p) return ''; let s=String(p).replace(' ','T');
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s)) s+='T00:00:00';   // date-only -> LOCAL midnight (avoid UTC off-by-one showing yesterday)
+  const d=new Date(s); if(isNaN(d.getTime())) return p;
   const days=Math.floor((Date.now()-d.getTime())/86400000);
   const dt=d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
   const rel=days<=0?'today':days===1?'1 day ago':days+'d ago'; return rel+' · '+dt; }
+function rankedUrl(){
+  const p=new URLSearchParams();
+  if($('fRemote')&&$('fRemote').checked) p.set('remote_only','1');
+  if($('fUS')&&$('fUS').checked) p.set('us_only','1');
+  const sm=parseInt(($('fSalary')&&$('fSalary').value)||'0',10);
+  if(sm>0) p.set('salary_min',String(sm));
+  const qs=p.toString(); return '/ranked'+(qs?('?'+qs):'');
+}
 async function loadJobs(){
   const [r,st]=await Promise.all([
-    fetch('/ranked').then(r=>r.json()).catch(()=>({jobs:[]})),
+    fetch(rankedUrl()).then(r=>r.json()).catch(()=>({jobs:[]})),
     fetch('/stats').then(r=>r.json()).catch(()=>({}))
   ]);
   JOBS=r.jobs||[];
@@ -278,13 +323,22 @@ async function loadJobs(){
 function render(){
   const q=($('q').value||'').toLowerCase();
   let rows=JOBS.filter(j=>!q||(j.company+' '+j.role+' '+j.ats).toLowerCase().includes(q));
-  rows.sort((a,b)=>{const A=a[sortKey]||'',B=b[sortKey]||'';return (A<B?-1:A>B?1:0)*sortDir;});
+  rows.sort((a,b)=>{
+    if(sortKey==='score'){ return ((+a.score||0)-(+b.score||0))*sortDir; }
+    if(sortKey==='discovered_at'){
+      const A=a.discovered_at||a.posted||'', B=b.discovered_at||b.posted||'';
+      if(A===B){ return (+b.score||0)-(+a.score||0); }      // score tiebreak, desc
+      return (A<B?-1:1)*sortDir;                            // missing sorts last on desc
+    }
+    const A=a[sortKey]||'',B=b[sortKey]||''; return (A<B?-1:A>B?1:0)*sortDir;
+  });
   $('count').textContent=rows.length+' shown'; $('empty').hidden=rows.length>0;
   $('rows').innerHTML=rows.map(j=>{const ap=j.status==='applied';
     return `<tr class="jobrow ${ap?'applied':''}" data-url="${esc(j.apply)}">
       <td class="sc ${scCls(j.score||0)}">${j.score||0}</td>
       <td class="co">${esc(j.company)}</td>
       <td><a href="${esc(j.apply)}" target="_blank" rel="noopener">${esc(j.role)}</a></td>
+      <td class="muted" style="white-space:nowrap;font-size:12px">${esc(postedFmt(j.discovered_at))}</td>
       <td class="muted" style="white-space:nowrap;font-size:12px">${esc(postedFmt(j.posted))}</td>
       <td class="muted" style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.location||'')}</td>
       <td class="muted" style="font-size:12px;white-space:nowrap">${esc(j.salary||'')}</td>
@@ -340,8 +394,10 @@ async function mark(b){ b.disabled=true;b.textContent='...';
   const j=JOBS.find(x=>x.apply===b.dataset.url); if(j)j.status='applied';
 }
 $('q').oninput=render;
+['fRemote','fUS'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',loadJobs);});
+{const sal=$('fSalary'); if(sal) sal.addEventListener('change',loadJobs);}
 document.querySelectorAll('th[data-sort]').forEach(th=>th.onclick=()=>{const k=th.dataset.sort;
-  sortDir=(sortKey===k)?-sortDir:(k==='score'?-1:1); sortKey=k; render();});
+  sortDir=(sortKey===k)?-sortDir:((k==='score'||k==='discovered_at'||k==='posted')?-1:1); sortKey=k; render();});
 $('refresh').onclick=async()=>{ $('refresh').disabled=true;
   await fetch('/discover',{method:'POST'}).catch(()=>{});
   const poll=setInterval(async()=>{const st=await fetch('/discover/status').then(r=>r.json()).catch(()=>({running:false}));
@@ -420,6 +476,44 @@ async function delImport(idx){ const it=IMPORTS[idx]; if(!it)return;
 $('impFilter').oninput=renderImports;
 $('impEditSave').onclick=saveImport;
 $('impEditCancel').onclick=()=>{$('impEdit').hidden=true;impEditKey=null;};
+let RS_HTML="", RS_MD="";
+async function loadResumeJobs(){
+  const r=await fetch('/api/queue-lite').then(x=>x.json()).catch(()=>({jobs:[]}));
+  const sel=$('rsJob'); sel.innerHTML='<option value="">- pick a job with a JD -</option>';
+  (r.jobs||[]).filter(j=>j.has_jd).forEach(j=>{const o=document.createElement('option');
+    o.value=j.id;o.textContent=j.company+' - '+j.role;o.dataset.company=j.company;o.dataset.role=j.role;sel.appendChild(o);});
+}
+$('rsJob').onchange=()=>{const o=$('rsJob').selectedOptions[0]; if(o&&o.value){$('rsCompany').value=o.dataset.company||'';$('rsRole').value=o.dataset.role||'';}};
+async function doTailor(){
+  const job=$('rsJob').value, jd=$('rsJD').value.trim();
+  if(!job && !jd){$('rsMsg').textContent='pick a job or paste a JD';return;}
+  $('rsTailor').disabled=true;$('rsMsg').textContent='tailoring...';
+  const body={company:$('rsCompany').value,role:$('rsRole').value}; if(jd)body.jd=jd; else body.job=job;
+  const r=await fetch('/api/tailor',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(x=>x.json()).catch(e=>({ok:false,error:String(e)}));
+  $('rsTailor').disabled=false;
+  if(!r.ok){$('rsMsg').textContent='error: '+(r.error||'?');return;}
+  $('rsMsg').textContent='';RS_HTML=r.html;RS_MD=r.markdown;$('rsFrame').srcdoc=r.html;
+  const chip=(t,c)=>`<span style="display:inline-block;background:${c};color:#fff;border-radius:10px;padding:2px 8px;margin:2px;font-size:12px">${esc(t)}</span>`;
+  $('rsCov').innerHTML='<b>Covered ('+r.coverage.covered.length+'):</b> '+r.coverage.covered.map(x=>chip(x,'#166534')).join('')
+    +'<div style="margin-top:6px"><b>Missing ('+r.coverage.missing.length+'):</b> '+(r.coverage.missing.map(x=>chip(x,'#92400e')).join('')||'<span class="muted">none</span>')+'</div>'
+    +'<div class="muted" style="font-size:11px;margin-top:4px">Missing = the JD asks for it and it is not on your resume. Not written on, for you to decide.</div>';
+  $('rsResult').hidden=false;$('rsCoverBox').hidden=true;
+}
+$('rsPrint').onclick=()=>{const w=window.open('','_blank');if(!w)return;w.document.write(RS_HTML);w.document.close();w.focus();setTimeout(()=>w.print(),400);};
+$('rsHtml').onclick=()=>{const b=new Blob([RS_HTML],{type:'text/html'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='resume_tailored.html';a.click();};
+$('rsMd').onclick=()=>{navigator.clipboard.writeText(RS_MD);$('rsMsg').textContent='markdown copied';setTimeout(()=>$('rsMsg').textContent='',2000);};
+async function doCover(){
+  const job=$('rsJob').value, jd=$('rsJD').value.trim();
+  $('rsCover').disabled=true;$('rsCoverBox').hidden=false;$('rsCoverText').value='drafting on your local model...';$('rsCoverMeta').textContent='';
+  const body={company:$('rsCompany').value,role:$('rsRole').value}; if(jd)body.jd=jd;else body.job=job;
+  const r=await fetch('/api/cover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(x=>x.json()).catch(e=>({ok:false,error:String(e)}));
+  $('rsCover').disabled=false;
+  $('rsCoverText').value=r.ok?r.text:('error: '+(r.error||'?'));
+  if(r.ok)$('rsCoverMeta').textContent=(r.story?('story: '+r.story):'')+(r.checks&&r.checks.length?(' . review: '+r.checks.join(', ')):'');
+}
+$('rsCover').onclick=doCover;
+$('rsCoverCopy').onclick=()=>{navigator.clipboard.writeText($('rsCoverText').value);};
+$('rsTailor').onclick=doTailor;
 async function loadProfile(){ const p=await fetch('/profile').then(r=>r.json()).catch(()=>({}));
   $('prof').textContent=p.profile||'(profile.yaml not found)'; $('work').textContent=p.work_history||'(work_history.yaml not found)';
 }

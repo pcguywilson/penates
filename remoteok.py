@@ -58,12 +58,19 @@ def _sal(j):
     return ((a + "-" + b) if a and b else (a or b)) + "/yr"
 
 
+DESC_CAP = 20000
+
+
 def _row(j):
-    return {"url": j.get("apply_url") or j.get("url", ""),
-            "company": j.get("company", ""), "role": (j.get("position") or "")[:120],
-            "source": "remoteok", "posted": (j.get("date") or "")[:10],
-            "location": j.get("location") or "", "workplace": "Remote",
-            "salary": _sal(j), "desc": _strip(j.get("description"))[:1500]}
+    desc = _strip(j.get("description"))
+    row = {"url": j.get("apply_url") or j.get("url", ""),
+           "company": j.get("company", ""), "role": (j.get("position") or "")[:120],
+           "source": "remoteok", "posted": (j.get("date") or "")[:10],
+           "location": j.get("location") or "", "workplace": "Remote",
+           "salary": _sal(j), "desc": desc[:DESC_CAP]}
+    if len(desc) > DESC_CAP:
+        row["desc_truncated"] = True
+    return row
 
 
 def main():
