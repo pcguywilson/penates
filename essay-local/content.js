@@ -12,7 +12,7 @@
 (() => {
   if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
   window.__penatesInit = true;
-  const PENATES_BUILD = "build 32";   // shown in the report header; if you don't see it after a reload, the extension didn't update
+  const PENATES_BUILD = "build 37";   // shown in the report header; if you don't see it after a reload, the extension didn't update
   const IS_TOP = window.top === window;
   // The content script is injected only on ATS hosts (manifest matches). When an ATS application
   // form is EMBEDDED as a cross-origin iframe inside a company careers page (e.g. a Greenhouse
@@ -555,7 +555,8 @@
   // Both are left for the human; the per-field popup still drafts one on demand.
   const CONDITIONAL_RE = /\bif you (responded|answered|selected|indicated|checked|chose)\b|\bif (yes|no|other|so|applicable|not|the above|you did)\b/i;
   const LEAVE_BLANK_RE = /accommodat|other than your|is there anything|anything (else|you.?d like|we should know)|additional (information|comments|details)|feel free to (add|share|include)|anything you would like to (share|add|tell)/i;
-  function skipQuestion(q) { return !!q && (CONDITIONAL_RE.test(q) || LEAVE_BLANK_RE.test(q)); }
+  const JUNK_RE = /skip to main content|english settings|^\s*settings\s*$|cookie(s| policy| preferences)|privacy statement|back to job posting|sign ?out|log ?out|page is loaded/i;
+  function skipQuestion(q) { return !!q && (CONDITIONAL_RE.test(q) || LEAVE_BLANK_RE.test(q) || JUNK_RE.test(q)); }
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -698,6 +699,35 @@
     await sleep(250);
     const after = norm(el.textContent || "");
     return el.getAttribute("aria-expanded") === "false" || (!!after && after !== "select");
+  }
+
+  // ---- Workday single-select "prompt" button (<button aria-haspopup="listbox">Select One</button>) --
+  // Not role=combobox, so the ARIA combobox/radiogroup passes miss it. Open, read the real
+  // promptOption labels, ask the engine constrained to them, click the match, VERIFY the button
+  // text moved off "Select One". Single-select: no search box, no hierarchy.
+  async function wdSelectFill(btn, q) {
+    const vis = () => [...document.querySelectorAll('[data-automation-id="promptOption"], [role="option"], li[role="option"]')]
+      .filter((o) => { try { return o.offsetParent !== null; } catch (_) { return false; } });
+    const label = (o) => clean(o.getAttribute("data-automation-label") || o.textContent || "");
+    const curText = () => clean(btn.textContent || "");
+    const isPlaceholder = (t) => !t || /^select( one)?( required)?\.{0,3}$/i.test(t);
+    try { fireMouse(btn); } catch (_) {}
+    await sleep(400);
+    let opts = vis(); if (!opts.length) { await sleep(400); opts = vis(); }
+    const optLabels = [...new Set(opts.map(label).filter(Boolean))].slice(0, 30);
+    const data = await askEngine(q, 25, false, 40000, false, optLabels.length ? optLabels : ["Yes", "No"]);
+    if (!data || data.__error || !data.text) {
+      try { btn.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); } catch (_) {}
+      return { ok: false, detail: data && data.__error ? data.__error : "no value -> you" };
+    }
+    const na = norm(data.text);
+    let hit = vis().find((o) => norm(label(o)) === na)
+           || vis().find((o) => na && norm(label(o)).startsWith(na))
+           || vis().find((o) => na && norm(label(o)).length >= 2 && na.startsWith(norm(label(o))));
+    if (hit) { try { hit.scrollIntoView({ block: "center" }); } catch (_) {} try { fireMouse(hit); } catch (_) {} await sleep(300); }
+    if (!isPlaceholder(curText())) return { ok: true, answer: data.text };
+    try { btn.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); } catch (_) {}
+    return { ok: false, detail: "'" + clean(data.text).slice(0, 20) + "' not selectable -> you" };
   }
 
   async function runFillAll() {
@@ -1058,6 +1088,22 @@
           } else { rows.push([q.slice(0, 60), "skip", "answer '" + clean(data.text).slice(0, 20) + "' not a choice -> you"]); skipped++; }
         } catch (_) {}
       }
+      // C) Workday single-select prompt buttons: button[aria-haspopup=listbox] showing "Select One"
+      for (const btn of [...document.querySelectorAll('button[aria-haspopup="listbox"]')]
+             .filter((b) => !inPenates(b) && shown(b) && b.getAttribute("aria-disabled") !== "true")) {
+        try {
+          const q = ariaQuestion(btn);
+          if (!q || groupsDone.has(q)) continue;
+          if (skipQuestion(q)) { groupsDone.add(q); rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; continue; }
+          const sv = clean(btn.textContent || "");
+          if (sv && !/^select( one)?( required)?\.{0,3}$/i.test(sv)) { groupsDone.add(q); continue; }   // already chosen
+          groupsDone.add(q); seen++;
+          setReport("Filling " + seen + " (choice) ... " + elapsed() + "s elapsed. NOTHING submitted.", rows);
+          const r = await wdSelectFill(btn, q);
+          rows.push([q.slice(0, 60), r.ok ? "filled" : "skip", r.ok ? String(r.answer).slice(0, 40) : r.detail]);
+          r.ok ? filled++ : skipped++;
+        } catch (_) {}
+      }
     } catch (e) { rows.push(["(aria widget pass)", "skip", String(e).slice(0, 60)]); }
 
     // ---- heal pass ----------------------------------------------------------------
@@ -1191,7 +1237,7 @@
     try { if (_keepPort) _keepPort.disconnect(); } catch (_) {}   // release the service-worker keep-alive
     _answerCache = null;
     fillBusy = false;
-    const summary = "Filled " + filled + " . " + review + " to review . " + skipped + " left for you . " + elapsed() + "s total . NOTHING submitted.";
+    const summary = "\u2713 DONE  \u2014  Filled " + filled + " . " + review + " to review . " + skipped + " left for you . " + elapsed() + "s total . NOTHING submitted.";
     setReport(summary, rows);
     try {
       chrome.runtime.sendMessage({ type: "FETCH_FILLLOG", payload: {
@@ -1257,7 +1303,9 @@
   }
   function setReport(summary, rows) {
     if (!report) return;
-    report.querySelector('[data-r="sum"]').textContent = summary || "";
+    const _sumEl = report.querySelector('[data-r="sum"]');
+    _sumEl.textContent = summary || "";
+    _sumEl.style.color = /^\u2713 DONE/.test(summary || "") ? "#34d399" : "#fbbf24";  // green=done, amber=working
     const color = { filled: "#34d399", review: "#fbbf24", skip: "#94a3b8" };
     report.querySelector('[data-r="body"]').innerHTML = (rows || []).map((r) =>
       '<div style="display:flex;gap:9px;padding:6px 2px;border-bottom:1px solid #1e293b;align-items:flex-start">' +
