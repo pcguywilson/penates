@@ -12,8 +12,14 @@
 (() => {
   if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
   window.__penatesInit = true;
-  const PENATES_BUILD = "build 21";   // shown in the report header; if you don't see it after a reload, the extension didn't update
+  const PENATES_BUILD = "build 32";   // shown in the report header; if you don't see it after a reload, the extension didn't update
   const IS_TOP = window.top === window;
+  // The content script is injected only on ATS hosts (manifest matches). When an ATS application
+  // form is EMBEDDED as a cross-origin iframe inside a company careers page (e.g. a Greenhouse
+  // iframe on acme.com/careers), this code runs in THAT subframe with IS_TOP=false. Let the
+  // launcher + fill operate there too, so the button is not top-frame-only.
+  const ATS_EMBED_HOST = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|workday\.com|icims\.com|paylocity\.com|paycomonline\.net|smartrecruiters\.com|jobvite\.com|rippling\.com|successfactors\.(com|eu)|breezy\.hr|workable\.com|bamboohr\.com|dayforcehcm\.com|recruitee\.com|applytojob\.com|hrmdirect\.com|zohorecruit\.com|trakstar\.com|pinpointhq\.com|adp\.com)$/i.test(location.hostname);
+  const CAN_SURFACE = IS_TOP || ATS_EMBED_HOST;
   let currentEl = null, currentQuestion = "", lastEditable = null, chip = null;
 
   const clean = (s) => (s || "").replace(/\s+/g, " ").trim();
@@ -25,6 +31,17 @@
       el.isContentEditable);
 
   const inPenates = (el) => !!(el && el.closest && el.closest("[data-penates]"));
+  function reFindField(q) {
+    // Re-resolve the LIVE field for a question after an await: Ashby may have re-rendered and
+    // detached the node we captured before the essay draft. Match questionFor over fresh refs.
+    try {
+      for (const o of deepFields()) {
+        if ((o.tagName === "TEXTAREA" || o.tagName === "INPUT" || o.isContentEditable) &&
+            !inPenates(o) && !o.disabled && questionFor(o) === q) return o;
+      }
+    } catch (_) {}
+    return null;
+  }
 
   // ===== surface gating (only show on real application forms) =====
   // User overrides live in chrome.storage.local "penatesSettings" and win over detection,
@@ -86,7 +103,7 @@
     return isApplySurface();
   }
   function reevaluate() {
-    if (!IS_TOP) return;
+    if (!CAN_SURFACE) return;
     if (!surfaceAllowed()) {
       if (chip) chip.style.display = "none";
       if (launcherBtn) { try { launcherBtn.remove(); } catch (_) {} launcherBtn = null; launcherMounted = false; }
@@ -148,7 +165,14 @@
 
   function questionFor(el) {
     const sel = clean(window.getSelection && String(window.getSelection()));
-    if (el === (currentEl || lastEditable) && sel.length >= 12 && sel.length <= 500) return sel;
+    const selUsable = el === (currentEl || lastEditable) && sel.length >= 12 && sel.length <= 500;
+    // A highlighted selection only speaks for the field when the target is open-ended (essay /
+    // contentEditable). For a one-line identity input (tel/email/text/number) a stray page
+    // selection must NOT override the real label - that drafted a project story into a Mobile
+    // Phone field. For one-line inputs the selection is a last resort only, used below iff no
+    // label resolves.
+    const openEnded = el.tagName === "TEXTAREA" || el.isContentEditable === true;
+    if (selUsable && openEnded) return sel;
     const tries = [];
     const root = el.getRootNode ? el.getRootNode() : document;
     if (el.id) {
@@ -175,6 +199,22 @@
       }
       n = host; hops++;
     }
+    // Bootstrap / horizontal forms (e.g. clearcompany): input has no id/for/aria-label and its real
+    // <label class="control-label"> is a preceding sibling of an ANCESTOR (beside the input's column,
+    // not the input). Climb <=4 ancestors, read a preceding control-label; a bare <label> only at a
+    // shallow hop (form-group shape) so a section-header label above a deeper group is not grabbed.
+    let anc = el, ah = 0;
+    while (anc && ah < 4) {
+      const prev = anc.previousElementSibling;
+      if (prev) {
+        const classHit = /control-label|col-\S*label/i.test(prev.className || "");
+        if (classHit || (prev.tagName === "LABEL" && ah <= 2)) {
+          const t = clean(prev.innerText);
+          if (t.length >= 2 && t.length <= 120) { tries.push(t); break; }
+        }
+      }
+      anc = anc.parentElement; ah++;
+    }
     const cont = el.closest && el.closest('[class*="question" i], .application-question, [data-automation-id], [class*="field" i]');
     if (cont) {
       const h = cont.querySelector('label, [class*="label" i], legend, h1,h2,h3,h4');
@@ -187,7 +227,17 @@
       p = p.previousElementSibling; hh++;
     }
     if (el.placeholder) tries.push(el.placeholder);
-    for (const t of tries) { const c = stripSectionHead(clean(t)); if (c && c.length >= 3) return c.slice(0, 400); }
+    const _HELPER = /^(optional|required|\(optional\)|\(required\))$/i;
+    for (const t of tries) { const c = stripSectionHead(clean(t)); if (c && c.length >= 3 && !_HELPER.test(c)) return c.slice(0, 400); }
+    // EEO selects (Hispanic/Latino, Veteran, Disability) sit under long VEVRAA/CC-305 preamble with
+    // no resolvable label -> derive a canonical question from the OPTION contents so fields.yaml maps it.
+    if (el.tagName === "SELECT" && el.options && el.options.length) {
+      const blob = norm([...el.options].map((o) => o.textContent).join(" "));
+      if (/hispanic|latino/.test(blob)) return "Are you Hispanic or Latino?";
+      if (/protected veteran|veteran/.test(blob)) return "Veteran status";
+      if (/disabilit|disabled/.test(blob)) return "Disability status";
+    }
+    if (selUsable) return sel;   // last resort: no label resolved -> use highlighted selection
     return "";
   }
 
@@ -206,6 +256,16 @@
     return questionFor(el);   // fallback (already section-stripped)
   }
 
+  function _pageCompanyName() {
+    // Correctly-cased company name from the posting page: og:site_name, or
+    // "Role @ Company" / "Role at Company" in the title. Fixes slug casing (1password -> 1Password).
+    const site = document.querySelector('meta[property="og:site_name"]');
+    if (site && site.content) { const c = clean(site.content).trim(); if (c && c.length <= 40) return c; }
+    const t = clean(document.title || "");
+    let m = t.match(/@\s*([^|\u2013\u2014:]+?)\s*$/) || t.match(/\bat\s+([A-Z0-9][^|\u2013\u2014:]+?)\s*$/);
+    if (m && m[1]) { const c = m[1].trim().slice(0, 40); if (c) return c; }
+    return null;
+  }
   function companyGuess() {
     // The ATS URL slug is the most reliable company signal (page titles are noisy).
     const h = location.hostname, path = location.pathname;
@@ -217,6 +277,8 @@
     if (m && m[1] && !/^(embed|www|jobs|job-boards|boards|apply)$/i.test(m[1])) {
       let sname = decodeURIComponent(m[1]).replace(/[-_]+/g, " ").trim();
       if (sname && sname.length <= 40) {
+        const cased = _pageCompanyName();
+        if (cased && cased.replace(/\s+/g, "").toLowerCase() === sname.replace(/\s+/g, "").toLowerCase()) return cased;
         if (sname === sname.toLowerCase()) sname = sname.replace(/\b\w/g, (c) => c.toUpperCase());
         return sname;
       }
@@ -263,8 +325,8 @@
   }
 
   // ---- server call (via background: dodges CORS / mixed-content / private-network) ----
-  async function askEngine(question, limit, fresh, timeoutMs, bulk) {
-    const payload = { question, company: companyGuess(), role: roleGuess(), url: location.href, page_context: pageContext(), limit: limit || null, fresh: !!fresh, bulk: !!bulk };
+  async function askEngine(question, limit, fresh, timeoutMs, bulk, options) {
+    const payload = { question, company: companyGuess(), role: roleGuess(), url: location.href, page_context: pageContext(), limit: limit || null, fresh: !!fresh, bulk: !!bulk, options: (options && options.length) ? options : null };
     const call = (async () => {
       try {
         const resp = await chrome.runtime.sendMessage({ type: "FETCH_ANSWER", payload });
@@ -289,7 +351,7 @@
   let _answerCache = null;   // Map<question, answer-record> for this fill; verify/heal reuse it
   async function askEngineBatch(questions, timeoutMs) {
     const payload = { questions, company: companyGuess(), role: roleGuess(), url: location.href,
-                      page_context: pageContext(), bulk: true };
+                      page_context: pageContext(), bulk: true, bulk_skip_essays: true };
     const call = (async () => {
       try {
         const resp = await chrome.runtime.sendMessage({ type: "FETCH_ANSWER_BATCH", payload });
@@ -344,10 +406,24 @@
     try { file = new File([_b64ToBytes(data.b64)], data.filename || "resume.pdf", { type: data.mime || "application/pdf" }); }
     catch (e) { rows.push(["Resume upload", "skip", "build file: " + String(e).slice(0, 40)]); return; }
     let done = 0, label = "";
-    for (const inp of inputs) {
-      const lbl = ((inp.getAttribute("aria-label") || "") + " " + (inp.name || "") + " " + _nearText(inp)).toLowerCase();
-      // when there are several file inputs, don't drop the resume into a cover-letter-only slot
-      if (inputs.length > 1 && /cover letter|transcript|portfolio|photo|headshot/.test(lbl) && !/resume|\bcv\b|curriculum/.test(lbl)) continue;
+    // Pick the right slot(s): PREFER a positively resume-labeled input. If none are labeled and
+    // there are several, take a doc-accepting / non-cover slot (else the first) - and NEVER blast
+    // the resume into every file input. That blast is how it landed in the Cover Letter slot on
+    // Greenhouse, whose hidden file input carries no "cover letter" text near it.
+    const _rlbl = (inp) => ((inp.getAttribute("aria-label") || "") + " " + (inp.name || "") + " " + _nearText(inp)).toLowerCase();
+    const _isResume = (inp) => /resume|\bcv\b|curriculum/.test(_rlbl(inp));
+    const _isCover = (inp) => /cover letter|transcript|portfolio|photo|headshot/.test(_rlbl(inp));
+    let targets;
+    const _resumeSlots = inputs.filter(_isResume);
+    if (_resumeSlots.length) targets = _resumeSlots;
+    else if (inputs.length === 1) targets = inputs;
+    else {
+      const _nonCover = inputs.filter((i) => !_isCover(i));
+      const _docish = _nonCover.find((i) => /\.pdf|\.doc|application\/pdf|msword/.test((i.getAttribute("accept") || "").toLowerCase()));
+      targets = [_docish || _nonCover[0] || inputs[0]];
+    }
+    targets = targets.filter((inp) => !(_isCover(inp) && !_isResume(inp)));
+    for (const inp of targets) {
       if (inp.files && inp.files.length) { done++; continue; } // already attached
       try {
         const dt = new DataTransfer(); dt.items.add(file);
@@ -441,6 +517,18 @@
     return clean(input.getAttribute("aria-label") || input.value || "");
   }
 
+  function _optClickable(el) {
+    // Fillable if the input has a layout box, OR it's a visually-hidden native input (opacity:0 /
+    // sr-only) whose clickable LABEL is visible. Rippling styles its Yes/No radios this way, so the
+    // old input-box-only skip dropped them entirely (sponsorship never got answered).
+    const r = el.getBoundingClientRect();
+    const inputVisible = !(el.offsetParent === null || getComputedStyle(el).display === "none" || (!r.width && !r.height));
+    if (inputVisible) return true;
+    let lab = null;
+    try { lab = (el.id && el.getRootNode().querySelector('label[for="' + CSS.escape(el.id) + '"]')) || (el.closest && el.closest("label")); } catch (_) {}
+    return !!(lab && shown(lab));
+  }
+
   function fillSelect(el, value) {
     const want = norm(value);
     const opts = [...el.options];
@@ -504,7 +592,10 @@
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
     const query = (String(value).split(",")[0] || value).trim();
     const nv = norm(value);
-    const vtokens = nv.split(" ").filter((w) => w.length >= 2);
+    const vtokens = [...new Set(
+      String(value).toLowerCase().split(/[\s/,|]+/).map((w) => w.replace(/[^a-z0-9]+/g, "")).filter((w) => w.length >= 2)
+        .concat(nv.split(" ").filter((w) => w.length >= 2))
+    )];
     el.focus();
     try { el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); } catch (_) {}
     await sleep(120);
@@ -517,17 +608,36 @@
       if (!opts.length) { try { opts = [...document.querySelectorAll('[role="option"]')].filter((o) => o.offsetParent); } catch (_) {} }
       if (opts.length) break;
     }
-    if (!opts.length) return false;
+    if (!opts.length) {
+      // Typing the query can filter the menu to empty (e.g. "He/Him" is not a prefix of the option
+      // text) -> reopen without a query and scan the full option list, then token-match.
+      try { setter.call(el, ""); el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" })); } catch (_) {}
+      try { el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); } catch (_) {}
+      for (let i = 0; i < 12; i++) {
+        await sleep(200);
+        const menu2 = document.getElementById(el.getAttribute("aria-controls") || "__none__") || document.querySelector('[role="listbox"]');
+        opts = menu2 ? [...menu2.querySelectorAll('[role="option"]')] : [...document.querySelectorAll('[role="option"]')].filter((o) => o.offsetParent);
+        if (opts.length) break;
+      }
+      if (!opts.length) return false;
+    }
     // pick the option sharing the most tokens with the wanted value (exact full match wins)
-    let best = null, bestScore = -1;
+    let best = null, bestScore = 0;
     for (const o of opts) {
       const ot = norm(o.textContent);
+      // Tokenize the OPTION the same way as the value (split on / , | and space) so a slashed
+      // option like "He/him/his" -> [he,him,his] can overlap he/him. norm() alone collapses the
+      // slashes into "hehimhis" and the whole-word match then fails - that is how "He/Him" got
+      // committed as "She/her/hers" (all options scored 0, so it clicked the first one).
+      const otokens = String(o.textContent).toLowerCase().split(/[\s/,|]+/).map((w) => w.replace(/[^a-z0-9]+/g, "")).filter(Boolean);
       let score = 0;
-      for (const t of vtokens) if ((" " + ot + " ").includes(" " + t + " ")) score++;
+      for (const t of vtokens) { if (otokens.includes(t)) score += 2; else if (t.length >= 3 && ot.includes(t)) score += 1; }
       if (ot === nv) score += 100;
       if (score > bestScore) { bestScore = score; best = o; }
     }
-    const targetText = norm((best || opts[0]).textContent);
+    // Nothing overlapped the wanted value -> do NOT blind-click the first option. Leave it for you.
+    if (!best) return false;
+    const targetText = norm(best.textContent);
     // Commit order matters. Ashby's own autocomplete (role=combobox, class
     // ashby-application-form-input-autocomplete) renders results as clickable [role=option] divs
     // and leaves aria-activedescendant null, so the react-select keyboard path never "reaches" the
@@ -535,7 +645,7 @@
     // click on the chosen option element commits it, and the token-scored pick above avoids the
     // default-active foreign match (e.g. a same-named city abroad) - both verified live on the fixture. Click
     // first; fall back to keyboard nav for true react-select v5 widgets that ignore synthetic clicks.
-    const clickTarget = best || opts[0];
+    const clickTarget = best;
     fireMouse(clickTarget);
     await sleep(260);
     if (comboCommitted(el) || norm(el.value) === targetText || el.getAttribute("aria-expanded") === "false") return true;
@@ -553,6 +663,41 @@
     el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
     await sleep(240);
     return el.getAttribute("aria-expanded") === "false" || comboCommitted(el) || norm(el.value) === targetText;
+  }
+
+  async function fillAriaCombobox(el, value) {
+    // A div[role=combobox] with a listbox popup and NO inner <input> (Rippling / react-aria).
+    // fillCombobox targets an <input> and types to filter; here we click to open, read the
+    // controlled [role=option] list, token-score (same slash-aware scorer as the pronoun fix),
+    // and click the best match. Never blind-clicks: no overlap -> Escape + false.
+    const nv = norm(value);
+    const vtokens = [...new Set(String(value).toLowerCase().split(/[\s/,|]+/).map((w) => w.replace(/[^a-z0-9]+/g, "")).filter((w) => w.length >= 2))];
+    try { el.focus(); } catch (_) {}
+    fireMouse(el);
+    await sleep(150);
+    if (el.getAttribute("aria-expanded") !== "true") { try { el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); } catch (_) {} }
+    let opts = [];
+    for (let i = 0; i < 16; i++) {
+      await sleep(200);
+      const menu = document.getElementById(el.getAttribute("aria-controls") || "__none__") || document.querySelector('[role="listbox"]');
+      opts = menu ? [...menu.querySelectorAll('[role="option"]')] : [...document.querySelectorAll('[role="option"]')].filter((o) => o.offsetParent);
+      if (opts.length) break;
+    }
+    if (!opts.length) return false;
+    let best = null, bestScore = 0;
+    for (const o of opts) {
+      const ot = norm(o.textContent);
+      const otokens = String(o.textContent).toLowerCase().split(/[\s/,|]+/).map((w) => w.replace(/[^a-z0-9]+/g, "")).filter(Boolean);
+      let score = 0;
+      for (const t of vtokens) { if (otokens.includes(t)) score += 2; else if (t.length >= 3 && ot.includes(t)) score += 1; }
+      if (ot === nv) score += 100;
+      if (score > bestScore) { bestScore = score; best = o; }
+    }
+    if (!best) { try { el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); } catch (_) {} return false; }
+    fireMouse(best);
+    await sleep(250);
+    const after = norm(el.textContent || "");
+    return el.getAttribute("aria-expanded") === "false" || (!!after && after !== "select");
   }
 
   async function runFillAll() {
@@ -611,8 +756,7 @@
       for (const el of fields) {
         const tag = el.tagName, typ = (el.type || "").toLowerCase();
         if (tag === "INPUT" && (typ === "radio" || typ === "checkbox")) {
-          const r = el.getBoundingClientRect();
-          if (el.offsetParent === null || getComputedStyle(el).display === "none" || (!r.width && !r.height)) continue;
+          if (!_optClickable(el)) continue;
           const q = groupQuestion(el);
           if (!q || seenG.has(q)) continue; seenG.add(q);
           const optlab = optionLabel(el);
@@ -655,8 +799,7 @@
       if (tag === "INPUT" && (typ === "radio" || typ === "checkbox")) {
         // Skip inputs with no layout box (Ashby's hidden Yes/No backing checkboxes); the button
         // pass clicks the real visible buttons.
-        const _r = el.getBoundingClientRect();
-        if (el.offsetParent === null || getComputedStyle(el).display === "none" || (!_r.width && !_r.height)) continue;
+        if (!_optClickable(el)) continue;
         const q = groupQuestion(el);
         if (!q) { continue; } // no question resolved: skip silently (avoid random toggles)
         // Group by the QUESTION, so a "select all that apply" checkbox set (each option is a
@@ -735,12 +878,25 @@
         const cur = (el.value || el.textContent || "").trim();
         if (cur) { continue; }                        // don't clobber prefilled
         const limit = el.maxLength && el.maxLength > 0 ? el.maxLength : null;
-        const data = await askCached(q, limit, false, 40000, true);
-        if (data && data.method === "essay-skip") { rows.push([q.slice(0, 60), "review", "essay -> click the field to draft it"]); review++; continue; }
+        let data = await askCached(q, limit, false, 40000, true);
+        if (data && data.method === "essay-skip") {
+          // Essays are skipped in the fast batch so it never blocks on a 20s draft. Draft this
+          // one now, inline (single /answer, bulk off, composes the essay), one at a time; it
+          // gets filled and marked "review" below so you read it before submitting.
+          data = await askEngine(q, limit, false, 60000, false);
+        }
         if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", data && data.__error ? "engine: " + data.__error : "no answer -> you"]); skipped++; continue; }
         // a bare structured value (tier-1 field match) belongs in an input/select, never a prose
         // box: this is where a demographic token leaks into a free-text field. Leave it for you.
-        if (tag === "TEXTAREA" && data.method === "field") { rows.push([q.slice(0, 60), "skip", "structured value not for a text box -> you"]); skipped++; continue; }
+        if (tag === "TEXTAREA" && data.method === "field") {
+          // A demographic token must never leak into a prose box, but a LinkedIn/GitHub/website URL
+          // legitimately belongs in its labeled textarea. Allow only URL/handle field values through.
+          const fkey = (data.field || "").toLowerCase();
+          const urlish = /identity\.(linkedin|github|gitlab|website|portfolio|url)/.test(fkey)
+            || /\b(linkedin|github|gitlab|portfolio|personal (site|website)|website|url)\b/i.test(q)
+            || /https?:\/\/|(?:linkedin|github|gitlab)\.com|^[\w.-]+\.(?:com|io|dev|net|org|me)\b/i.test(String(data.text || "").trim());
+          if (!urlish) { rows.push([q.slice(0, 60), "skip", "structured value not for a text box -> you"]); skipped++; continue; }
+        }
         const isCombo = isCombobox(el);
         const singleLine = tag !== "TEXTAREA" && !el.isContentEditable;
         const isEssay = data.method && data.method !== "field" && data.method !== "learned";
@@ -755,11 +911,23 @@
           else { rows.push([q.slice(0, 60), "skip", "combobox: '" + data.text.slice(0, 40) + "' not selectable -> you"]); skipped++; }
           continue;
         }
-        setNative(el, data.text);
-        // record structured single-line values (phone/title/urls...) for the heal pass; those
-        // are the ones an intermittent re-render can wipe. Skip essays/gaps (long prose in
-        // textareas, unlikely to clear and expensive to re-verify).
-        if (singleLine && !gap && !isEssay) healMap.push({ q, value: data.text, kind: "text" });
+        // Long prose (essay/gap) is written 6-20s after its ref was captured, so Ashby's async
+        // resume-autofill re-render can have DETACHED our node - the write then lands on a dead
+        // element and the live field stays empty (report says "review", DOM is blank). Re-resolve
+        // the live field, verify the write stuck, retry once, and register it for the heal pass so
+        // a still-later re-render is repaired too. Structured single-line values heal as before.
+        const isProse = (tag === "TEXTAREA" || el.isContentEditable) && (isEssay || gap);
+        if (isProse) {
+          let tgt = (el.isConnected ? el : (reFindField(q) || el));
+          setNative(tgt, data.text);
+          if (!((tgt.value || tgt.textContent || "").trim())) {
+            const r2 = reFindField(q); if (r2) { tgt = r2; setNative(tgt, data.text); }
+          }
+          healMap.push({ q, value: data.text, kind: "text" });
+        } else {
+          setNative(el, data.text);
+          if ((singleLine || tag === "TEXTAREA" || el.isContentEditable) && !gap && !isEssay) healMap.push({ q, value: data.text, kind: "text" });
+        }
         if (gap) { rows.push([q.slice(0, 60), "review", "gap: " + data.gaps.join(", ") + " | " + data.text.slice(0, 40)]); review++; }
         else if (isEssay) { rows.push([q.slice(0, 60), "review", "essay (" + (data.method || "") + ") - read it | " + data.text.slice(0, 40)]); review++; }
         else { rows.push([q.slice(0, 60), "filled", data.text.slice(0, 60)]); filled++; }
@@ -829,6 +997,69 @@
       }
     } catch (e) { rows.push(["(button choice pass)", "skip", String(e).slice(0, 60)]); }
 
+    // ---- ARIA-role widget pass (Rippling etc.): div[role=combobox] + div[role=radiogroup] -----
+    // deepFields only walks input/textarea/select, so react-aria DIV widgets with no native control
+    // are invisible to every pass above. Resolve the question from aria-labelledby, ask the engine,
+    // and commit by clicking the ARIA option / radio. Self-verifying; never blind-clicks.
+    try {
+      const ariaQuestion = (el) => {
+        const lb = el.getAttribute("aria-labelledby");
+        if (lb) {
+          const t = lb.split(/\s+/).map((i) => (document.getElementById(i) || {}).innerText || "").join(" ").trim();
+          if (t) return stripSectionHead(clean(t)).slice(0, 240);
+        }
+        return groupQuestion(el); // climb ancestors for the question heading (radiogroups here have no
+                                  // aria-labelledby); groupQuestion strips a trailing "Yes No" and falls
+                                  // back to questionFor itself. Fixes the Rippling auth/sponsorship radios.
+      };
+
+      // A) ARIA comboboxes: div[role=combobox] with a listbox popup, no native input
+      const combos = [...document.querySelectorAll('[role="combobox"][aria-haspopup="listbox"], [role="combobox"][aria-controls]')]
+        .filter((el) => el.tagName !== "INPUT" && !inPenates(el) && shown(el) && el.getAttribute("aria-disabled") !== "true");
+      for (const el of combos) {
+        try {
+          const q = ariaQuestion(el);
+          if (!q || groupsDone.has(q)) continue;
+          if (skipQuestion(q)) { groupsDone.add(q); rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; continue; }
+          const shownVal = clean(el.textContent || el.getAttribute("aria-label") || "");
+          if (shownVal && !/^select\.{0,3}$/i.test(shownVal)) { groupsDone.add(q); continue; }   // already answered
+          groupsDone.add(q); seen++;
+          setReport("Filling " + seen + " (choice) ... " + elapsed() + "s elapsed. NOTHING submitted.", rows);
+          const data = await askCached(q, 40, false, 40000, true);
+          if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", data && data.__error ? data.__error : "no value -> you"]); skipped++; continue; }
+          const ok = await fillAriaCombobox(el, data.text);
+          rows.push([q.slice(0, 60), ok ? "filled" : "skip", ok ? data.text.slice(0, 60) : "'" + data.text.slice(0, 30) + "' not selectable -> you"]);
+          ok ? filled++ : skipped++;
+        } catch (_) {}
+      }
+
+      // B) ARIA radiogroups: div[role=radiogroup] > div[role=radio][data-value]
+      for (const g of [...document.querySelectorAll('[role="radiogroup"]')].filter((g) => !inPenates(g) && shown(g))) {
+        try {
+          const q = ariaQuestion(g);
+          if (!q || groupsDone.has(q)) continue;
+          const radios = [...g.querySelectorAll('[role="radio"]')].filter((r) => shown(r));
+          if (radios.length < 2 || radios.length > 8) continue;
+          if (skipQuestion(q)) { groupsDone.add(q); rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; continue; }
+          if (radios.some((r) => r.getAttribute("aria-checked") === "true")) { groupsDone.add(q); continue; }
+          groupsDone.add(q); seen++;
+          setReport("Filling " + seen + " (choice) ... " + elapsed() + "s elapsed. NOTHING submitted.", rows);
+          const labelOf = (r) => clean(r.getAttribute("data-value") || r.textContent || "");
+          const opts = radios.map(labelOf).filter(Boolean);
+          const data = await askEngine(q, 25, false, 40000, false, opts);   // options: serve constrains a choice to Yes/No
+          if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", data && data.__error ? data.__error : "no answer -> you"]); skipped++; continue; }
+          const na = norm(data.text);
+          let hit = null;
+          for (const r of radios) { const rl = norm(labelOf(r)); if (rl && (rl === na || rl.startsWith(na) || na.startsWith(rl))) { hit = r; break; } }
+          if (hit) {
+            fireMouse(hit); await sleep(140);
+            rows.push([q.slice(0, 60), "filled", labelOf(hit)]); filled++;
+            healMap.push({ q, value: labelOf(hit), kind: "ariaRadio" });
+          } else { rows.push([q.slice(0, 60), "skip", "answer '" + clean(data.text).slice(0, 20) + "' not a choice -> you"]); skipped++; }
+        } catch (_) {}
+      }
+    } catch (e) { rows.push(["(aria widget pass)", "skip", String(e).slice(0, 60)]); }
+
     // ---- heal pass ----------------------------------------------------------------
     // Ashby intermittently re-renders the form (a stray effect, the file attach, a sibling
     // update) and wipes a value we already set - phone was the repeat offender. Re-scan on
@@ -875,7 +1106,7 @@
     // re-scans on FRESH refs, and re-attempts anything required that is still empty/unchecked. It
     // only ACTS on a control that is currently unsatisfied, so it can never clobber a good value.
     try {
-      await sleep(600);
+      await sleep((CAN_SURFACE && !IS_TOP) ? 1200 : 600);   // embeds render/settle slower
       const fresh2 = deepFields().filter((el) => {
         if (inPenates(el)) return false;
         if (el.tagName === "INPUT" && SKIP_TYPES.test(el.type || "")) return false;
@@ -927,14 +1158,30 @@
             }
             continue;
           }
-          // combobox still empty (Ashby autocomplete that lost the fill-time timing/re-render race)
+          // combobox still empty (autocomplete/react-select that lost the fill-time timing race,
+          // common in an embedded iframe). Read the DISPLAYED value, not el.value: a react-select
+          // keeps its selection in a single-value element and leaves the input empty.
           if (tag === "INPUT" && isCombobox(el)) {
-            if ((el.value || "").trim()) continue;
+            if (comboCommitted(el) || (el.value || "").trim()) continue;
             const q = questionFor(el);
             if (!q || skipQuestion(q)) continue;
             const data = await askCached(q, null, false, 40000, true);
             if (!data || data.__error || !data.text) continue;
             if (await fillCombobox(el, data.text)) { fixed++; rows.push([q.slice(0, 60), "filled", data.text.slice(0, 50) + " (verify)"]); }
+          }
+          // native <select> still on its placeholder (some Country / yes-no fields) - re-pick.
+          if (tag === "SELECT" && (el.selectedIndex <= 0 || !(el.value || "").trim())) {
+            const q = questionFor(el);
+            if (q && !skipQuestion(q)) {
+              const data = await askCached(q, null, false, 40000, true);
+              if (data && !data.__error && data.text) {
+                const want = norm(data.text);
+                const opt = [...el.options].find((o) => norm(o.textContent) === want || norm(o.value) === want)
+                          || [...el.options].find((o) => want.length >= 2 && norm(o.textContent).startsWith(want));
+                if (opt) { el.value = opt.value; el.dispatchEvent(new Event("change", { bubbles: true }));
+                  fixed++; rows.push([q.slice(0, 60), "filled", (opt.textContent || "").trim().slice(0, 50) + " (verify)"]); }
+              }
+            }
           }
         } catch (_) {}
       }
@@ -1046,25 +1293,35 @@
     return fillable >= 4 && hasIdentity;
   }
   function mountLauncher() {
-    if (!IS_TOP || launcherMounted) return;
+    if (!CAN_SURFACE || launcherMounted) return;
     if (!surfaceAllowed()) return;
     launcherMounted = true;
     const b = document.createElement("button");
     launcherBtn = b;
     b.setAttribute("data-penates", "launch");
-    b.textContent = "Fill application";
+    b.textContent = IS_TOP ? "Fill application" : "Fill in new tab";
     b.type = "button";
     b.style.cssText =
       "position:fixed;right:16px;bottom:16px;z-index:2147483646;font:600 13px system-ui,sans-serif;" +
       "padding:9px 14px;border:1px solid #1e40af;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer;" +
       "box-shadow:0 2px 10px rgba(0,0,0,.35)";
-    b.addEventListener("click", (e) => { e.preventDefault(); runFillAll(); });
+    b.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (IS_TOP) { runFillAll(); return; }
+      // Embedded ATS form: its dropdowns are a cross-origin react-select that reverts synthetic
+      // selections in the iframe. Open the SAME form standalone (top frame) and auto-fill it there.
+      // window.open is blocked inside a sandboxed iframe, so ask the background worker to open it.
+      try {
+        const u = new URL(location.href); u.hash = "penates-fill";
+        chrome.runtime.sendMessage({ type: "OPEN_FILL_TAB", url: u.toString() });
+      } catch (_) { try { runFillAll(); } catch (__) {} }
+    });
     (document.body || document.documentElement).appendChild(b);
   }
   let _reevalT = 0;
   function reevaluateDebounced() { clearTimeout(_reevalT); _reevalT = setTimeout(reevaluate, 350); }
   function watchForForm() {
-    if (!IS_TOP) return;
+    if (!CAN_SURFACE) return;
     reevaluate();
     let obs = null;
     try { obs = new MutationObserver(reevaluateDebounced); obs.observe(document.documentElement, { childList: true, subtree: true }); } catch (_) {}
@@ -1120,7 +1377,7 @@
   }
   let card, els = {};
   function openCard() {
-    if (card) { card.style.display = "block"; return; }
+    if (card) { card.style.display = "block"; if (els && els.q) els.q.textContent = currentQuestion; return; }
     card = document.createElement("div");
     card.setAttribute("data-penates", "card");
     card.style.cssText =
@@ -1198,6 +1455,6 @@
   chrome.runtime.onMessage.addListener((msg) => {
     if (!msg) return;
     if (msg.type === "ANSWER_FIELD") run();
-    else if (msg.type === "FILL_ALL" && IS_TOP) runFillAll();
+    else if (msg.type === "FILL_ALL" && CAN_SURFACE) runFillAll();
   });
 })();
