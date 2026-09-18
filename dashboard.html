@@ -296,7 +296,9 @@ function scCls(n){return n>=65?'hi':n>=45?'mid':'lo';}
 function postedFmt(p){ if(!p) return ''; let s=String(p).replace(' ','T');
   if(/^\d{4}-\d{2}-\d{2}$/.test(s)) s+='T00:00:00';   // date-only -> LOCAL midnight (avoid UTC off-by-one showing yesterday)
   const d=new Date(s); if(isNaN(d.getTime())) return p;
-  const days=Math.floor((Date.now()-d.getTime())/86400000);
+  const md=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  const now=new Date(), mn=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  const days=Math.round((mn-md)/86400000);
   const dt=d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
   const rel=days<=0?'today':days===1?'1 day ago':days+'d ago'; return rel+' · '+dt; }
 function rankedUrl(){
