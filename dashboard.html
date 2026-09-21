@@ -114,6 +114,8 @@ tr.jobrow:hover{background:var(--panel2)}
       <label class="ftchk"><input type="checkbox" id="fRemote" checked> Remote only</label>
       <label class="ftchk"><input type="checkbox" id="fUS" checked> US only</label>
       <label class="ftchk">Min $<input type="number" id="fSalary" min="0" step="5000" placeholder="0"></label>
+      <label class="ftchk"><input type="checkbox" id="fClosed"> Show closed</label>
+      <span class="muted" id="pruneLine"></span>
       <span class="muted" id="count"></span>
       <span class="grow"></span>
       <span class="muted" id="reflog" style="font:12px ui-monospace,monospace"></span>
@@ -307,6 +309,7 @@ function rankedUrl(){
   if($('fUS')&&$('fUS').checked) p.set('us_only','1');
   const sm=parseInt(($('fSalary')&&$('fSalary').value)||'0',10);
   if(sm>0) p.set('salary_min',String(sm));
+  if($('fClosed')&&$('fClosed').checked) p.set('status','closed');
   const qs=p.toString(); return '/ranked'+(qs?('?'+qs):'');
 }
 async function loadJobs(){
@@ -316,9 +319,12 @@ async function loadJobs(){
   ]);
   JOBS=r.jobs||[];
   const top=JOBS.slice(0,10), avg=top.length?Math.round(top.reduce((a,j)=>a+(j.score||0),0)/top.length):0;
-  $('stats').innerHTML=[['Apply-able jobs',JOBS.length],['Avg score, top 10',avg],
+  const closedOn=$('fClosed')&&$('fClosed').checked;
+  $('stats').innerHTML=[[closedOn?'Closed (review)':'Apply-able jobs',JOBS.length],['Avg score, top 10',avg],
     ['Applied this week',st.applied_this_week??0],['Applied this month',st.applied_this_month??0],['Total applied',st.applied_total??0]]
     .map(s=>`<div class="stat"><div class="n">${s[1]}</div><div class="l">${s[0]}</div></div>`).join('');
+  const lp=st.last_prune;
+  $('pruneLine').textContent = lp && lp.at ? ((lp.closed||0)+' closed this refresh (hidden)') : '';
   $('lastAdded').textContent='Jobs added: '+ago(st.last_added); $('lastAdded').title=st.last_added||'';
   render();
 }
@@ -344,7 +350,7 @@ function render(){
       <td class="muted" style="white-space:nowrap;font-size:12px">${esc(postedFmt(j.posted))}</td>
       <td class="muted" style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.location||'')}</td>
       <td class="muted" style="font-size:12px;white-space:nowrap">${esc(j.salary||'')}</td>
-      <td class="ats">${esc(j.ats||'')}</td>
+      <td class="ats">${esc(j.ats||'')}${j.closed_reason?' <span class="muted">'+esc(j.closed_reason)+'</span>':''}</td>
       <td class="act">${ap?'<span class="muted">applied</span>':
         `<button class="mini apply" data-url="${esc(j.apply)}">Apply</button>
          <button class="mini mk" data-url="${esc(j.apply)}" data-co="${esc(j.company)}" data-role="${esc(j.role)}">Mark applied</button>`}</td></tr>`;
@@ -368,6 +374,7 @@ function openDrawer(j){
   if(j.workplace&&j.workplace!==j.location)chips.push(['',j.workplace]);
   if(j.salary)chips.push(['',j.salary]);
   if(j.ats)chips.push(['ATS',j.ats]);
+  if(j.closed_reason)chips.push(['Closed',j.closed_reason]);
   if(j.source)chips.push(['Source',j.source]);
   $('dr-meta').innerHTML=chips.map(c=>`<span class="chip">${c[0]?esc(c[0])+': ':''}${esc(String(c[1]))}</span>`).join('');
   const d=$('dr-desc');
@@ -396,7 +403,7 @@ async function mark(b){ b.disabled=true;b.textContent='...';
   const j=JOBS.find(x=>x.apply===b.dataset.url); if(j)j.status='applied';
 }
 $('q').oninput=render;
-['fRemote','fUS'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',loadJobs);});
+['fRemote','fUS','fClosed'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',loadJobs);});
 {const sal=$('fSalary'); if(sal) sal.addEventListener('change',loadJobs);}
 document.querySelectorAll('th[data-sort]').forEach(th=>th.onclick=()=>{const k=th.dataset.sort;
   sortDir=(sortKey===k)?-sortDir:((k==='score'||k==='discovered_at'||k==='posted')?-1:1); sortKey=k; render();});

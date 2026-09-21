@@ -817,7 +817,7 @@ def _filter_ranked(rows, qs):
 _PIPE = {"running": False, "log": [], "started": 0, "finished": 0}
 _ANSWER_LOG = []   # local-model reasoning: recent /answer resolutions
 _FILL_LOG = []     # form-fill reports posted by the extension
-_PIPE_SCRIPTS = ["scan_ats.py", "discover.py", "hiringcafe.py", "builtin.py", "remotive.py", "remoteok.py", "resolve.py", "rank.py"]
+_PIPE_SCRIPTS = ["scan_ats.py", "discover.py", "hiringcafe.py", "builtin.py", "remotive.py", "remoteok.py", "resolve.py", "rank.py", "prune.py"]
 
 def _run_pipeline():
     import jobs_store
@@ -954,7 +954,8 @@ class H(BaseHTTPRequestHandler):
             try:
                 import jobs_store
                 qs = urllib.parse.parse_qs(parsed.query)
-                rows = _filter_ranked(jobs_store.ranked(), qs)
+                st = (qs.get("status") or ["discovered"])[0].strip() or "discovered"
+                rows = _filter_ranked(jobs_store.ranked(status=st), qs)
                 out = [{"company": r.get("company", ""), "role": r.get("role", ""),
                         "score": r.get("score") or 0, "ats": r.get("ats", ""),
                         "status": r.get("status"), "source": r.get("source", ""),
@@ -964,7 +965,8 @@ class H(BaseHTTPRequestHandler):
                         "workplace": r.get("workplace", ""),
                         "salary": r.get("salary", ""), "desc": r.get("desc", ""),
                         "url": r.get("url", ""),
-                        "apply": r.get("apply_url") or r.get("url", "")} for r in rows]
+                        "apply": r.get("apply_url") or r.get("url", ""),
+                        "closed_reason": r.get("closed_reason") or ""} for r in rows]
                 return self._json(200, {"count": len(out), "jobs": out})
             except Exception as e:
                 return self._json(500, {"error": str(e)})
