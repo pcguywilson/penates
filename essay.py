@@ -129,16 +129,35 @@ _GENRE_RULES = [
     ("why_company",  r"why (do you want|are you interested|us\b|here\b|this (company|organization|team))|what (excites|interests|draws|appeals to) you|what makes you (excited|want)|excited to (work|join|be part)|want to work (at|for|here)|why (would you like )?work(ing)? (here|with us|for us)|interested in (working|joining)|^\s*why \S+\s*\??\s*$"),
     ("why_role",     r"why this (position|role|job)|why (are you interested in )?(this )?(devops|sre|cloud|platform|the) (role|position)|why do you want this (role|position|job)"),
     ("hypothetical", r"what would you build|if you (were|had|could|got)|imagine (you|that)|suppose you|given (a|the).{0,20}(month|week|opportunity|chance)|spend a (month|week|day)|how would you (design|build|approach|architect)|greenfield|from scratch, what|blue ?sky"),
+    ("behavioral",   r"influenc\w+|disagree\w*|convince|persuad\w+|conflict|push(ed)? ?back|difficult (person|co-?worker|colleague|teammate|customer|client|manager|boss|conversation|stakeholder)|had to (get|win|bring|convince|persuade|talk)|build(ing)? consensus|align(ing|ed)? (a |the )?(team|group|stakeholders|people)|work(ed)? with (a )?(difficult|resistant)|handl\w+ (a )?(disagreement|conflict)|gave (someone )?(difficult|hard|critical) feedback"),
     ("owned_project",r"describe (a|the|your).{0,40}(project|time|situation|example)|tell (us|me) about (a|the|your)|most (complex|challenging|difficult|impactful)|(a|one) (project|time|situation) (you|where you)|walk (us|me) through|you (personally )?(owned|led|built|architected)|give (us|me) an example|share an example"),
     ("technical_experience", r"what is your experience (with|in)|describe your .{0,30}experience|how (do|have) you (use|used)|rate your|proficiency (with|in)|how familiar are you|level of experience|how many years"),
     ("definition",   r"what does .{0,30}mean to you|how do you define|what is your definition|what do you (understand|think).{0,20}means"),
 ]
+# Inventory / list questions ("which AWS services / what tools have you used") must enumerate the
+# candidate's real stack, NOT become a STAR project story. Narrative cue (describe a / one time /
+# example) keeps a genuine project question as owned_project.
+_INVENTORY_RE = re.compile(
+    r"(which|what)\b.{0,60}\b(services?|tools?|technolog\w+|platforms?|languages?|stack|frameworks?|software|monitoring|databases?)\b"
+    r".{0,40}\b(have you|did you|you.?ve|do you)\b.{0,14}\b(use|used|using|worked with|run|ran|operated?|set up|manage[d]?|maintain\w*)\b"
+    r"|what\b.{0,70}\bhave you\b.{0,14}\b(set up|configured?|maintain\w*|worked with)\b",
+    re.I)
+_NARRATIVE_CUE_RE = re.compile(
+    r"describe (a|an|one|your)|give (us|me) an example|share an example|walk (us|me) through"
+    r"|tell (us|me) about|(a|one) (time|project|issue|situation|example)\b", re.I)
+_PRACTICE_RE = re.compile(r"\b(testing|test suite|synthetic monitoring|integration tests?|endpoint checks?|unit tests?|smoke tests?|monitoring practice)\b", re.I)
+
+
 def classify_genre(question, constraints):
     q = (question or "").lower()
     # short_text: an explicit one-sentence / very short ask that is not a project story
     if (constraints.get("max_sent") == 1 or (constraints.get("max_words") or 999) < 40) \
        and not re.search(r"project|time you|example|describe a", q):
         return "short_text"
+    # inventory/list question -> enumerate real stack, not a project story. A PRACTICE noun
+    # (testing/synthetic monitoring/integration/endpoint) asks for how you do it, not a tool list.
+    if _INVENTORY_RE.search(q) and not _NARRATIVE_CUE_RE.search(q) and not _PRACTICE_RE.search(q):
+        return "inventory"
     for genre, rx in _GENRE_RULES:
         if re.search(rx, q):
             return genre
@@ -154,6 +173,43 @@ def classify_genre(question, constraints):
         except Exception:
             pass
     return "owned_project"  # safe default: force a concrete answer, not a skills dump
+
+# ---------------------------------------------------------------- inventory / list answers
+_BUCKET_KEYWORDS = {
+    "aws_services": ["aws service", "aws services"],
+    "cloud": ["cloud", " aws", "azure", "gcp", "govcloud"],
+    "monitoring_security": ["monitor", "observab", "siem", "logging", "log analytics", "alerting",
+                            "synthetic", "security tool", "security stack", "endpoint check"],
+    "cicd": ["ci/cd", "cicd", "ci cd", "continuous integration", "continuous delivery",
+             "continuous deployment", "pipeline", "github actions", "automated testing",
+             "integration test", "testing"],
+    "containers": ["container", "docker", "kubernetes", "k8s", "orchestrat"],
+    "iac": ["infrastructure as code", "iac", "terraform", "ansible", "provision",
+            "configuration management"],
+    "systems": ["operating system", "linux", "windows", "server os", "sysadmin"],
+    "languages": ["language", "scripting", "programming language", "coding"],
+}
+def _enumerate_experience(question):
+    """Deterministic honest list for inventory/list questions: real items from profile.yaml buckets
+    whose keyword appears in the question. No model, no story, no narrative."""
+    p = _a.load("profile.yaml") or {}
+    ql = (question or "").lower()
+    items, seen = [], set()
+    for bucket, kws in _BUCKET_KEYWORDS.items():
+        if any(k in ql for k in kws):
+            for x in (p.get(bucket) or []):
+                xs = str(x).strip()
+                if xs and xs.lower() not in seen:
+                    seen.add(xs.lower()); items.append(xs)
+    if not items:
+        for s2 in (_a._real_stack(p) or "").split(","):
+            s2 = s2.strip()
+            if s2 and s2.lower() not in seen:
+                seen.add(s2.lower()); items.append(s2)
+    if not items:
+        return ""
+    return "In production I have worked with " + ", ".join(items[:16]) + "."
+
 
 # ---------------------------------------------------------------- gaps
 # Systems a question may name that, if the candidate has no evidence of them, must be
@@ -421,6 +477,48 @@ def _no_dash(s):
     s = re.sub(r"\s{2,}", " ", s)            # collapse double spaces
     return s.strip()
 
+def _question_company(q):
+    """Company name a 'why <company>' question names, or None. Used to catch a question whose
+    company token does not match the application's company context (answering the wrong company)."""
+    m = re.search(r"\bwhy\s+([A-Z0-9][\w&.\-]*(?:\s+[A-Z0-9][\w&.\-]*){0,3})", q or "")
+    if not m:
+        m = re.search(r"(?:work (?:at|for)|join|part of)\s+([A-Z0-9][\w&.\-]*(?:\s+[A-Z0-9][\w&.\-]*){0,3})", q or "")
+    if not m:
+        return None
+    cand = re.sub(r"\s+(there|out|here|today).*$", "", m.group(1).strip().rstrip("?.,!"), flags=re.I).strip()
+    if cand and cand.lower() not in ("do", "are", "would", "you", "us", "this", "the", "our", "i"):
+        return cand
+    return None
+
+def _company_match(a, b):
+    na = re.sub(r"[^a-z0-9]", "", (a or "").lower())
+    nb = re.sub(r"[^a-z0-9]", "", (b or "").lower())
+    if not na or not nb:
+        return True
+    return na in nb or nb in na
+
+def _story_is_interpersonal(story):
+    """True only if the story actually carries influence/conflict content. Our corpus is technical,
+    so this is normally False and behavioral questions floor to an honest gap instead of a fake STAR."""
+    if not story:
+        return False
+    s = story.get("star", {}) or {}
+    blob = " ".join([str(story.get("hero", "")), str(story.get("title", "")),
+                     " ".join(story.get("domains", []) or []),
+                     str(s.get("situation", "")), str(s.get("action", "")), str(s.get("result", ""))]).lower()
+    return bool(re.search(r"influenc|persuad|convince|consensus|disagree|conflict|stakeholder|align the team|pushed back|negotiat", blob))
+
+def _behavioral_gap(question, c):
+    """Honest floor for a behavioral/influence prompt when no story has real interpersonal conflict.
+    Do NOT invent a conflict or relabel a technical project as one."""
+    limit = c.get("max_chars") or 700
+    ans = ("I want to be accurate rather than force an example. I do not have a standout story of "
+           "overturning a team's disagreement that I would want to overstate. Where I do have "
+           "influence, it is usually by putting a clear, tested proposal in front of people and "
+           "letting the results make the case, not by winning an argument. I would rather be upfront "
+           "about that than invent a conflict.")
+    return _no_dash(_a.enforce_length(ans, {}, limit, False).strip())
+
 def _why_candidate_only(facts, c, target_role=None, company=None, job_text=""):
     """Deterministic why-company floor (option B, Grok-approved): ENGAGE the company with a true
     domain hook taken from the POSTING (never the mission slogan), tie it to the candidate's real
@@ -478,20 +576,22 @@ def retrieve_story(question, want_owned, ignore_not_implied=False):
     if not stories:
         return None, -1
     qt = _tokens(question)
-    best, bs = None, -10
+    best, bs, b_topic = None, -10, -1
     ql = (question or "").lower()
     for st in stories:
-        hay = " ".join(list(st.get("domains", [])) + list(st.get("tools", [])) +
-                       [st.get("title", ""), st.get("hero", "")])
-        score = len(qt & _tokens(hay))
+        dt = _tokens(" ".join(list(st.get("domains", [])) + list(st.get("tools", []))))   # topic/tool tokens
+        th = _tokens(" ".join([st.get("title", ""), st.get("hero", "")])) - dt             # title/hero only
+        topic_hits = len(qt & dt)                 # real domain/tool overlap
+        score = topic_hits * 3 + len(qt & th)     # weight topic/tool matches over title/hero words
         if want_owned and st.get("owned"):
             score += 2
         if not ignore_not_implied:
             for ni in st.get("not_implied", []):
                 if re.search(r"(?<![a-z0-9])" + re.escape(ni.lower()) + r"(?![a-z0-9])", ql):
                     score -= 5
-        if score > bs:
-            bs, best = score, st
+        # tie-break on real topic/tool overlap, NOT file order (was: first story in file won ties)
+        if score > bs or (score == bs and topic_hits > b_topic):
+            bs, best, b_topic = score, st, topic_hits
     return best, bs
 
 # ---------------------------------------------------------------- prompts
@@ -699,6 +799,20 @@ def answer_essay(question, limit=None, company=None, url=None, model=None, want_
     # why-company role lock + validator.
     target_role = resolve_target_role(role, url) if genre in ("why_company", "why_role") else ""
     current_title = _current_title() if genre in ("why_company", "why_role") else ""
+    if genre == "why_company":
+        qco = _question_company(q)
+        if qco and company and not _company_match(qco, company):
+            mtext = ("This reads as a 'why %s' question, but the application is set to %s. I will not "
+                     "answer for the wrong company. Set the company to %s and regenerate." % (qco, company, qco))
+            return {"ok": True, "kind": "review", "method": "essay:ctx_mismatch", "genre": "why_company",
+                    "chars": len(mtext), "gaps": ["company ctx mismatch"], "story": None, "text": mtext}
+    if genre == "inventory":
+        _inv = _enumerate_experience(q)
+        if _inv:
+            return {"ok": True, "kind": "answer", "method": "field:inventory",
+                    "genre": "inventory", "grounding": "profile", "story": None,
+                    "chars": len(_inv), "words": _wordcount(_inv), "gaps": [],
+                    "review": False, "checks": [], "text": _inv}
     gaps = detect_gaps(q)
     want_owned = c.get("owned") or genre == "owned_project"
     story, score = retrieve_story(q, want_owned)
@@ -709,6 +823,14 @@ def answer_essay(question, limit=None, company=None, url=None, model=None, want_
                 "chars": 0, "gaps": [], "story": None,
                 "text": "[NEEDS INPUT] Add at least one story in stories.yaml (Profile - Stories) "
                         "so this can be answered from your real work."}
+
+    # Behavioral / influence questions need a real interpersonal example. The corpus is technical,
+    # so a plain owned_project STAR here answers the wrong question. If no story actually carries
+    # influence/conflict content, disclose honestly rather than fake it (Grok-agreed floor).
+    if genre == "behavioral" and not _story_is_interpersonal(story):
+        btext = _behavioral_gap(q, c)
+        return {"ok": True, "kind": "answer", "method": "essay:behavioral_gap", "genre": "behavioral",
+                "chars": len(btext), "gaps": [], "story": None, "text": btext}
 
     # domain gap (e.g. 'endpoint management' with no endpoint story) -> treat as a gap
     dgap = _domain_gap(q, story) if genre in ("owned_project", "technical_experience") else None

@@ -3,11 +3,14 @@
 
 Routes:
   /apply?url=...   -> launches run_url.py --attach <url> (the CDP full-fill path)
-  /answer  (POST)  -> JSON {question, limit?, company?, url?, fresh?} -> grounded
+  /answer  (POST)  -> JSON {question, limit?, company?, url?, fresh?, options?} -> grounded
                       answer. Tiers: structured field -> intent template ->
                       LEARNED (your vetted past answers) -> compose (LLM + gap guard).
-  /answer-batch (POST) -> JSON {questions: [str|{q|question, limit?}], company?,
-                      role?, url?, page_context?, bulk?, fresh?, bulk_skip_essays?}
+                      method=field responses include field:<yaml value path>.
+                      When options:[str] is non-empty, answer is constrained to an option
+                      (or kind:review leave-blank) — never free-text/essay.
+  /answer-batch (POST) -> JSON {questions: [str|{q|question, limit?, options?}], company?,
+                      role?, url?, page_context?, bulk?, fresh?, bulk_skip_essays?, options?}
                       -> {ok, answers: [{q, .../answer fields} | {q, ok:false, __error}]}.
                       answers[i] matches questions[i]. One item failing never fails the
                       batch. Defaults bulk=true and bulk_skip_essays=true (essays stay
@@ -236,13 +239,115 @@ def do_learn(payload):
 
 # ---- answer resolution -----------------------------------------------------
 def _shape(r):
-    return {
+    out = {
         "ok": r.get("kind") in ("answer", "field"),
         "kind": r.get("kind"),
         "method": r.get("method"),
         "chars": r.get("chars"),
         "gaps": r.get("gaps", []),
         "text": r.get("text", ""),
+    }
+    # Additive: yaml value path on method=field hits (e.g. identity.linkedin, literal:Yes)
+    if r.get("field"):
+        out["field"] = r["field"]
+    if r.get("reason"):
+        out["reason"] = r["reason"]
+    return out
+
+
+def _match_field_key(label, fields):
+    """Re-derive the fields.yaml value path for a label (serve.py lane; apply.match_field
+    only returns resolved text). Same first-match-wins order as match_field."""
+    lab = (label or "").lower()
+    for rule in (fields or {}).get("fields") or []:
+        try:
+            if re.search(rule["pattern"], lab, re.I):
+                return rule.get("value")
+        except re.error:
+            continue
+    return None
+
+
+def _norm_option(s):
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+
+def _pick_option(text, options):
+    """Return the original option string whose normalized form equals text, else None."""
+    nt = _norm_option(text)
+    if not nt:
+        return None
+    for o in options:
+        if _norm_option(o) == nt:
+            return o
+    return None
+
+
+def _yes_no_from_text(text):
+    t = _norm_option(text)
+    if t in ("yes", "y", "true"):
+        return "Yes"
+    if t in ("no", "n", "false"):
+        return "No"
+    if t.startswith("yes") and len(t) <= 8:
+        return "Yes"
+    if t.startswith("no") and len(t) <= 8:
+        return "No"
+    return None
+
+
+def _pick_yes_no_option(yn, options):
+    """Map Yes/No onto the closest option label (Yes/No/Y/N/True/False/...)."""
+    hit = _pick_option(yn, options)
+    if hit is not None:
+        return hit
+    want_yes = yn == "Yes"
+    for o in options:
+        no = _norm_option(o)
+        if want_yes and (no in ("yes", "y", "true") or (no.startswith("yes") and len(no) <= 12)):
+            return o
+        if (not want_yes) and (no in ("no", "n", "false") or (no.startswith("no") and len(no) <= 12)):
+            return o
+    return None
+
+
+def _constrain_to_options(out, options, q):
+    """When the client sends choice labels, never return free-text/essay.
+    Prefer a normalized match to an option; else Yes/No coerce; else review leave-blank.
+    """
+    opts = [str(o) for o in (options or []) if o is not None and str(o).strip()]
+    if not opts:
+        return out
+    out = dict(out) if isinstance(out, dict) else {"ok": False, "text": str(out)}
+    text = out.get("text") or ""
+    matched = _pick_option(text, opts)
+    if matched is not None:
+        out["text"] = matched
+        out["chars"] = len(matched)
+        out["ok"] = True
+        if out.get("kind") not in ("answer", "field"):
+            out["kind"] = "field"
+        return out
+    yn = _yes_no_from_text(text)
+    if yn:
+        matched = _pick_yes_no_option(yn, opts)
+        if matched is not None:
+            out["text"] = matched
+            out["chars"] = len(matched)
+            out["ok"] = True
+            out["kind"] = "field"
+            out.setdefault("method", "options")
+            out["gaps"] = out.get("gaps") or []
+            return out
+    # Options present but no safe match — leave blank (do not ship a story into a radio)
+    return {
+        "ok": False,
+        "kind": "review",
+        "method": "options-miss",
+        "chars": 0,
+        "gaps": [],
+        "text": "",
+        "reason": "answer not in options; left blank",
     }
 
 # Server-side field guards - the single chokepoint every field passes through, so they hold
@@ -278,18 +383,45 @@ _COI_NO = re.compile(
     r"(family member|domestic partner|friend)[\s\S]{0,140}(working|employed|currently (at|with|working))",
     re.I)
 
+def _story_at_floor(essay_mod, question, story):
+    """True when retrieve_story's pick shares >=1 domain/tool token with the question.
+
+    That is the retrieval floor. The raw score is not: owned +2 and title/hero words
+    inflate it, and retrieve_story does not return topic_hits. Same tokenizer as
+    essay.retrieve_story. A title-only overlap stays below the floor so imported
+    can still be the Regenerate reference.
+    """
+    if not story:
+        return False
+    qt = essay_mod._tokens(question)
+    blob = " ".join(list(story.get("domains") or []) + list(story.get("tools") or []))
+    return len(qt & essay_mod._tokens(blob)) >= 1
+
+
 def do_answer(payload):
     """Tiered. Imported lazily so a broken import can't stop the server.
       0. field guards               -> skip conditional/optional; deterministic COI = No
       1. structured/identity/salary  -> match_field (fields.yaml -> profile.yaml)
-      1.2 imported (Regenerate only) -> fresh:true review suggestion; never default fill
-      1.5 genre router               -> essay.py (incl. definition / technical_experience)
+      1.2 imported (Regenerate only) -> fresh:true review suggestion; never default fill.
+          Skipped when inventory, or when owned_project/behavioral already has a story
+          at/above the retrieval floor (one domain/tool token).
+      1.5 genre router               -> essay.py (incl. definition / technical_experience / inventory)
       2. intent template             -> answer(question=...)  short-field bank only
       2.5 learned                    -> your vetted past answer (version-stamped)
       3. open-ended essay            -> compose()             (grounded LLM + gap guard)
     Pass fresh:true to skip the learned tier and force a new compose.
     Pass _engine_only:true (internal) to skip imported too (learn-diff draft).
+    Pass options:[str] to constrain the result to a choice label (never essay/story).
     """
+    out = _do_answer_unconstrained(payload)
+    opts = (payload or {}).get("options")
+    if isinstance(opts, list) and any(o is not None and str(o).strip() for o in opts):
+        q = ((payload or {}).get("question") or "").strip()
+        return _constrain_to_options(out, opts, q)
+    return out
+
+
+def _do_answer_unconstrained(payload):
     import apply as _apply
     q = (payload.get("question") or "").strip()
     if not q:
@@ -316,7 +448,8 @@ def do_answer(payload):
         val, how = _apply.match_field(q, prof, fields, required=True)
         if how == "field" and val not in (None, ""):
             return _shape({"kind": "field", "method": "field", "chars": len(str(val)),
-                           "gaps": [], "text": str(val)})
+                           "gaps": [], "text": str(val),
+                           "field": _match_field_key(q, fields)})
         if how and str(how).startswith("pause"):
             # fields.yaml explicitly marks this optional/leave-blank -> do NOT compose
             return _shape({"kind": "pause", "method": "optional-skip",
@@ -324,9 +457,35 @@ def do_answer(payload):
     except Exception as e:
         print("[tier1 skip] " + str(e), flush=True)
 
+    # Classify once, before the imported gate, so tier 1.5 reuses _genre/_c and does
+    # not call the model a second time.
+    _essay = None
+    _c = None
+    _genre = None
+    try:
+        import essay as _essay
+        _c = _essay.parse_constraints(q, limit)
+        _genre = _essay.classify_genre(q, _c)
+    except Exception as e:
+        print("[genre skip] " + str(e), flush=True)
+        _essay = None
+        _c = None
+        _genre = None
+
     # tier 1.2: imported reference — Regenerate-only (fresh:true). Never on default
     # non-fresh fill (was a pre-engine override of live drafts). Skipped for learn-diff.
-    if fresh and not engine_only:
+    # Also skipped when the genre engine is authoritative: inventory enumerate, or an
+    # owned_project/behavioral story already at/above the retrieval floor.
+    _skip_imported = _genre == "inventory"
+    if (not _skip_imported and _essay is not None and _c is not None
+            and _genre in ("owned_project", "behavioral")):
+        try:
+            _want_owned = bool(_c.get("owned")) or _genre == "owned_project"
+            _story, _sc = _essay.retrieve_story(q, _want_owned)
+            _skip_imported = _story_at_floor(_essay, q, _story)
+        except Exception as e:
+            print("[imported floor skip] " + str(e), flush=True)
+    if fresh and not engine_only and not _skip_imported:
         try:
             rec = imported_lookup(q)
             if rec:
@@ -342,15 +501,17 @@ def do_answer(payload):
             print("[imported skip] " + str(e), flush=True)
 
     # tier 1.5: genre router — project / hypothetical / behavioral / gap / why_* AND
-    # definition / technical_experience go to essay.py BEFORE apply.py's keyword bank.
+    # definition / technical_experience / inventory go to essay.py BEFORE apply.py's keyword bank.
     try:
-        import essay as _essay
-        _c = _essay.parse_constraints(q, limit)
-        _genre = _essay.classify_genre(q, _c)
+        if _essay is None:
+            import essay as _essay
+            _c = _essay.parse_constraints(q, limit)
+            _genre = _essay.classify_genre(q, _c)
         _gaps = _essay.detect_gaps(q)
         _is_gap = bool(_gaps["hard"] or _gaps["limited"])
         if _genre in ("owned_project", "hypothetical", "behavioral", "short_text",
-                      "why_company", "why_role", "definition", "technical_experience") or _is_gap:
+                      "why_company", "why_role", "definition", "technical_experience",
+                      "inventory") or _is_gap:
             if not fresh:
                 _la = learned_lookup(q)
                 if _la:
@@ -441,17 +602,22 @@ def do_answer_batch(payload):
         "bulk": bulk,
         "bulk_skip_essays": skip_essays,
     }
+    if isinstance(payload.get("options"), list):
+        shared["options"] = payload.get("options")
 
     answers = []
     t_all = time.time()
     for item in raw_qs:
         limit = payload.get("limit")
+        item_options = None
         if isinstance(item, str):
             q = item
         elif isinstance(item, dict):
             q = item.get("question") or item.get("q") or ""
             if "limit" in item:
                 limit = item.get("limit")
+            if "options" in item:
+                item_options = item.get("options")
         else:
             q = ""
         q = (q or "").strip()[:600]
@@ -461,6 +627,8 @@ def do_answer_batch(payload):
         one = dict(shared)
         one["question"] = q
         one["limit"] = limit
+        if item_options is not None:
+            one["options"] = item_options
         print("[answer] " + q.replace("\n", " ")[:120], flush=True)
         _t0 = time.time()
         try:
