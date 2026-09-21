@@ -6,7 +6,7 @@ Every feature reads/writes rows here so they share one shape:
   id, company, role, url, status, note,        (existing)
   ats, source, score, discovered_at, applied_at, answers[]   (added, all optional)
 
-status vocabulary: discovered, verify, go, applied, closed, skip
+status vocabulary: discovered, verify, go, applied, closed, skip, expired
 This module is import-safe with no third-party deps (stdlib only).
 """
 import os, json, re, datetime, threading
@@ -182,8 +182,13 @@ def add_discovered(jobs):
             fp = _fp(j.get("company"), j.get("role"), j.get("location") or j.get("workplace"))
             existing = by_url.get(_norm_url(u)) or (by_aid.get(aid) if aid else None)
             if existing is not None:
+                # Rediscovery enriches fields only. closed/expired stay closed/expired
+                # (prune.py owns those; a later fetch must not flip them to discovered).
+                kept = existing.get("status")
                 if _enrich(existing, j):
                     enriched += 1
+                if existing.get("status") != kept:
+                    existing["status"] = kept
                 continue
             if fp.strip("|") and fp in have_fp:
                 continue                        # fingerprint dup from another source/url
@@ -281,6 +286,7 @@ def stats():
         "applied_undated": len(applied) - len(dated),
         "applied_by_ats": dict(sorted(by_ats.items(), key=lambda x: -x[1])),
         "pipeline_by_status": dict(sorted(by_status.items(), key=lambda x: -x[1])),
+        "last_prune": d.get("last_prune"),
         "recent": [{"company": r.get("company"), "role": r.get("role"),
                     "applied_at": r.get("applied_at"), "ats": r.get("ats") or infer_ats(r.get("url"))}
                    for r in sorted(dated, key=lambda r: r.get("applied_at", ""), reverse=True)[:10]],

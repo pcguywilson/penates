@@ -12,7 +12,7 @@
 (() => {
   if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
   window.__penatesInit = true;
-  const PENATES_BUILD = "build 39";   // shown in the report header; if you don't see it after a reload, the extension didn't update
+  const PENATES_BUILD = "build 41";   // shown in the report header; if you don't see it after a reload, the extension didn't update
   const IS_TOP = window.top === window;
   // The content script is injected only on ATS hosts (manifest matches). When an ATS application
   // form is EMBEDDED as a cross-origin iframe inside a company careers page (e.g. a Greenhouse
@@ -755,6 +755,21 @@
     return { ok: false, detail: "'" + clean(data.text).slice(0, 20) + "' not selectable -> you" };
   }
 
+  // Middle name (and similar optional identity bits) should only fill when the field is REQUIRED.
+  // Bias toward NOT required: fill only on a clear signal, so an optional middle-name box stays blank.
+  function _fieldRequired(el) {
+    try {
+      if (el.required) return true;
+      if (el.getAttribute && el.getAttribute("aria-required") === "true") return true;
+      const wrap = el.closest && el.closest('[data-automation-id^="formField-"], [class*="form-group" i], label');
+      if (wrap) {
+        const t = clean(wrap.innerText || wrap.textContent || "");
+        if (t.length <= 120 && /(^|\s)\*|\brequired\b/i.test(t)) return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
   async function runFillAll() {
     if (fillBusy) return;
     fillBusy = true;
@@ -943,6 +958,10 @@
         if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", data && data.__error ? "engine: " + data.__error : "no answer -> you"]); skipped++; continue; }
         // a bare structured value (tier-1 field match) belongs in an input/select, never a prose
         // box: this is where a demographic token leaks into a free-text field. Leave it for you.
+        // Middle name only when the field is actually required (Shawn preference).
+        if (/\bmiddle\s+(name|initial)\b/i.test(q) && !_fieldRequired(el)) {
+          rows.push([q.slice(0, 60), "skip", "middle name optional -> left blank"]); skipped++; continue;
+        }
         if (tag === "TEXTAREA" && data.method === "field") {
           // A demographic token must never leak into a prose box, but a LinkedIn/GitHub/website URL
           // legitimately belongs in its labeled textarea. Allow only URL/handle field values through.
@@ -1375,7 +1394,7 @@
     b.textContent = IS_TOP ? "Fill application" : "Fill in new tab";
     b.type = "button";
     b.style.cssText =
-      "position:fixed;right:16px;bottom:16px;z-index:2147483646;font:600 13px system-ui,sans-serif;" +
+      "position:fixed;inset:auto;right:16px;bottom:16px;z-index:2147483646;margin:0;font:600 13px system-ui,sans-serif;" +
       "padding:9px 14px;border:1px solid #1e40af;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer;" +
       "box-shadow:0 2px 10px rgba(0,0,0,.35)";
     b.addEventListener("click", (e) => {
@@ -1390,6 +1409,11 @@
       } catch (_) { try { runFillAll(); } catch (__) {} }
     });
     (document.body || document.documentElement).appendChild(b);
+    // Some ATS pages put a transform/filter/overflow-clip on <body>, which "contains" a
+    // position:fixed button and cuts off its hit-area. The top layer ignores all that.
+    try {
+      if (typeof b.showPopover === "function") { b.setAttribute("popover", "manual"); b.showPopover(); }
+    } catch (_) { try { b.removeAttribute("popover"); } catch (__) {} }
   }
   let _reevalT = 0;
   function reevaluateDebounced() { clearTimeout(_reevalT); _reevalT = setTimeout(reevaluate, 350); }
