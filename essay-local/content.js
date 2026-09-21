@@ -12,7 +12,7 @@
 (() => {
   if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
   window.__penatesInit = true;
-  const PENATES_BUILD = "build 37";   // shown in the report header; if you don't see it after a reload, the extension didn't update
+  const PENATES_BUILD = "build 39";   // shown in the report header; if you don't see it after a reload, the extension didn't update
   const IS_TOP = window.top === window;
   // The content script is injected only on ATS hosts (manifest matches). When an ATS application
   // form is EMBEDDED as a cross-origin iframe inside a company careers page (e.g. a Greenhouse
@@ -236,6 +236,24 @@
       if (/hispanic|latino/.test(blob)) return "Are you Hispanic or Latino?";
       if (/protected veteran|veteran/.test(blob)) return "Veteran status";
       if (/disabilit|disabled/.test(blob)) return "Disability status";
+    }
+    // Last resort for hook-less field groups (e.g. Gem/jobs.gem.com): no id/for/aria/label
+    // anywhere, and the question is a leading text sibling of an ANCESTOR (the field group wraps a
+    // label span + the input). Climb <=4 ancestors; take the nearest preceding sibling that holds
+    // short label text and does not itself contain a form control.
+    let a2 = el, h2 = 0;
+    while (a2 && h2 < 4) {
+      let sib = a2.previousElementSibling, g2 = 0;
+      while (sib && g2 < 3) {
+        try {
+          if (!(sib.querySelector && sib.querySelector("input, textarea, select"))) {
+            const c2 = stripSectionHead(clean(sib.innerText || sib.textContent));
+            if (c2 && c2.length >= 3 && c2.length <= 160 && !_HELPER.test(c2)) return c2.slice(0, 400);
+          }
+        } catch (_) {}
+        sib = sib.previousElementSibling; g2++;
+      }
+      a2 = a2.parentElement; h2++;
     }
     if (selUsable) return sel;   // last resort: no label resolved -> use highlighted selection
     return "";
@@ -556,7 +574,14 @@
   const CONDITIONAL_RE = /\bif you (responded|answered|selected|indicated|checked|chose)\b|\bif (yes|no|other|so|applicable|not|the above|you did)\b/i;
   const LEAVE_BLANK_RE = /accommodat|other than your|is there anything|anything (else|you.?d like|we should know)|additional (information|comments|details)|feel free to (add|share|include)|anything you would like to (share|add|tell)/i;
   const JUNK_RE = /skip to main content|english settings|^\s*settings\s*$|cookie(s| policy| preferences)|privacy statement|back to job posting|sign ?out|log ?out|page is loaded/i;
-  function skipQuestion(q) { return !!q && (CONDITIONAL_RE.test(q) || LEAVE_BLANK_RE.test(q) || JUNK_RE.test(q)); }
+  // A self-contained "Have you X? If so, briefly explain" is a real question, not a follow-up to a
+  // PRIOR question - do not let the "if so/if yes" conditional guard skip it.
+  const _SELF_ASK = /^\s*(have|do|did|are|were|will|would|can|could|has|is there)\b/i;
+  function skipQuestion(q) {
+    if (!q) return false;
+    const cond = CONDITIONAL_RE.test(q) && !_SELF_ASK.test(q);
+    return cond || LEAVE_BLANK_RE.test(q) || JUNK_RE.test(q);
+  }
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
