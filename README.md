@@ -1,6 +1,9 @@
-# Project Penates
-
-**Local answers. Locked facts. You submit.**
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/img/penates-lockup-dark.svg">
+    <img src="docs/img/penates-lockup-light.svg" width="320" alt="Penates — Local answers. Locked facts. You submit.">
+  </picture>
+</p>
 
 A local helper for job applications. It fills what it can from a profile you own, and it
 drafts the written questions the paid extensions meter (why this company, tell us about a
