@@ -12,7 +12,7 @@
 (() => {
   if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
   window.__penatesInit = true;
-  const PENATES_BUILD = "build 41";   // shown in the report header; if you don't see it after a reload, the extension didn't update
+  const PENATES_BUILD = "build 44";   // shown in the report header; if you don't see it after a reload, the extension didn't update
   const IS_TOP = window.top === window;
   // The content script is injected only on ATS hosts (manifest matches). When an ATS application
   // form is EMBEDDED as a cross-origin iframe inside a company careers page (e.g. a Greenhouse
@@ -770,6 +770,180 @@
     return false;
   }
 
+  // ===== Workday multi-instance Work Experience filler =========================
+  // Ported from run_url.py's live-verified id scheme: workExperience-<N>--<field>, where <N>
+  // is a per-candidate counter (NOT 1-based). We read <N> off the DOM, never hardcode it.
+  // Fills the repeating grid from your saved work_history (title/company/location/dates/desc/
+  // currently-work-here) - the identity fields the generic per-field loop cannot map per row.
+  const WD_HOST = /(^|\.)myworkdayjobs\.com$/i.test(location.hostname) || /(^|\.)workday\.com$/i.test(location.hostname);
+  function wdExpIndices() {
+    const out = [];
+    for (const el of document.querySelectorAll('input[id^="workExperience-"][id$="--jobTitle"]')) {
+      const m = (el.id || "").match(/^workExperience-(\d+)--jobTitle$/);
+      if (m) out.push(m[1]);
+    }
+    return out;
+  }
+  function wdSetById(id, val) {
+    if (val == null || val === "") return false;
+    const el = document.getElementById(id);
+    if (!el) return false;
+    const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    try {
+      Object.getOwnPropertyDescriptor(proto, "value").set.call(el, String(val));
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.dispatchEvent(new Event("blur", { bubbles: true }));
+      return true;
+    } catch (_) { return false; }
+  }
+  function wdSetCurrent(idx, want) {
+    const el = document.getElementById("workExperience-" + idx + "--currentlyWorkHere");
+    if (!el) return false;
+    try { if (!!el.checked !== !!want) el.click(); return !!el.checked === !!want; } catch (_) { return false; }
+  }
+  async function wdFillDate(idx, which, mmYYYY) {
+    if (!mmYYYY || !/\//.test(String(mmYYYY))) return false;
+    let [mm, yyyy] = String(mmYYYY).split("/").map((x) => x.trim());
+    mm = (mm || "").padStart(2, "0");
+    const base = "workExperience-" + idx + "--" + which;
+    const monthIn = document.getElementById(base + "-dateSectionMonth-input");
+    const yearIn  = document.getElementById(base + "-dateSectionYear-input");
+    if (!monthIn || !yearIn) return false;
+    const setSpin = (el, v) => {
+      try {
+        el.focus();
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, v);
+        el.dispatchEvent(new InputEvent("input", { bubbles: true, data: v, inputType: "insertText" }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new Event("blur", { bubbles: true }));
+      } catch (_) {}
+    };
+    setSpin(monthIn, mm); await sleep(70);
+    setSpin(yearIn, yyyy); await sleep(70);
+    try {
+      const md = ((document.getElementById(base + "-dateSectionMonth-display") || {}).textContent || monthIn.value || "").trim();
+      const yd = ((document.getElementById(base + "-dateSectionYear-display")  || {}).textContent || yearIn.value  || "").trim();
+      return md.replace(/^0+/, "") === mm.replace(/^0+/, "") && yd === yyyy;
+    } catch (_) { return false; }
+  }
+  function wdAddExperienceBtn() {
+    for (const b of document.querySelectorAll('button[data-automation-id="add-button"]')) {
+      let n = b, h = "";
+      for (let k = 0; k < 12 && n; k++) { n = n.parentElement; if (!n) break;
+        const el = n.querySelector && n.querySelector("h2,h3,h4,[role=heading]");
+        if (el) { h = el.textContent || ""; break; } }
+      if (/work experience/i.test(h)) return b;
+    }
+    return null;
+  }
+  function _wdYamlVal(v) {
+    let x = (v == null ? "" : String(v)).trim();
+    if ((x.startsWith("'") && x.endsWith("'")) || (x.startsWith('"') && x.endsWith('"'))) x = x.slice(1, -1).replace(/''/g, "'");
+    if (x === "true") return true;
+    if (x === "false") return false;
+    return x;
+  }
+  function parseWorkHistoryYaml(text) {
+    const jobs = []; let cur = null;
+    for (const raw of String(text || "").split(/\r?\n/)) {
+      if (!raw.trim() || /^\s*#/.test(raw) || /^jobs:\s*$/.test(raw)) continue;
+      const mNew = raw.match(/^-\s+([a-z_]+):\s?(.*)$/i);
+      const mKey = raw.match(/^\s+([a-z_]+):\s?(.*)$/i);
+      if (/^-\s*$/.test(raw)) { cur = {}; jobs.push(cur); continue; }
+      if (mNew) { cur = {}; jobs.push(cur); cur[mNew[1]] = _wdYamlVal(mNew[2]); continue; }
+      if (mKey && cur) { cur[mKey[1]] = _wdYamlVal(mKey[2]); }
+    }
+    return jobs.filter((j) => j.title || j.company);
+  }
+  async function fetchWorkHistory() {
+    let resp = null;
+    try { resp = await chrome.runtime.sendMessage({ type: "FETCH_PROFILE" }); } catch (_) { return []; }
+    if (!resp || !resp.ok || !resp.data) return [];
+    const d = resp.data;
+    if (Array.isArray(d.work_history_json)) return d.work_history_json;   // preferred, if serve.py provides it
+    return parseWorkHistoryYaml(d.work_history || "");
+  }
+  async function fillWorkdayExperience(rows, handled) {
+    if (!WD_HOST) return { filled: 0, review: 0 };
+    let jobs = [];
+    try { jobs = await fetchWorkHistory(); } catch (_) {}
+    if (!jobs || !jobs.length) return { filled: 0, review: 0 };
+    let existing = wdExpIndices();
+    if (!existing.length && !wdAddExperienceBtn()) return { filled: 0, review: 0 };   // no WE section on this form
+    let filled = 0, review = 0;
+    for (let i = 0; i < jobs.length; i++) {
+      const j = jobs[i]; let idx;
+      try {
+        if (i < existing.length) { idx = existing[i]; }
+        else {
+          const before = new Set(wdExpIndices());
+          const addBtn = wdAddExperienceBtn(); if (!addBtn) break;
+          try { addBtn.scrollIntoView({ block: "center" }); addBtn.click(); } catch (_) { break; }
+          await sleep(900);
+          const fresh = wdExpIndices().filter((x) => !before.has(x));
+          if (!fresh.length) break;
+          idx = fresh[fresh.length - 1]; existing = wdExpIndices();
+        }
+        const setF = (suffix, val) => {
+          const id = "workExperience-" + idx + "--" + suffix;
+          const ok = wdSetById(id, val);
+          const el = document.getElementById(id); if (el && handled) handled.add(el);
+          return ok;
+        };
+        setF("jobTitle", j.title);
+        setF("companyName", j.company);
+        setF("location", j.location);
+        setF("roleDescription", (j.description || "").toString().trim());
+        const sd = await wdFillDate(idx, "startDate", j.start);
+        let ed;
+        if (j.current) { wdSetCurrent(idx, true); ed = true; }
+        else { wdSetCurrent(idx, false); ed = await wdFillDate(idx, "endDate", j.end); }
+        for (const suf of ["startDate-dateSectionMonth-input", "startDate-dateSectionYear-input",
+                           "endDate-dateSectionMonth-input", "endDate-dateSectionYear-input", "currentlyWorkHere"]) {
+          const el = document.getElementById("workExperience-" + idx + "--" + suf); if (el && handled) handled.add(el);
+        }
+        const dOK = sd && ed;
+        if (dOK) filled++; else review++;
+        rows.push(["Work Exp " + (i + 1) + ": " + clean(j.title || "") + " @ " + clean(j.company || ""),
+                   dOK ? "filled" : "review", dOK ? "from your history" : "text set - check the dates"]);
+      } catch (e) {
+        rows.push(["Work Exp " + (i + 1), "skip", String(e).slice(0, 50)]); 
+      }
+    }
+    return { filled, review };
+  }
+
+  // Workday Education often renders collapsed (just an "Add" button, no fields) until you add an
+  // entry. Materialize one block so the generic loop's education field mappings can fill it.
+  // Existence is checked by field LABEL (not id prefix) so we never create a duplicate block.
+  async function wdEnsureEducation() {
+    if (!WD_HOST) return false;
+    const _hasEduField = () => {
+      try {
+        for (const el of deepFields()) {
+          if (inPenates(el) || !shown(el)) continue;
+          const q = questionFor(el) || "";
+          if (/\b(school|university|institution|college|degree|field of study|area of study)\b/i.test(q)) return true;
+        }
+      } catch (_) {}
+      return false;
+    };
+    if (_hasEduField()) return false;                     // a block is already present
+    let btn = null;
+    for (const b of document.querySelectorAll('button[data-automation-id="add-button"]')) {
+      let n = b, h = "";
+      for (let k = 0; k < 12 && n; k++) { n = n.parentElement; if (!n) break;
+        const el = n.querySelector && n.querySelector("h2,h3,h4,[role=heading]");
+        if (el) { h = el.textContent || ""; break; } }
+      if (/education/i.test(h)) { btn = b; break; }
+    }
+    if (!btn) return false;
+    try { btn.scrollIntoView({ block: "center" }); btn.click(); } catch (_) { return false; }
+    await sleep(900);
+    return _hasEduField();
+  }
+
   async function runFillAll() {
     if (fillBusy) return;
     fillBusy = true;
@@ -784,6 +958,7 @@
 
     const rows = [];
     const groupsDone = new Set();
+    const wdHandled = new Set();
     const healMap = [];   // {q, value, kind} for text/radio fills, so a heal pass can re-fill
     let filled = 0, review = 0, skipped = 0;                     // any that an Ashby re-render race cleared
     const t0 = Date.now();
@@ -803,9 +978,20 @@
     } catch (e) { rows.push(["Resume upload", "skip", String(e).slice(0, 50)]); }
     await sleep(700); // let the file-triggered re-render finish before we grab element refs
 
+    // Workday repeating Work Experience grid (from your saved work_history). Marks the
+    // fields it sets so the generic scan below skips them.
+    try {
+      const _wr = await fillWorkdayExperience(rows, wdHandled);
+      filled += _wr.filled; review += _wr.review;
+      if (_wr.filled || _wr.review) setReport("Work experience filled ... NOTHING submitted.", rows);
+      // Materialize a Workday Education block if the section is collapsed, so the scan below fills it.
+      if (await wdEnsureEducation()) setReport("Education block added ... NOTHING submitted.", rows);
+    } catch (e) { rows.push(["Work Experience", "skip", String(e).slice(0, 60)]); }
+
     setReport("Scanning form...", rows);
     const fields = deepFields().filter((el) => {
       if (inPenates(el)) return false;
+      if (wdHandled.has(el)) return false;
       const t = (el.type || el.tagName).toLowerCase();
       if (el.tagName === "INPUT" && SKIP_TYPES.test(el.type || "")) return false;
       if (el.disabled || el.readOnly) return false;
@@ -930,7 +1116,7 @@
       if (tag === "SELECT") {
         const q = questionFor(el);
         if (!q) { continue; }
-        if (skipQuestion(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; continue; }
+        if (skipQuestion(q)) { if (!JUNK_RE.test(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; } continue; }
         if (el.value && el.selectedIndex > 0 && clean(el.options[el.selectedIndex].text)) { continue; } // already set
         const data = await askCached(q, 40, false, 40000, true);
         if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", "no value -> you"]); skipped++; continue; }
@@ -944,7 +1130,7 @@
       if (tag === "TEXTAREA" || (tag === "INPUT" && /^(text|email|tel|url|search|number|)$/i.test(typ)) || el.isContentEditable) {
         const q = questionFor(el);
         if (!q) { continue; }                        // unlabeled (site search etc.) -> skip
-        if (skipQuestion(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; continue; }
+        if (skipQuestion(q)) { if (!JUNK_RE.test(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; } continue; }
         const cur = (el.value || el.textContent || "").trim();
         if (cur) { continue; }                        // don't clobber prefilled
         const limit = el.maxLength && el.maxLength > 0 ? el.maxLength : null;
@@ -969,7 +1155,11 @@
           const urlish = /identity\.(linkedin|github|gitlab|website|portfolio|url)/.test(fkey)
             || /\b(linkedin|github|gitlab|portfolio|personal (site|website)|website|url)\b/i.test(q)
             || /https?:\/\/|(?:linkedin|github|gitlab)\.com|^[\w.-]+\.(?:com|io|dev|net|org|me)\b/i.test(String(data.text || "").trim());
-          if (!urlish) { rows.push([q.slice(0, 60), "skip", "structured value not for a text box -> you"]); skipped++; continue; }
+          // A salary/compensation number legitimately belongs in its labeled box (Workday makes
+          // "salary expectations" a textarea). Allow compensation field values + salary questions through.
+          const salaryish = /^compensation\./.test(fkey)
+            || /salary|compensation|desired pay|pay expectation|expected pay/i.test(q);
+          if (!urlish && !salaryish) { rows.push([q.slice(0, 60), "skip", "structured value not for a text box -> you"]); skipped++; continue; }
         }
         const isCombo = isCombobox(el);
         const singleLine = tag !== "TEXTAREA" && !el.isContentEditable;
@@ -1051,7 +1241,7 @@
         if (btns.length < 2 || btns.length > 8) continue;      // a real choice set only
         if (groupsDone.has(q)) continue;
         groupsDone.add(q);
-        if (skipQuestion(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; continue; }
+        if (skipQuestion(q)) { if (!JUNK_RE.test(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; } continue; }
         // already answered (Ashby marks the picked option aria-pressed=true)?
         if (btns.some((b) => b.getAttribute("aria-pressed") === "true" || b.getAttribute("aria-checked") === "true")) continue;
         seen++;
@@ -1094,7 +1284,7 @@
         try {
           const q = ariaQuestion(el);
           if (!q || groupsDone.has(q)) continue;
-          if (skipQuestion(q)) { groupsDone.add(q); rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; continue; }
+          if (skipQuestion(q)) { groupsDone.add(q); if (!JUNK_RE.test(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; } continue; }
           const shownVal = clean(el.textContent || el.getAttribute("aria-label") || "");
           if (shownVal && !/^select\.{0,3}$/i.test(shownVal)) { groupsDone.add(q); continue; }   // already answered
           groupsDone.add(q); seen++;
@@ -1114,7 +1304,7 @@
           if (!q || groupsDone.has(q)) continue;
           const radios = [...g.querySelectorAll('[role="radio"]')].filter((r) => shown(r));
           if (radios.length < 2 || radios.length > 8) continue;
-          if (skipQuestion(q)) { groupsDone.add(q); rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; continue; }
+          if (skipQuestion(q)) { groupsDone.add(q); if (!JUNK_RE.test(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; } continue; }
           if (radios.some((r) => r.getAttribute("aria-checked") === "true")) { groupsDone.add(q); continue; }
           groupsDone.add(q); seen++;
           setReport("Filling " + seen + " (choice) ... " + elapsed() + "s elapsed. NOTHING submitted.", rows);
@@ -1138,7 +1328,7 @@
         try {
           const q = ariaQuestion(btn);
           if (!q || groupsDone.has(q)) continue;
-          if (skipQuestion(q)) { groupsDone.add(q); rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; continue; }
+          if (skipQuestion(q)) { groupsDone.add(q); if (!JUNK_RE.test(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; } continue; }
           const sv = clean(btn.textContent || "");
           if (sv && !/^select( one)?( required)?\.{0,3}$/i.test(sv)) { groupsDone.add(q); continue; }   // already chosen
           groupsDone.add(q); seen++;

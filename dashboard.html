@@ -19,6 +19,7 @@
   a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
   header{display:flex;align-items:center;gap:16px;padding:12px 22px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
   .brand{font:600 20px/1 Georgia,'Times New Roman',serif;color:var(--accent);letter-spacing:.02em}
+  .brand-mark{width:22px;height:22px;color:var(--accent);display:block}
   nav{display:flex;gap:4px;margin-left:4px}
   nav button{background:none;border:0;color:var(--muted);font:600 13px system-ui;padding:7px 12px;border-radius:7px;cursor:pointer}
   nav button.on{color:var(--text);background:var(--panel2)}
@@ -84,6 +85,17 @@ tr.jobrow:hover{background:var(--panel2)}
 </head>
 <body>
 <header>
+  <svg class="brand-mark" aria-hidden="true" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+    <g fill="currentColor">
+      <polygon points="512,96 96,340 928,340"/>
+      <rect x="168" y="328" width="688" height="36"/>
+      <rect x="168" y="364" width="88" height="460"/>
+      <rect x="768" y="364" width="88" height="460"/>
+      <rect x="148" y="808" width="128" height="28"/>
+      <rect x="748" y="808" width="128" height="28"/>
+      <path fill-rule="evenodd" d="M 372 400 H 652 V 808 H 372 Z M 512 488 m -58 0 a 58 58 0 1 1 116 0 a 58 58 0 1 1 -116 0 M 488 530 L 536 530 L 556 690 L 468 690 Z"/>
+    </g>
+  </svg>
   <span class="brand">Penates</span>
   <nav>
     <button data-tab="jobs" class="on">Jobs</button>
@@ -270,9 +282,24 @@ const $=id=>document.getElementById(id), esc=s=>(s||"").replace(/[&<>"]/g,c=>({'
 let JOBS=[], sortKey="discovered_at", sortDir=-1, STORIES=[];
 
 // theme
-function applyTheme(t){ document.documentElement.setAttribute('data-theme',t); try{localStorage.setItem('penates-theme',t);}catch(_){}}
+function applyFavicon(){
+  const fill=getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  const svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><g fill="'+fill+'">'
+    +'<polygon points="512,96 96,340 928,340"/>'
+    +'<rect x="168" y="328" width="688" height="36"/>'
+    +'<rect x="168" y="364" width="88" height="460"/>'
+    +'<rect x="768" y="364" width="88" height="460"/>'
+    +'<rect x="148" y="808" width="128" height="28"/>'
+    +'<rect x="748" y="808" width="128" height="28"/>'
+    +'<path fill-rule="evenodd" d="M 372 400 H 652 V 808 H 372 Z M 512 488 m -58 0 a 58 58 0 1 1 116 0 a 58 58 0 1 1 -116 0 M 488 530 L 536 530 L 556 690 L 468 690 Z"/>'
+    +'</g></svg>';
+  let link=document.querySelector('link[rel="icon"]');
+  if(!link){ link=document.createElement('link'); link.rel='icon'; document.head.appendChild(link); }
+  link.href='data:image/svg+xml,'+encodeURIComponent(svg);
+}
+function applyTheme(t){ document.documentElement.setAttribute('data-theme',t); try{localStorage.setItem('penates-theme',t);}catch(_){} applyFavicon(); }
 (function(){ let t='slate'; try{t=localStorage.getItem('penates-theme')||'slate';}catch(_){}
-  document.documentElement.setAttribute('data-theme',t); })();
+  document.documentElement.setAttribute('data-theme',t); applyFavicon(); })();
 $('theme').value=document.documentElement.getAttribute('data-theme');
 $('theme').onchange=e=>applyTheme(e.target.value);
 

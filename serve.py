@@ -358,6 +358,9 @@ def _constrain_to_options(out, options, q):
 #    No grounded answer exists; matching here leaked race "White" into an accommodations box that
 #    merely said "other than your ethnicity".
 #  - _COI_NO: a personal-relationship / conflict-of-interest Yes/No -> deterministic No.
+#  - _FORMER_EMPLOYER_Q: "have you worked here / for <co>" checked against work_history.yaml.
+#    Runs before fields.yaml so the static former-employee -> No rule cannot hide a real match.
+#    "worked with <tool>" is not this question unless it also names employment.
 _SKIP_CONDITIONAL = re.compile(
     r"\bif you (responded|answered|selected|indicated|checked|chose)\b|"
     r"\bif (yes|no|other|so|applicable|not|the above|you did)\b", re.I)
@@ -382,6 +385,114 @@ _COI_NO = re.compile(
     r"conflict of interest|close personal relationship|"
     r"(family member|domestic partner|friend)[\s\S]{0,140}(working|employed|currently (at|with|working))",
     re.I)
+# Prior-employment Yes/No. Auth-to-work questions must not match (no "authorized"/"eligible").
+# Bare "have you worked with <tool>" is experience, not a former-employer check.
+_FORMER_EMPLOYER_Q = re.compile(
+    r"(?:"
+    r"have you(?: ever)? (?:worked|work) (?:for|at)\b"
+    r"|have you(?: ever)? been employed\b"
+    r"|were you(?: ever)? employed\b"
+    r"|previously (?:employed|worked)\b"
+    r"|formerly employed\b"
+    r"|(?:former|previous) employee\b"
+    r"|\brehire\b"
+    r"|boomerang(?: employee)?\b"
+    r"|affiliates and subsidiaries"
+    r"|as an associate, intern, or contractor"
+    r")",
+    re.I)
+_WORKED_WITH_EMPLOYER = re.compile(
+    r"have you(?: ever)? (?:worked|work) with\b[\s\S]{0,80}"
+    r"(?:employee|employed|employer|company|affiliate|subsidiar|contractor|rehire|boomerang|\bus\b|\bour\b)",
+    re.I)
+_Q_COMPANY = re.compile(
+    r"\b(?:worked|work|employed)\s+(?:for|at|by)\s+"
+    r"([A-Z0-9][\w&.'’/-]*(?:\s+[A-Z0-9][\w&.'’/-]*){0,5})")
+_LEGAL_SUFFIX = re.compile(
+    r"\b(?:incorporated|inc|llc|ltd|limited|corp|corporation|company|plc|co)\b")
+_CO_STOP = {"the", "and", "of", "a", "an"}
+
+
+def _company_tokens(name):
+    """Case/punct/Inc/LLC-normalized tokens. Slashes become spaces (alias split)."""
+    s = (name or "").lower().replace("&", " and ")
+    s = re.sub(r"[^\w\s]", " ", s)
+    s = _LEGAL_SUFFIX.sub(" ", s)
+    return [t for t in s.split() if t and t not in _CO_STOP]
+
+
+def _token_slice_match(left, right):
+    """Equal, or the shorter multi-word name is a consecutive slice of the longer."""
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    short, long_ = (left, right) if len(left) <= len(right) else (right, left)
+    if len(short) < 2:
+        return False
+    n = len(short)
+    return any(long_[i:i + n] == short for i in range(len(long_) - n + 1))
+
+
+def _companies_match(target, employer):
+    """Both ways: 'Acme' hits 'Acme/Globex'; a leading phrase hits the legal name.
+
+    Slash/pipe components are compared on their own so either alias matches.
+    A one-word name matches only the first token of the other (not a trailing 'Solutions').
+    """
+    t_parts = [p for p in re.split(r"[/|]", target or "") if p.strip()]
+    e_parts = [p for p in re.split(r"[/|]", employer or "") if p.strip()]
+    pairs = [(target, employer)]
+    pairs += [(a, b) for a in t_parts for b in e_parts]
+    for a, b in pairs:
+        ta, eb = _company_tokens(a), _company_tokens(b)
+        if _token_slice_match(ta, eb):
+            return True
+        if len(ta) == 1 and len(ta[0]) >= 4 and eb and eb[0] == ta[0]:
+            return True
+        if len(eb) == 1 and len(eb[0]) >= 4 and ta and ta[0] == eb[0]:
+            return True
+    return False
+
+
+def _company_from_question(q):
+    m = _Q_COMPANY.search(q or "")
+    if not m:
+        return ""
+    name = m.group(1)
+    name = re.split(r"\s+(?:or|as|and|including|any)\b|,|\?|:", name, maxsplit=1, flags=re.I)[0]
+    return name.strip(" .")
+
+
+def _work_history_companies():
+    import apply as _apply
+    wh = _apply.load(os.path.join("data", "work_history.yaml")) or {}
+    jobs = wh.get("jobs") if isinstance(wh, dict) else (wh or [])
+    out = []
+    for j in jobs or []:
+        c = (j.get("company") or "").strip()
+        if c and c not in out:
+            out.append(c)
+    return out
+
+
+def _former_employer_answer(question, company):
+    """Yes/No from work_history, or None when this is not a prior-employment question.
+
+    Payload company wins (application companyGuess). Otherwise a capitalized name
+    after worked/employed for|at|by. No company to check -> No (do not infer).
+    """
+    q = question or ""
+    if not (_FORMER_EMPLOYER_Q.search(q) or _WORKED_WITH_EMPLOYER.search(q)):
+        return None
+    target = (company or "").strip() or _company_from_question(q)
+    if not target:
+        return "No"
+    try:
+        employers = _work_history_companies()
+    except Exception:
+        return "No"
+    return "Yes" if any(_companies_match(target, e) for e in employers) else "No"
 
 def _story_at_floor(essay_mod, question, story):
     """True when retrieve_story's pick shares >=1 domain/tool token with the question.
@@ -400,7 +511,8 @@ def _story_at_floor(essay_mod, question, story):
 
 def do_answer(payload):
     """Tiered. Imported lazily so a broken import can't stop the server.
-      0. field guards               -> skip conditional/optional; deterministic COI = No
+      0. field guards               -> skip conditional/optional; deterministic COI = No;
+                                   prior-employment Yes/No from work_history.yaml
       1. structured/identity/salary  -> match_field (fields.yaml -> profile.yaml)
       1.2 imported (Regenerate only) -> fresh:true review suggestion; never default fill.
           Skipped when inventory, or when owned_project/behavioral already has a story
@@ -441,6 +553,10 @@ def _do_answer_unconstrained(payload):
     if _COI_NO.search(q):
         return {"ok": True, "kind": "field", "method": "field",
                 "chars": 2, "gaps": [], "text": "No"}
+    prior = _former_employer_answer(q, payload.get("company"))
+    if prior:
+        return {"ok": True, "kind": "field", "method": "field",
+                "chars": len(prior), "gaps": [], "text": prior}
 
     # tier 1: deterministic structured field (salary, country, links, yes/no...)
     try:

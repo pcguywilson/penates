@@ -46,6 +46,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true; // async
   }
+  // Profile/work_history: GET that returns {profile, work_history, work_history_json?}.
+  // content.js uses work_history to fill Workday's repeating Work Experience grid.
+  if (msg.type === "FETCH_PROFILE") {
+    fetch(BASE + "/profile", { method: "GET" })
+      .then((r) => r.json())
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true; // async
+  }
+  // Open the standalone ATS form in a new tab (used when the launcher runs inside an embedded
+  // iframe, where window.open is blocked). The URL carries #penates-fill so it auto-fills.
+  if (msg.type === "OPEN_FILL_TAB" && msg.url) {
+    try { chrome.tabs.create({ url: msg.url, active: true }); } catch (e) {}
+    return;
+  }
   let path = null;
   if (msg.type === "FETCH_ANSWER") path = "/answer";
   else if (msg.type === "FETCH_ANSWER_BATCH") path = "/answer-batch";
