@@ -170,6 +170,7 @@ def add_discovered(jobs):
         d = load(); q = d["queue"]
         by_url = {_norm_url(r.get("url")): r for r in q if r.get("url")}
         by_aid = {r.get("ats_id"): r for r in q if r.get("ats_id")}
+        gone = set(d.get("pruned") or [])      # deleted by retention: never re-add
         have_fp = {_fp(r.get("company"), r.get("role"), r.get("location") or r.get("workplace"))
                    for r in q}
         added = enriched = 0
@@ -180,6 +181,8 @@ def add_discovered(jobs):
                 continue
             aid = j.get("ats_id")
             fp = _fp(j.get("company"), j.get("role"), j.get("location") or j.get("workplace"))
+            if _norm_url(u) in gone or (aid and ("aid:" + str(aid)) in gone):
+                continue
             existing = by_url.get(_norm_url(u)) or (by_aid.get(aid) if aid else None)
             if existing is not None:
                 # Rediscovery enriches fields only. closed/expired stay closed/expired
@@ -291,3 +294,68 @@ def stats():
                     "applied_at": r.get("applied_at"), "ats": r.get("ats") or infer_ats(r.get("url"))}
                    for r in sorted(dated, key=lambda r: r.get("applied_at", ""), reverse=True)[:10]],
     }
+
+
+# ---- retention: delete old jobs you never acted on ------------------------------
+# config.json retention_days: 7 / 14 / 30 / any N; 0 = keep forever. Age is from
+# discovered_at (falls back to posted). Jobs you acted on are never deleted.
+RETENTION_KEEP = ("applied", "go", "verify")
+RETENTION_DEFAULT = 30
+_PRUNED_MAX = 20000
+
+
+def retention_days():
+    try:
+        v = int(load_config().get("retention_days", RETENTION_DEFAULT))
+        return max(0, v)
+    except Exception:
+        return RETENTION_DEFAULT
+
+
+def _age_days(row, today):
+    for k in ("discovered_at", "posted"):
+        v = str(row.get(k) or "").strip()
+        if len(v) >= 10 and v[4] == "-" and v[7] == "-":
+            try:
+                return (today - datetime.date.fromisoformat(v[:10])).days
+            except ValueError:
+                pass
+    return None
+
+
+def retention_candidates(queue, days, today=None):
+    if not days or days <= 0:
+        return []
+    today = today or datetime.datetime.now(datetime.timezone.utc).date()
+    out = []
+    for r in queue:
+        if r.get("status") in RETENTION_KEEP:
+            continue
+        age = _age_days(r, today)
+        if age is not None and age > days:
+            out.append(r)
+    return out
+
+
+def apply_retention(days=None, dry=False):
+    """Delete old never-acted-on jobs. Returns how many (would be) deleted."""
+    days = retention_days() if days is None else days
+    with _LOCK:
+        d = load()
+        q = d.get("queue") or []
+        victims = retention_candidates(q, days)
+        if dry or not victims:
+            return len(victims)
+        ids = {id(r) for r in victims}
+        gone = list(d.get("pruned") or [])
+        for r in victims:
+            if r.get("url"):
+                gone.append(_norm_url(r["url"]))
+            if r.get("ats_id"):
+                gone.append("aid:" + str(r["ats_id"]))
+        d["pruned"] = list(dict.fromkeys(gone))[-_PRUNED_MAX:]
+        d["queue"] = [r for r in q if id(r) not in ids]
+        d["last_retention"] = {"at": datetime.datetime.now().isoformat(timespec="seconds"),
+                               "days": days, "deleted": len(victims)}
+        save(d)
+        return len(victims)

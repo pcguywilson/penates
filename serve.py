@@ -2769,6 +2769,15 @@ class H(BaseHTTPRequestHandler):
                 return self._json(500, {"error": str(e)})
         if parsed.path == "/api/ollama":
             return self._json(200, ollama_status())
+        if parsed.path == "/api/retention":
+            import jobs_store
+            q = jobs_store.load().get("queue") or []
+            preview = {str(n): len(jobs_store.retention_candidates(q, n)) for n in (7, 14, 30)}
+            days = jobs_store.retention_days()
+            return self._json(200, {"ok": True, "days": days, "total": len(q),
+                                    "would_delete": len(jobs_store.retention_candidates(q, days)),
+                                    "preview": preview, "keep": list(jobs_store.RETENTION_KEEP),
+                                    "last": jobs_store.load().get("last_retention")})
         if parsed.path == "/api/profile":
             try:
                 return self._json(200, profile_get())
@@ -2826,6 +2835,25 @@ class H(BaseHTTPRequestHandler):
                 return self._json(200, {"ok": True})
             except Exception as e:
                 return self._json(500, {"ok": False, "error": str(e)})
+        if parsed.path in ("/api/retention", "/api/retention/run", "/api/retention/preview"):
+            import jobs_store
+            try:
+                payload = json.loads(raw or b"{}")
+            except Exception:
+                return self._json(400, {"ok": False, "error": "bad json"})
+            try:
+                days = int(payload.get("days", jobs_store.retention_days()))
+            except Exception:
+                return self._json(400, {"ok": False, "error": "days must be a whole number"})
+            if days < 0 or days > 3650:
+                return self._json(400, {"ok": False, "error": "days must be 0-3650 (0 = keep forever)"})
+            if parsed.path == "/api/retention/preview":
+                return self._json(200, {"ok": True, "days": days, "would_delete": jobs_store.apply_retention(days, dry=True)})
+            if parsed.path == "/api/retention":
+                cfg = jobs_store.load_config(); cfg["retention_days"] = days; jobs_store.save_config(cfg)
+                return self._json(200, {"ok": True, "days": days})
+            n = jobs_store.apply_retention(days)
+            return self._json(200, {"ok": True, "days": days, "deleted": n})
         if parsed.path in ("/api/ollama", "/api/ollama/test"):
             try:
                 payload = json.loads(raw or b"{}")

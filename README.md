@@ -149,6 +149,8 @@ python serve.py                       # http://127.0.0.1:8765/dashboard
   behind it. Filter to remote-only, US-only and a minimum salary; sort by score or newest;
   each row opens a preview pane with an Apply + autofill button that hands off to the extension.
 - **Settings** - edit your search terms and turn sources on or off (saved to `config.json`),
+  set job retention (delete jobs older than 1 week / 2 weeks / 1 month / custom days, or never;
+  jobs you applied to or marked go/verify are always kept, and deleted jobs are not re-added),
   check the Ollama connection and choose the answers and essay models, and open the local
   test pages: **Demo application** (`/demo`, a realistic fake application to run a full fill
   end to end) and **QA bench** (`/qa`, ask any question and see the answer, the tier that
