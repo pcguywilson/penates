@@ -12,7 +12,7 @@
   :root[data-theme="amber"]{color-scheme:dark;--bg:#0e0c0a;--panel:#16120c;--panel2:#1c1710;--line:#2a2118;--text:#e9e3d6;--muted:#9c917e;--accent:#e0a83e;--accent2:#c9922f;--onaccent:#20170a;--hi:#e8b451;--mid:#b98f3a;--lo:#8a7f6c;}
   :root[data-theme="nord"]{color-scheme:dark;--bg:#2e3440;--panel:#353c4a;--panel2:#3b4252;--line:#4c566a;--text:#eceff4;--muted:#a6adba;--accent:#88c0d0;--accent2:#5e81ac;--onaccent:#1b2430;--hi:#a3be8c;--mid:#ebcb8b;--lo:#81a1c1;}
   :root[data-theme="dracula"]{color-scheme:dark;--bg:#282a36;--panel:#2f313f;--panel2:#343746;--line:#44475a;--text:#f8f8f2;--muted:#a2a6be;--accent:#bd93f9;--accent2:#9d7cd8;--onaccent:#1a1b26;--hi:#50fa7b;--mid:#f1fa8c;--lo:#6272a4;}
-  :root[data-theme="light"]{color-scheme:light;--bg:#f6f5f2;--panel:#ffffff;--panel2:#f0efea;--line:#e2ded5;--text:#1f2937;--muted:#6b7280;--accent:#2563eb;--accent2:#1d4ed8;--onaccent:#ffffff;--hi:#059669;--mid:#b45309;--lo:#9ca3af;}
+  :root[data-theme="light"]{color-scheme:light;--bg:#f6f5f2;--panel:#ffffff;--panel2:#f0efea;--line:#e2ded5;--text:#1f2937;--muted:#6b7280;--accent:#2563eb;--accent2:#1d4ed8;--onaccent:#ffffff;--hi:#059669;--mid:#b45309;--lo:#6b7280;}
 
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,sans-serif}
@@ -28,6 +28,8 @@
   select{background:var(--panel2);color:var(--text);border:1px solid var(--line);padding:7px 10px}
   .btn{border:1px solid var(--accent2);background:var(--accent);color:var(--onaccent);padding:8px 15px}
   .btn:disabled{opacity:.5;cursor:default}
+  .btn.ghost{background:transparent;color:var(--text);border-color:var(--line)}
+  .btn.ghost:hover{border-color:var(--accent)}
   .ts{color:var(--muted);font-size:12px;white-space:nowrap}
   main{padding:16px 22px 60px}
   .stats{display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap}
@@ -49,6 +51,7 @@
   .mini{font:600 11px system-ui;padding:4px 9px;border-radius:6px;cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--text)}
   .mini.apply{background:var(--accent);color:var(--onaccent);border-color:var(--accent2)}
   .mini.mk{background:transparent;color:var(--muted)}
+  .mini.danger{background:#b91c1c;color:#fff;border-color:#991b1b}
   tr.applied td{opacity:.4}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
   .card h3{margin:0 0 8px;font:600 13px system-ui;color:var(--accent);text-transform:uppercase;letter-spacing:.05em}
@@ -165,6 +168,20 @@ tr.jobrow:hover{background:var(--panel2)}
     <div class="card"><h3>Local model reasoning</h3><div id="lg-ans"></div></div>
   </section>
   <section data-panel="settings" hidden>
+    <div class="card"><h3>Local model (Ollama)</h3>
+      <p class="hint">Every answer is generated on this machine by Ollama. Pick the model for short answers and choice picks, and a (usually larger) one for written answers and stories. Saved to config.json; takes effect on the next answer, no restart.</p>
+      <div id="olStatus" class="muted">checking...</div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:10px">
+        <label class="muted" style="display:flex;flex-direction:column;gap:4px">Answers model<select id="olModel"></select></label>
+        <label class="muted" style="display:flex;flex-direction:column;gap:4px">Essay / story model<select id="olEssay"></select></label>
+      </div>
+      <div style="margin-top:10px"><button class="btn" id="olSave">Save models</button> <button class="btn ghost" id="olTest">Test</button> <button class="btn ghost" id="olRefresh">Recheck</button> <span class="muted" id="olMsg"></span></div></div>
+    <div class="card"><h3>Test pages</h3>
+      <p class="hint">Local pages for trying Penates without applying anywhere. Nothing on them is sent to any employer.</p>
+      <ul style="margin:6px 0 0 18px;line-height:1.9">
+        <li><a href="/demo" target="_blank" rel="noopener">Demo application</a> <span class="muted">- a realistic fake job application (identity, Yes/No, dropdowns, EEO, essays). Click the extension's Fill application to run a full fill end to end and read the report.</span></li>
+        <li><a href="/qa" target="_blank" rel="noopener">QA bench</a> <span class="muted">- type any application question (with company and role) and see exactly what the local engine answers, which tier answered it, and how long it took. For checking answer quality and honesty.</span></li>
+      </ul></div>
     <div class="card"><h3>Sources to scrape</h3><div id="srcs"></div>
       <p class="hint">ATS boards are the reliable spine (direct company APIs, edit config/companies.yml). The rest are aggregators. Uncheck any you do not want on the next Refresh.</p></div>
     <div class="card"><h3>Search terms</h3><p class="hint">One per line. Used by every source on the next Refresh.</p>
@@ -184,7 +201,7 @@ tr.jobrow:hover{background:var(--panel2)}
         border:1px solid var(--line,#334155);border-radius:6px;padding:7px;font:13px/1.4 ui-monospace,Menlo,monospace}
       .stt{min-height:52px;resize:vertical}
       .stcard{border-bottom:1px solid var(--line,#1e293b);padding:9px 0}
-      .btn.ghost{background:var(--panel2,#1f2937)}
+      .btn.ghost{background:var(--panel2);color:var(--text);border-color:var(--line)}
       .stpanes{display:flex;gap:6px;margin:0 0 12px}
       .stpanes button{background:none;border:1px solid var(--line,#334155);color:var(--muted);font:600 13px system-ui;padding:6px 12px;border-radius:8px;cursor:pointer}
       .stpanes button.on{color:var(--text);background:var(--panel2);border-color:var(--accent)}
@@ -332,7 +349,7 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
   document.querySelectorAll('[data-panel]').forEach(p=>p.hidden=p.dataset.panel!==b.dataset.tab);
   if(b.dataset.tab==='logs') loadLogs();
-  if(b.dataset.tab==='settings') loadCfg();
+  if(b.dataset.tab==='settings'){ loadCfg(); loadOllama(); }
   if(b.dataset.tab==='resume') loadResumeJobs();
   if(b.dataset.tab==='profile') loadProfile();
   if(b.dataset.tab==='stories'){ loadStories(); loadImports(); loadImportsList(); }
@@ -469,6 +486,24 @@ async function loadLogs(){ const l=await fetch('/logs').then(r=>r.json()).catch(
   $('lg-fill').innerHTML=(l.fills||[]).map(f=>`<div class="logline"><b>${esc(f.company||'')}</b> ${esc(f.role||'')} — ${esc(f.summary||'')}</div>`).join('')||'<div class="muted">No fills logged yet.</div>';
   $('lg-ans').innerHTML=(l.answers||[]).map(a=>`<div class="logline"><b>${esc(a.method||'')}</b> · ${a.chars||0} chars${a.gaps&&a.gaps.length?' · ⚠ '+esc(a.gaps.join(', ')):''} · ${esc(a.q||'')}</div>`).join('')||'<div class="muted">No model answers yet.</div>';
 }
+async function loadOllama(){
+  const st=$('olStatus'); st.textContent='checking...';
+  const o=await fetch('/api/ollama').then(r=>r.json()).catch(()=>({reachable:false,error:'server unreachable'}));
+  const dot=c=>`<span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${c};margin-right:6px"></span>`;
+  if(!o.reachable){ st.innerHTML=dot('#ef4444')+'Ollama not reachable at '+esc(o.base||'127.0.0.1:11434')+'. Start Ollama (Start Penates.bat does this) then Recheck.'; }
+  else { const miss=[!o.model_installed&&o.model, !o.essay_model_installed&&o.essay_model].filter(Boolean);
+    st.innerHTML=dot(miss.length?'#f59e0b':'#22c55e')+'Connected to Ollama at '+esc(o.base)+' . '+o.models.length+' model(s) installed'+(miss.length?' . not installed: '+esc(miss.join(', '))+' (ollama pull &lt;name&gt;)':''); }
+  const fill=(sel,cur)=>{ const names=[...new Set([...(o.models||[]),cur].filter(Boolean))];
+    sel.innerHTML=names.map(n=>`<option ${n===cur?'selected':''}>${esc(n)}</option>`).join(''); sel.disabled=!o.reachable; };
+  fill($('olModel'),o.model); fill($('olEssay'),o.essay_model);
+}
+$('olRefresh').onclick=loadOllama;
+$('olSave').onclick=async()=>{ $('olMsg').textContent='saving...';
+  const r=await fetch('/api/ollama',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:$('olModel').value,essay_model:$('olEssay').value})}).then(x=>x.json()).catch(e=>({ok:false,error:String(e)}));
+  $('olMsg').textContent=r.ok?'saved':'not saved: '+(r.error||''); if(r.ok) loadOllama(); };
+$('olTest').onclick=async()=>{ $('olMsg').textContent='testing '+$('olModel').value+'...';
+  const r=await fetch('/api/ollama/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:$('olModel').value})}).then(x=>x.json()).catch(e=>({ok:false,error:String(e)}));
+  $('olMsg').textContent=r.ok?('OK: '+r.model+' replied "'+r.reply+'" in '+(r.ms/1000).toFixed(1)+'s'):('failed: '+(r.error||'')); };
 async function loadCfg(){ const c=await fetch('/config').then(r=>r.json()).catch(()=>({}));
   $('terms').value=(c.terms||[]).join('\n'); const src=c.sources||{};
   const SRC_LABELS={ats:'ATS boards (Greenhouse/Lever/Ashby)',discover:'JobSpy (LinkedIn/Indeed/ZipRecruiter/Google)',hiringcafe:'hiring.cafe',builtin:'Built In',remotive:'Remotive',remoteok:'RemoteOK'};
@@ -512,7 +547,7 @@ function renderImports(){
       <div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="mini" data-make="${o.idx}">Make a story</button>
         <button class="mini" data-edit="${o.idx}">edit</button>
-        <button class="mini" data-del="${o.idx}" style="background:#7f1d1d">delete</button></div></div>`;
+        <button class="mini danger" data-del="${o.idx}">delete</button></div></div>`;
   }).join('')||'<div class="muted">No imports yet. Upload an export above.</div>';
   document.querySelectorAll('#impList [data-edit]').forEach(b=>b.onclick=()=>editImport(+b.dataset.edit));
   document.querySelectorAll('#impList [data-del]').forEach(b=>b.onclick=()=>delImport(+b.dataset.del));
@@ -774,7 +809,7 @@ async function loadStories(){
     <div class="muted" style="font-size:12px">${s.owned?'owned · ':''}${esc((s.domains||[]).join(', '))}</div>
     <div style="margin-top:5px;display:flex;gap:6px">
       <button class="mini" data-edit="${i}">edit</button>
-      <button class="mini" data-del="${esc(s.id)}" style="background:#7f1d1d">delete</button></div></div>`).join('')||'<div class="muted">No stories yet.</div>';
+      <button class="mini danger" data-del="${esc(s.id)}">delete</button></div></div>`).join('')||'<div class="muted">No stories yet.</div>';
   document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>fillStory(STORIES[+b.dataset.edit]));
   document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>delStory(b.dataset.del));
 }

@@ -1,6 +1,6 @@
 """Local job store: the single source of truth for discovered and applied jobs.
 
-Backed by data/jobs.json ({"queue":[...]}) so it stays compatible with run_url.py.
+Backed by data/jobs.json ({"queue":[...]}) (the dashboard and ranker read it).
 Every feature reads/writes rows here so they share one shape:
 
   id, company, role, url, status, note,        (existing)
