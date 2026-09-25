@@ -26,6 +26,7 @@ def _salary(r):
     def k(x):
         try: x = float(x)
         except Exception: return None
+        if math.isnan(x) or x <= 0: return None   # pandas NaN -> no "$nan" salaries
         return ("$%.0fk" % (x / 1000)) if x >= 1000 else ("$%.0f" % x)
     lo, hi = k(r.get("min_amount")), k(r.get("max_amount"))
     if not lo and not hi: return ""
@@ -64,7 +65,7 @@ def discover(terms, results, hours, sites, include_easy=False):
             site = str(r.get("site") or "")
             direct = _clean(r.get("job_url_direct"))
             url = direct or _clean(r.get("job_url"))
-            title = str(r.get("title") or "")
+            title = _clean(r.get("title"))
             if not url or url in seen:
                 continue
             seen.add(url)
@@ -74,7 +75,7 @@ def discover(terms, results, hours, sites, include_easy=False):
             if TITLE_NO.search(title) or not TITLE_OK.search(title):
                 continue
             desc = _clean(r.get("description"))
-            row = {"url": url, "company": str(r.get("company") or ""),
+            row = {"url": url, "company": _clean(r.get("company")),
                    "role": title[:120], "source": "jobspy:" + site,
                    "posted": _clean(r.get("date_posted")),
                    "location": _clean(r.get("location")),
