@@ -394,7 +394,7 @@ function render(){
   $('rows').innerHTML=rows.map(j=>{const ap=j.status==='applied';
     return `<tr class="jobrow ${ap?'applied':''}" data-url="${esc(j.apply)}">
       <td class="sc ${scCls(j.score||0)}">${j.score||0}</td>
-      <td class="co">${esc(j.company)}</td>
+      <td class="co">${j.company?esc(j.company):'<span class="muted">(unknown)</span>'}</td>
       <td><a href="${esc(j.apply)}" target="_blank" rel="noopener">${esc(j.role)}</a></td>
       <td class="muted" style="white-space:nowrap;font-size:12px">${esc(postedFmt(j.discovered_at))}</td>
       <td class="muted" style="white-space:nowrap;font-size:12px">${esc(postedFmt(j.posted))}</td>
