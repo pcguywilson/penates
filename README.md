@@ -14,8 +14,7 @@ No account. No cloud LLM required. Nothing leaves the machine by default.
 
 > Two ways to fill, both in a normal browser through one extension: a whole-page **Fill
 > application** that handles identity, EEO, yes/no and dropdowns and drafts the essays, and
-> a per-field answer helper for one written question at a time. Both stop before Submit. A
-> separate Playwright/debug-Chrome runner predates the extension and is now legacy.
+> a per-field answer helper for one written question at a time. Both stop before Submit.
 
 ## Features
 
@@ -138,7 +137,7 @@ python rank.py           # score against your lane
 Or skip the CLI: open the dashboard and hit **Refresh jobs**, which runs the whole pipeline
 in the background and respects the source toggles in **Settings**.
 
-![Settings: every job source is a toggle](docs/img/settings.png)
+![Settings: Ollama connection and model picker, local test pages, job sources, search terms](docs/img/settings.png)
 
 ### Dashboard
 
@@ -149,7 +148,11 @@ python serve.py                       # http://127.0.0.1:8765/dashboard
 - **Jobs** - a list scored against your profile, with a per-row fit score and the reason
   behind it. Filter to remote-only, US-only and a minimum salary; sort by score or newest;
   each row opens a preview pane with an Apply + autofill button that hands off to the extension.
-- **Settings** - edit your search terms and turn sources on or off (saved to `config.json`).
+- **Settings** - edit your search terms and turn sources on or off (saved to `config.json`),
+  check the Ollama connection and choose the answers and essay models, and open the local
+  test pages: **Demo application** (`/demo`, a realistic fake application to run a full fill
+  end to end) and **QA bench** (`/qa`, ask any question and see the answer, the tier that
+  answered it, and the timing).
 - **Logs** - discovery runs, fills, and answer generations.
 - **Profile** - edit the facts the answer helper draws on, card by card: personal, education,
   EEO, eligibility and pay, screening answers, skills, a "Do NOT claim" list the honesty guard
@@ -215,12 +218,12 @@ ollama pull llama3.2:3b          # classify + short answers
 ollama pull qwen2.5:7b-instruct  # grounded essays
 ```
 
-Everything stays on localhost: Ollama `11434`, the tool's server `8765`, and (only for
-the WIP runner) Chrome's debug port `9222`. No paid API, Docker, or database.
+Everything stays on localhost: Ollama `11434` and the tool's server `8765`. No paid API,
+Docker, or database.
 
-## Quickstart: the answer helper (supported)
+## Quickstart
 
-1. Start Ollama and pull the two models above.
+1. Install Ollama and pull the two models above.
 2. `pip install -r requirements.txt`
 3. Copy the example configs and fill in your own facts (the real ones are git-ignored):
    ```
@@ -230,32 +233,22 @@ the WIP runner) Chrome's debug port `9222`. No paid API, Docker, or database.
    cp stories.example.yaml stories.yaml            # your story bank (or add stories in the dashboard)
    cp config/companies.example.yml config/companies.yml
    ```
-4. Start the local server: **Start Autofill Server.bat**, or `python serve.py`
-   (serves `/answer` on `127.0.0.1:8765`).
-5. In `chrome://extensions` (Developer mode, then Load unpacked), load the **`essay-local/`**
-   folder (this is the real fill + answer UI; the `extension/` folder is a legacy
-   dashboard-launcher button - do not load it). It works in your normal Chrome. The install
+4. Double-click **Start Penates.bat**. One click: it starts Ollama if it is not running,
+   restarts the local server on `127.0.0.1:8765`, checks it answers, and opens the dashboard.
+   Run it again any time to restart. (Right-click > Send to > Desktop for a shortcut.
+   Elsewhere: `python serve.py`.)
+5. In the dashboard **Settings** tab, confirm Ollama shows **Connected** and pick the answers
+   model and the essay/story model (Test sends a one-line prompt and shows the reply time).
+6. In `chrome://extensions` (Developer mode, then Load unpacked), load the
+   **`penates-extension/`** folder. It works in your normal Chrome. The install
    prompt lists only known ATS hosts, not "all sites": the fill bubble auto-mounts on those
    application pages, and the per-field helper injects on demand (right-click / Alt+A) on any
    page you invoke it, via `activeTab`.
-6. Focus a written-answer box, then right-click **Answer with local AI**, or press
-   **Alt+A**. The draft is inserted; a toast shows the method and any review flag.
+7. On an application page, click **Fill application** for the whole form, or focus a
+   written-answer box and right-click **Answer with local AI** (or press **Alt+A**). The draft is inserted; a toast shows the method and any review flag.
 
 You can run this next to a commercial autofiller: let it do the structured fields, turn
 off its AI on the unique questions, and let Penates handle those.
-
-## Quickstart: WIP full-page autofill (lab)
-
-The Playwright runner drives a Chrome started with `--remote-debugging-port=9222`
-(**Launch Apply Chrome.bat**), attaches over CDP, fills a whole application, and stops
-before Submit. Per-ATS handling for the sites listed above. Experimental.
-
-```
-python run_url.py --attach "<application URL>"
-```
-
-Submit stays blocked unless you set `APPLY_ALLOW_SUBMIT=1`. `APPLY_ICIMS_ADVANCE=1` lets
-the iCIMS runner page through, still stopping before the last step.
 
 ## Configuration
 
@@ -271,7 +264,6 @@ the iCIMS runner page through, still stopping before the last step.
 | `fields.yaml` | Field-label to profile mapping rules | shipped |
 | `config.json` | Dashboard search terms + source toggles | `.example` only; runtime is git-ignored |
 | `answers.yaml` | Intent templates for essays | shipped |
-| `secrets.yaml` | Workday login (WIP runner only) | `.example` only; real is git-ignored |
 
 ## How it's split
 
@@ -281,7 +273,7 @@ the iCIMS runner page through, still stopping before the last step.
 | `fields.yaml` | Deterministic rules: yes/no, work authorization, city, salary, EEO you chose. |
 | `answers.yaml` + `apply.py` | Deterministic identity + short intent-template answers (why-company, ratings). |
 | `stories.yaml` + `essay.py` | The story bank and the genre engine: classify the question, retrieve ONE real story (or a gap), validate the draft in code. |
-| Browser | One MV3 extension in normal Chrome (whole-page Fill + per-field helper) talking to a local server; a legacy CDP runner remains for reference. |
+| Browser | One MV3 extension in normal Chrome (whole-page Fill + per-field helper) talking to a local server. |
 | Discovery (`scan_ats.py` + `sources/`, `discover.py`, `hiringcafe.py`, `builtin.py`, `remoteok.py`, `remotive.py`) | ATS-API boards first, then aggregators; pull postings into `data/jobs.json`, dedupe, `rank.py` scores, `serve.py` dashboard shows them. |
 | You | Captchas, MFA, account creation, the final read, and Submit. |
 

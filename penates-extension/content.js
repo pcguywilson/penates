@@ -788,7 +788,7 @@
   }
 
   // ===== Workday multi-instance Work Experience filler =========================
-  // Ported from run_url.py's live-verified id scheme: workExperience-<N>--<field>, where <N>
+  // Workday's live-verified id scheme: workExperience-<N>--<field>, where <N>
   // is a per-candidate counter (NOT 1-based). We read <N> off the DOM, never hardcode it.
   // Fills the repeating grid from your saved work_history (title/company/location/dates/desc/
   // currently-work-here) - the identity fields the generic per-field loop cannot map per row.

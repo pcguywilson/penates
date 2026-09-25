@@ -2,7 +2,7 @@
 """Local server for the apply tool. Listens on 127.0.0.1:8765.
 
 Routes:
-  /apply?url=...   -> launches run_url.py --attach <url> (the CDP full-fill path)
+  (the old /apply Playwright launcher was removed; the extension fills in your normal Chrome)
   /answer  (POST)  -> JSON {question, limit?, company?, url?, fresh?, kind?, options?}
                       -> grounded answer. Tiers: structured field -> intent template ->
                       LEARNED (your vetted past answers) -> compose (LLM + gap guard).
@@ -111,21 +111,84 @@ def imported_lookup(q):
             return None
     return rec if rec and rec.get("variants") else None
 
-_last_proc = None
+# ---- local model (Ollama): status, model choice, test -------------------------
+# The chosen models live in config.json (ollama_model / ollama_essay_model) and are applied to
+# apply.MODEL / apply.ESSAY_MODEL, which every model call reads at call time: no restart needed.
+def _ollama_root():
+    import apply as _a
+    return _a.OLLAMA_ROOT
 
-def launch(url):
-    global _last_proc
-    if _last_proc is not None and _last_proc.poll() is None:
-        try:
-            _last_proc.terminate()
-            print("[kill] terminated previous run pid=%s" % _last_proc.pid, flush=True)
-        except Exception:
-            pass
-    args = [sys.executable, os.path.join(HERE, "run_url.py"), "--attach", url]
-    kw = {"cwd": HERE}
-    if os.name == "nt":
-        kw["creationflags"] = 0x00000010  # CREATE_NEW_CONSOLE
-    _last_proc = subprocess.Popen(args, **kw)
+
+def _ollama_models(timeout=3):
+    req = urllib.request.Request(_ollama_root() + "/api/tags")
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        data = json.loads(r.read().decode("utf-8") or "{}")
+    return sorted(m.get("name") for m in (data.get("models") or []) if m.get("name"))
+
+
+def apply_model_config():
+    """Load the saved model choice into apply.* (startup and after a save)."""
+    try:
+        import apply as _a, jobs_store
+        cfg = jobs_store.load_config()
+        if cfg.get("ollama_model"):
+            _a.MODEL = cfg["ollama_model"]
+        if cfg.get("ollama_essay_model"):
+            _a.ESSAY_MODEL = cfg["ollama_essay_model"]
+    except Exception:
+        pass
+
+
+def ollama_status():
+    import apply as _a
+    out = {"ok": True, "base": _ollama_root(), "model": _a.MODEL, "essay_model": _a.ESSAY_MODEL}
+    try:
+        out["models"] = _ollama_models()
+        out["reachable"] = True
+    except Exception as e:
+        out["models"] = []
+        out["reachable"] = False
+        out["error"] = str(e)[:160]
+    out["model_installed"] = out["model"] in out["models"]
+    out["essay_model_installed"] = out["essay_model"] in out["models"]
+    return out
+
+
+def ollama_set(payload):
+    import apply as _a, jobs_store
+    try:
+        installed = _ollama_models()
+    except Exception:
+        return 503, {"ok": False, "error": "Ollama is not reachable at " + _ollama_root()}
+    upd = {}
+    for key, cfgkey in (("model", "ollama_model"), ("essay_model", "ollama_essay_model")):
+        v = (payload or {}).get(key)
+        if v:
+            if v not in installed:
+                return 400, {"ok": False, "error": "%s is not installed (ollama pull %s)" % (v, v)}
+            upd[cfgkey] = v
+    if not upd:
+        return 400, {"ok": False, "error": "nothing to save"}
+    cfg = jobs_store.load_config()
+    cfg.update(upd)
+    jobs_store.save_config(cfg)
+    apply_model_config()
+    _clear_answer_cache()
+    return 200, ollama_status()
+
+
+def ollama_test(model=None):
+    import apply as _a
+    t0 = time.time()
+    try:
+        txt = _a.ollama("Reply with exactly: OK", "You are a connectivity check.", temperature=0,
+                        model=model or _a.MODEL)
+        return {"ok": True, "model": model or _a.MODEL, "reply": str(txt).strip()[:80],
+                "ms": int((time.time() - t0) * 1000)}
+    except Exception as e:
+        return {"ok": False, "model": model or _a.MODEL, "error": str(e)[:200],
+                "ms": int((time.time() - t0) * 1000)}
+
 
 # ---- learned-answer store (correction memory) ------------------------------
 def _norm_q(q):
@@ -2704,6 +2767,8 @@ class H(BaseHTTPRequestHandler):
                 return self._json(200, jobs_store.load_config())
             except Exception as e:
                 return self._json(500, {"error": str(e)})
+        if parsed.path == "/api/ollama":
+            return self._json(200, ollama_status())
         if parsed.path == "/api/profile":
             try:
                 return self._json(200, profile_get())
@@ -2735,16 +2800,7 @@ class H(BaseHTTPRequestHandler):
                 return self._json(200, {"count": len(q), "jobs": q})
             except Exception as e:
                 return self._json(500, {"ok": False, "error": str(e)})
-        if parsed.path != "/apply":
-            return self._send(404, b"not found")
-        url = (urllib.parse.parse_qs(parsed.query).get("url") or [""])[0]
-        if not url:
-            return self._send(400, b"missing url")
-        print("[launch] " + url, flush=True)
-        try:
-            launch(url); self._send(200, b"launched")
-        except Exception as e:
-            print("[error] " + str(e), flush=True); self._send(500, str(e))
+        return self._send(404, b"not found")
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         n = int(self.headers.get("Content-Length", 0) or 0)
@@ -2762,12 +2818,23 @@ class H(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True})
         if parsed.path == "/config":
             try:
-                cfg = json.loads(raw or b"{}")
+                new = json.loads(raw or b"{}")
                 import jobs_store
+                cfg = jobs_store.load_config()
+                cfg.update(new if isinstance(new, dict) else {})   # merge: keep keys other cards own
                 jobs_store.save_config(cfg)
                 return self._json(200, {"ok": True})
             except Exception as e:
                 return self._json(500, {"ok": False, "error": str(e)})
+        if parsed.path in ("/api/ollama", "/api/ollama/test"):
+            try:
+                payload = json.loads(raw or b"{}")
+            except Exception:
+                return self._json(400, {"ok": False, "error": "bad json"})
+            if parsed.path == "/api/ollama/test":
+                return self._json(200, ollama_test(payload.get("model")))
+            code, obj = ollama_set(payload)
+            return self._json(code, obj)
         if parsed.path == "/api/imports/promote-story":
             try:
                 payload = json.loads(raw or b"{}")
@@ -2886,15 +2953,6 @@ class H(BaseHTTPRequestHandler):
                 return self._json(200, {"ok": True, "count": n})
             except Exception as e:
                 return self._json(500, {"ok": False, "error": str(e)})
-        if parsed.path == "/apply":
-            url = (urllib.parse.parse_qs(parsed.query).get("url") or [""])[0]
-            if not url:
-                return self._send(400, b"missing url")
-            print("[launch] " + url, flush=True)
-            try:
-                launch(url); return self._send(200, b"launched")
-            except Exception as e:
-                print("[error] " + str(e), flush=True); return self._send(500, str(e))
         if parsed.path == "/applied":
             try:
                 payload = json.loads(raw or b"{}")
@@ -2976,7 +3034,8 @@ class H(BaseHTTPRequestHandler):
         pass
 
 if __name__ == "__main__":
-    print("Apply autofill server on http://127.0.0.1:%d  (/apply, /answer, /answer-batch, /learn)" % PORT)
+    apply_model_config()
+    print("Penates server on http://127.0.0.1:%d  (dashboard at /, /answer, /answer-batch)" % PORT)
     print("Leave this window open.")
     try:
         ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
