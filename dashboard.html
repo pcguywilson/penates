@@ -81,6 +81,23 @@
 .drawer .b-mark{background:var(--panel2);color:var(--text)}
 tr.jobrow{cursor:pointer}
 tr.jobrow:hover{background:var(--panel2)}
+.pcard-h{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.pcard-h h3{margin:0;flex:1}
+.pacts{display:flex;gap:6px;flex-wrap:wrap}
+.pgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
+@media(max-width:820px){.pgrid{grid-template-columns:1fr}}
+.pfld{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--muted)}
+.pfld.wide{grid-column:1/-1}
+.pfld input[type=text],.pfld input[type=number],.pfld textarea{width:100%;min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:7px 10px;font:14px/1.4 system-ui}
+.pfld textarea{min-height:72px;resize:vertical}
+.pval{color:var(--text);font-size:14px;white-space:pre-wrap}
+.psub{margin:12px 0 6px;font:600 12px system-ui;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.chip{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:3px 10px;font-size:12px;color:var(--text);display:inline-flex;align-items:center;gap:6px}
+.chip button{background:none;border:0;color:var(--muted);cursor:pointer;padding:0;font-size:14px;line-height:1}
+.chipadd{min-width:0 !important;width:160px;padding:6px 8px}
+.whcard{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:var(--panel2)}
+.chk{display:flex;align-items:center;gap:8px;color:var(--text);font-size:14px}
 </style>
 </head>
 <body>
@@ -103,7 +120,6 @@ tr.jobrow:hover{background:var(--panel2)}
     <button data-tab="settings">Settings</button>
     <button data-tab="profile">Profile</button>
     <button data-tab="stories">Stories</button>
-    <button data-tab="imports">Imports</button>
     <button data-tab="resume">Resume</button>
   </nav>
   <span class="ts" id="lastAdded"></span>
@@ -156,10 +172,8 @@ tr.jobrow:hover{background:var(--panel2)}
       <div style="margin-top:10px"><button class="btn" id="saveCfg">Save settings</button> <span class="muted" id="cfgMsg"></span></div></div>
   </section>
   <section data-panel="profile" hidden>
-    <div class="card"><h3>Profile (read-only for now)</h3>
-      <p class="hint">What the local model speaks from. UI editing + resume-upload onboarding are the next build; for now edit profile.yaml on disk.</p>
-      <pre id="prof">loading...</pre></div>
-    <div class="card"><h3>Work history</h3><pre id="work">loading...</pre></div>
+    <p class="hint" style="margin:0 0 12px">Edit a section, then save. Profile sections write profile.yaml. Work history writes its own file. Each save keeps a timestamped backup and clears cached answers.</p>
+    <div id="prof-root"><p class="muted">loading...</p></div>
   </section>
   <section data-panel="stories" hidden>
     <style>
@@ -171,12 +185,21 @@ tr.jobrow:hover{background:var(--panel2)}
       .stt{min-height:52px;resize:vertical}
       .stcard{border-bottom:1px solid var(--line,#1e293b);padding:9px 0}
       .btn.ghost{background:var(--panel2,#1f2937)}
+      .stpanes{display:flex;gap:6px;margin:0 0 12px}
+      .stpanes button{background:none;border:1px solid var(--line,#334155);color:var(--muted);font:600 13px system-ui;padding:6px 12px;border-radius:8px;cursor:pointer}
+      .stpanes button.on{color:var(--text);background:var(--panel2);border-color:var(--accent)}
     </style>
-    <p class="hint" style="margin:0 0 12px">Real experiences the local model draws on for complex answers, separate from your resume. Add the things you tell in interviews but never put on paper (the 3am incident, the migration nobody saw). The engine picks ONE per question and never invents one.</p>
+    <p class="hint" style="margin:0 0 12px">Real experiences the local model draws on for complex answers, separate from your resume. Add the things you tell in interviews but never put on paper (the 3am incident, the migration nobody saw). The engine picks ONE per question and never invents one. Imported answers can draft a story; nothing is saved until you click Save.</p>
+    <div class="stpanes">
+      <button type="button" id="stPaneMine" class="on">My stories</button>
+      <button type="button" id="stPaneImp">Imported answers</button>
+    </div>
+    <div id="stMine">
     <div class="stwrap">
       <div class="card">
         <h3 id="st-formtitle">Add a story</h3>
         <input type="hidden" id="st-id">
+        <input type="hidden" id="st-import-key">
         <label class="stl">Title</label>
         <input class="sti" id="st-title" placeholder="Restored service during a 3am Sev1 page">
         <label class="stl" style="display:inline-flex;gap:6px;align-items:center;margin-top:8px"><input type="checkbox" id="st-owned" checked> I personally owned / led this</label>
@@ -198,9 +221,9 @@ tr.jobrow:hover{background:var(--panel2)}
         <div id="st-list"></div>
       </div>
     </div>
-  </section>
-<section data-panel="imports" hidden>
-    <p class="hint" style="margin:0 0 12px">Answers imported from a ChatGPT / AI chat export. A match surfaces as a <b>review-flagged draft</b> when the same question appears - never auto-trusted; you edit before inserting. Browse, edit, or delete them here.</p>
+    </div>
+    <div id="stImp" hidden>
+    <p class="hint" style="margin:0 0 12px">Answers imported from a ChatGPT / AI chat export. A match surfaces as a <b>review-flagged draft</b> when the same question appears - never auto-trusted. Make a story drafts a STAR story into the form; it is not saved until you save it.</p>
     <div class="card"><h3>Import answers from AI chats</h3>
       <p class="hint">Import a Q&amp;A export from ChatGPT or any AI (JSON or Markdown). A match surfaces as a <b>review-flagged draft</b> when the same question appears - never auto-trusted, and you edit before inserting.</p>
       <input type="file" id="impFile" accept=".json,.md,.txt" style="color:var(--muted)">
@@ -230,6 +253,7 @@ Rules: one object per distinct question. Put ONLY the final answer text in "answ
         <div style="margin-top:8px"><button class="btn" id="impEditSave">Save</button> <button class="btn ghost" id="impEditCancel">Cancel</button> <span class="muted" id="impEditMsg"></span></div>
       </div>
       <div id="impList" style="margin-top:12px"></div>
+    </div>
     </div>
   </section>
   <section data-panel="resume" hidden>
@@ -309,10 +333,9 @@ document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('[data-panel]').forEach(p=>p.hidden=p.dataset.panel!==b.dataset.tab);
   if(b.dataset.tab==='logs') loadLogs();
   if(b.dataset.tab==='settings') loadCfg();
-  if(b.dataset.tab==='imports'){ loadImports(); loadImportsList(); }
   if(b.dataset.tab==='resume') loadResumeJobs();
   if(b.dataset.tab==='profile') loadProfile();
-  if(b.dataset.tab==='stories') loadStories();
+  if(b.dataset.tab==='stories'){ loadStories(); loadImports(); loadImportsList(); }
 });
 
 function ago(iso){ if(!iso) return 'never';
@@ -481,16 +504,19 @@ function renderImports(){
   const rows=IMPORTS.map((it,idx)=>({it,idx})).filter(o=>!q||((o.it.question+' '+o.it.category).toLowerCase().includes(q)));
   $('impListCount').textContent=IMPORTS.length;
   $('impList').innerHTML=rows.map(o=>{const it=o.it,v0=(it.variants&&it.variants[0])||'';
+    const badge=it.used_in_story?`<span class="chip">used in ${esc(it.used_in_story)}</span>`:'';
     return `<div class="stcard">
-      <div style="font-weight:600">${esc(it.question)}</div>
+      <div style="font-weight:600">${esc(it.question)} ${badge}</div>
       <div class="muted" style="font-size:12px">${esc(it.category||'')}${(it.variants&&it.variants.length>1)?' \u00b7 '+it.variants.length+' variants':''}</div>
       <div class="muted" style="font-size:12px;margin-top:3px">${esc(v0.slice(0,180))}${v0.length>180?'...':''}</div>
-      <div style="margin-top:5px;display:flex;gap:6px">
+      <div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="mini" data-make="${o.idx}">Make a story</button>
         <button class="mini" data-edit="${o.idx}">edit</button>
         <button class="mini" data-del="${o.idx}" style="background:#7f1d1d">delete</button></div></div>`;
   }).join('')||'<div class="muted">No imports yet. Upload an export above.</div>';
   document.querySelectorAll('#impList [data-edit]').forEach(b=>b.onclick=()=>editImport(+b.dataset.edit));
   document.querySelectorAll('#impList [data-del]').forEach(b=>b.onclick=()=>delImport(+b.dataset.del));
+  document.querySelectorAll('#impList [data-make]').forEach(b=>b.onclick=()=>makeStory(+b.dataset.make));
 }
 let impEditKey=null;
 function editImport(idx){ const it=IMPORTS[idx]; if(!it)return; impEditKey=it.key;
@@ -550,9 +576,194 @@ async function doCover(){
 $('rsCover').onclick=doCover;
 $('rsCoverCopy').onclick=()=>{navigator.clipboard.writeText($('rsCoverText').value);};
 $('rsTailor').onclick=doTailor;
-async function loadProfile(){ const p=await fetch('/profile').then(r=>r.json()).catch(()=>({}));
-  $('prof').textContent=p.profile||'(profile.yaml not found)'; $('work').textContent=p.work_history||'(work_history.yaml not found)';
+let PROFILE=null, PROF_EDIT={};
+const PROF_LABELS={
+  legal_name:'Legal name',first_name:'First name',last_name:'Last name',preferred_name:'Preferred name',
+  middle_name:'Middle name',email:'Email',phone:'Phone',linkedin:'LinkedIn',github:'GitHub',
+  current_title:'Current title',current_company:'Current company',location_full:'Location',city:'City',
+  city_only:'City only',state:'State',zip:'ZIP',country:'Country',street:'Street',timezone:'Time zone',
+  work_auth:'Work authorization',sponsorship_required:'Sponsorship required',will_relocate:'Will relocate',
+  remote_only:'Remote only',degree:'Degree',field:'Field of study',school:'School',year:'Year',location:'Location',
+  gender:'Gender',gender_identity:'Gender identity',hispanic_latino:'Hispanic or Latino',race:'Race',
+  veteran_status:'Veteran status',veteran_member:'Veteran member',disability_status:'Disability status',
+  disability_short:'Disability (short)',sexual_orientation:'Sexual orientation',transgender:'Transgender',
+  notice_period:'Notice period',earliest_start:'Earliest start',willing_to_travel:'Willing to travel',
+  over_18:'Over 18',background_check:'Background check',drug_screen:'Drug screen',drivers_license:"Driver's license",
+  reliable_transportation:'Reliable transportation',employment_type:'Employment type',non_compete:'Non-compete',
+  remote_experience:'Remote experience',evenings_weekends:'Evenings and weekends',band_usd:'Pay band (USD)',
+  single_default:'Default salary',english_level:'English level',cloud_most:'Cloud you know best',
+  ai_agents:'AI coding agents',infra_owned:'Infrastructure owned',infra_defined:'How infrastructure is defined',
+  k8s_ops:'How you run Kubernetes',spanish_portuguese:'Spanish or Portuguese near-native',
+  latin_america:'Located in Latin America',title:'Title',company:'Company',start:'Start',end:'End',
+  current:'Current job',description:'Description',supervisor:'Supervisor',name:'Name',relationship:'Relationship',
+  years_known:'Years known'
+};
+const PROF_ORDER={
+  identity:['legal_name','first_name','last_name','preferred_name','middle_name','email','phone','linkedin','github','current_title','current_company','location_full','city','city_only','state','zip','country','street','timezone','work_auth','sponsorship_required','will_relocate','remote_only'],
+  education:['degree','field','school','year','location'],
+  eeo:['gender','gender_identity','hispanic_latino','race','veteran_status','veteran_member','disability_status','disability_short','sexual_orientation','transgender'],
+  eligibility:['notice_period','earliest_start','willing_to_travel','over_18','background_check','drug_screen','drivers_license','reliable_transportation','employment_type','non_compete','remote_experience','evenings_weekends'],
+  compensation:['band_usd','single_default'],
+  screening:['english_level','cloud_most','ai_agents','infra_owned','infra_defined','k8s_ops','spanish_portuguese','latin_america']
+};
+const SKILL_LABELS={cloud:'Cloud',iac:'IaC',containers:'Containers',cicd:'CI/CD',monitoring_security:'Monitoring and security',systems:'Systems',aws_services:'AWS services',compliance_owned:'Compliance',languages:'Languages'};
+const LONG_KEYS={ai_agents:1,infra_owned:1,infra_defined:1,k8s_ops:1,description:1,disability_status:1,veteran_status:1,veteran_member:1};
+const REF_FIELDS=['name','relationship','company','title','email','phone','years_known'];
+const JOB_FIELDS=['title','company','location','start','end','current','description','supervisor'];
+function profLabel(k){return PROF_LABELS[k]||k.replace(/_/g,' ');}
+function profKeys(sec, obj){
+  const order=PROF_ORDER[sec]||[];
+  const rest=Object.keys(obj||{}).filter(k=>order.indexOf(k)<0);
+  return order.filter(k=>Object.prototype.hasOwnProperty.call(obj,k)).concat(rest);
 }
+function profActs(id, editing){
+  if(editing) return `<button type="button" class="btn" data-act="save" data-card="${id}">Save</button><button type="button" class="mini" data-act="cancel" data-card="${id}">Cancel</button>`;
+  return `<button type="button" class="mini" data-act="edit" data-card="${id}">Edit</button>`;
+}
+function profCardHead(id, title, editing){
+  return `<div class="pcard-h"><h3>${esc(title)}</h3><span class="pacts">${profActs(id, editing)}</span></div>`;
+}
+function showVal(v){
+  if(typeof v==='boolean') return v?'Yes':'No';
+  if(Array.isArray(v)) return v.join(', ');
+  if(v==null) return '';
+  return String(v);
+}
+function fieldHtml(sec, key, val, editing, idx){
+  const wide=LONG_KEYS[key]?' wide':'';
+  const lab=`<span>${esc(profLabel(key))}</span>`;
+  const data=idx==null?`data-sec="${sec}" data-key="${esc(key)}"`:`data-sec="${sec}" data-key="${esc(key)}" data-i="${idx}"`;
+  if(!editing) return `<label class="pfld${wide}">${lab}<div class="pval">${esc(showVal(val))}</div></label>`;
+  if(typeof val==='boolean') return `<label class="pfld${wide} chk"><input type="checkbox" ${data} ${val?'checked':''}> ${esc(profLabel(key))}</label>`;
+  if(typeof val==='number') return `<label class="pfld${wide}">${lab}<input type="number" ${data} data-typ="number" value="${esc(String(val))}"></label>`;
+  if(Array.isArray(val)){
+    const nums=val.every(x=>typeof x==='number');
+    return `<label class="pfld${wide}">${lab}<input type="text" ${data} data-typ="list" data-num="${nums?'1':'0'}" value="${esc(val.join(', '))}"></label>`;
+  }
+  if(LONG_KEYS[key]) return `<label class="pfld wide">${lab}<textarea ${data}>${esc(val==null?'':String(val))}</textarea></label>`;
+  return `<label class="pfld${wide}">${lab}<input type="text" ${data} value="${esc(val==null?'':String(val))}"></label>`;
+}
+function fieldsBlock(sec, editing){
+  const obj=PROFILE[sec]||{};
+  return `<div class="pgrid">${profKeys(sec, obj).map(k=>fieldHtml(sec, k, obj[k], editing)).join('')}</div>`;
+}
+function chipRow(sec, key, values, editing){
+  const chips=(values||[]).map((v,i)=>`<span class="chip">${esc(v)}${editing?`<button type="button" data-act="chip-del" data-sec="${sec}" data-key="${esc(key)}" data-i="${i}" aria-label="Remove">×</button>`:''}</span>`).join('');
+  const add=editing?`<input class="chipadd" type="text" data-chipfor="${sec}" data-key="${esc(key)}" placeholder="Add"><button type="button" class="mini" data-act="chip-add" data-sec="${sec}" data-key="${esc(key)}">Add</button>`:'';
+  return `<div class="chips">${chips}${add}</div>`;
+}
+function skillsBlock(editing){
+  return Object.keys(SKILL_LABELS).map(k=>`<div style="margin-bottom:10px"><div class="psub" style="margin-top:0">${esc(SKILL_LABELS[k])}</div>${chipRow('skills', k, (PROFILE.skills||{})[k], editing)}</div>`).join('');
+}
+function jobCard(job, i, editing){
+  if(!editing){
+    const end=job.end?job.end:'present';
+    return `<div class="whcard"><div style="font-weight:600">${esc(job.title||'')} <span class="muted">${job.company?('at '+esc(job.company)):''}</span></div><div class="muted">${esc(job.start||'')} – ${esc(end)}${job.location?(' · '+esc(job.location)):''}${job.current?' · current':''}</div>${job.supervisor?`<div class="muted">Supervisor: ${esc(job.supervisor)}</div>`:''}<div class="pval" style="margin-top:6px">${esc(job.description||'')}</div></div>`;
+  }
+  const inputs=JOB_FIELDS.map(k=>fieldHtml('work_history', k, job[k], true, i)).join('');
+  return `<div class="whcard"><div class="pgrid">${inputs}</div><div style="margin-top:8px"><button type="button" class="mini" data-act="job-del" data-i="${i}">Remove</button></div></div>`;
+}
+function refCard(ref, i, editing){
+  if(!editing){
+    const line=[ref.name, ref.title, ref.company].filter(Boolean).join(' · ');
+    const sub=[ref.relationship, ref.email, ref.phone, ref.years_known?('known '+ref.years_known):''].filter(Boolean).join(' · ');
+    return `<div class="whcard"><div style="font-weight:600">${esc(line||'Reference')}</div><div class="muted">${esc(sub)}</div></div>`;
+  }
+  const inputs=REF_FIELDS.map(k=>fieldHtml('references', k, ref[k]==null?'':ref[k], true, i)).join('');
+  return `<div class="whcard"><div class="pgrid">${inputs}</div><div style="margin-top:8px"><button type="button" class="mini" data-act="ref-del" data-i="${i}">Remove</button></div></div>`;
+}
+function renderProfile(){
+  const root=$('prof-root');
+  if(!PROFILE){root.innerHTML='<p class="muted">Could not load profile.</p>';return;}
+  const e=id=>!!PROF_EDIT[id];
+  const cards=[
+    `<div class="card">${profCardHead('identity','Personal',e('identity'))}${fieldsBlock('identity', e('identity'))}<p class="muted" id="pmsg-identity"></p></div>`,
+    `<div class="card">${profCardHead('education','Education',e('education'))}${fieldsBlock('education', e('education'))}<p class="muted" id="pmsg-education"></p></div>`,
+    `<div class="card">${profCardHead('eeo','EEO',e('eeo'))}${fieldsBlock('eeo', e('eeo'))}<p class="muted" id="pmsg-eeo"></p></div>`,
+    `<div class="card">${profCardHead('pay','Eligibility & pay',e('pay'))}<div class="psub">Eligibility</div>${fieldsBlock('eligibility', e('pay'))}<div class="psub">Pay</div>${fieldsBlock('compensation', e('pay'))}<p class="muted" id="pmsg-pay"></p></div>`,
+    `<div class="card">${profCardHead('screening','Screening answers',e('screening'))}<p class="hint">Workable-style answers. The question patterns stay in fields.yaml.</p>${fieldsBlock('screening', e('screening'))}<p class="muted" id="pmsg-screening"></p></div>`,
+    `<div class="card">${profCardHead('skills','Skills',e('skills'))}${skillsBlock(e('skills'))}<p class="muted" id="pmsg-skills"></p></div>`,
+    `<div class="card">${profCardHead('limited_or_none','Do NOT claim',e('limited_or_none'))}<p class="hint">The honesty guard will not claim these.</p>${chipRow('limited_or_none','', PROFILE.limited_or_none, e('limited_or_none'))}<p class="muted" id="pmsg-limited_or_none"></p></div>`,
+    `<div class="card">${profCardHead('work_history','Work history',e('work_history'))}${(PROFILE.work_history||[]).map((j,i)=>jobCard(j,i,e('work_history'))).join('')||'<p class="muted">No jobs yet.</p>'}${e('work_history')?'<button type="button" class="mini" data-act="job-add">Add job</button>':''}<p class="muted" id="pmsg-work_history"></p></div>`,
+    `<div class="card">${profCardHead('references','References',e('references'))}<p class="hint">Used only when a required question asks you to provide references. Optional questions, willingness questions, and referred-by stay blank.</p>${(PROFILE.references||[]).map((r,i)=>refCard(r,i,e('references'))).join('')||(e('references')?'':'<p class="muted">None yet.</p>')}${e('references')?'<button type="button" class="mini" data-act="ref-add">Add reference</button>':''}<p class="muted" id="pmsg-references"></p></div>`
+  ];
+  root.innerHTML=cards.join('');
+}
+function blankJob(){return {title:'',company:'',location:'',start:'',end:'',current:false,description:'',supervisor:''};}
+function blankRef(){return {name:'',relationship:'',company:'',title:'',email:'',phone:'',years_known:''};}
+function onProfInput(ev){
+  const t=ev.target; if(!t||!t.dataset||!t.dataset.sec||!t.dataset.key) return;
+  const sec=t.dataset.sec, key=t.dataset.key, idx=t.dataset.i;
+  let val;
+  if(t.type==='checkbox') val=t.checked;
+  else if(t.dataset.typ==='number') val=t.value===''?'':Number(t.value);
+  else if(t.dataset.typ==='list'){
+    const parts=t.value.split(',').map(s=>s.trim()).filter(Boolean);
+    val=t.dataset.num==='1'?parts.map(Number):parts;
+  } else val=t.value;
+  if(idx!=null && idx!=='') PROFILE[sec][+idx][key]=val;
+  else PROFILE[sec][key]=val;
+}
+async function saveProfileCard(id){
+  const msg=$('pmsg-'+id); if(msg) msg.textContent='Saving...';
+  const sections=id==='pay'?['eligibility','compensation']:[id];
+  for(const sec of sections){
+    let r;
+    try{
+      r=await fetch('/api/profile/'+sec,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(PROFILE[sec])}).then(x=>x.json());
+    }catch(_){ r={ok:false,error:'save failed'}; }
+    if(!r.ok){ if(msg) msg.textContent=r.error||'save failed'; return; }
+    PROFILE[sec]=r.data;
+  }
+  PROF_EDIT[id]=false;
+  renderProfile();
+  const done=$('pmsg-'+id); if(done) done.textContent='Saved';
+}
+function onProfClick(ev){
+  const b=ev.target.closest('[data-act]'); if(!b||!PROFILE) return;
+  const act=b.dataset.act, card=b.dataset.card;
+  if(act==='edit'){
+    const snap={};
+    (card==='pay'?['eligibility','compensation']:[card]).forEach(s=>snap[s]=JSON.parse(JSON.stringify(PROFILE[s])));
+    PROF_EDIT[card]=snap; PROF_EDIT[card]._on=true; renderProfile(); return;
+  }
+  if(act==='cancel'){
+    const snap=PROF_EDIT[card]||{};
+    Object.keys(snap).forEach(s=>{ if(s!=='_on') PROFILE[s]=snap[s]; });
+    delete PROF_EDIT[card];
+    renderProfile();
+    return;
+  }
+  if(act==='save'){ saveProfileCard(card); return; }
+  if(act==='chip-add'){
+    const sec=b.dataset.sec, key=b.dataset.key;
+    const input=document.querySelector(`[data-chipfor="${sec}"][data-key="${key}"]`);
+    const text=(input&&input.value||'').trim(); if(!text) return;
+    if(sec==='limited_or_none') PROFILE.limited_or_none.push(text);
+    else PROFILE.skills[key].push(text);
+    renderProfile(); return;
+  }
+  if(act==='chip-del'){
+    const sec=b.dataset.sec, i=+b.dataset.i;
+    if(sec==='limited_or_none') PROFILE.limited_or_none.splice(i,1);
+    else PROFILE.skills[b.dataset.key].splice(i,1);
+    renderProfile(); return;
+  }
+  if(act==='job-add'){ PROFILE.work_history.push(blankJob()); renderProfile(); return; }
+  if(act==='job-del'){ PROFILE.work_history.splice(+b.dataset.i,1); renderProfile(); return; }
+  if(act==='ref-add'){ PROFILE.references.push(blankRef()); renderProfile(); return; }
+  if(act==='ref-del'){ PROFILE.references.splice(+b.dataset.i,1); renderProfile(); return; }
+}
+async function loadProfile(){
+  const root=$('prof-root');
+  try{
+    const p=await fetch('/api/profile').then(r=>r.json());
+    if(!p||!p.ok){ PROFILE=null; renderProfile(); return; }
+    PROFILE=p; PROF_EDIT={}; renderProfile();
+  }catch(_){ PROFILE=null; if(root) root.innerHTML='<p class="muted">Could not load profile.</p>'; }
+}
+$('prof-root').oninput=onProfInput;
+$('prof-root').onclick=onProfClick;
 // ---- stories tab ----
 const ST_FIELDS=['id','title','domains','tools','not_implied','situation','task','action','result','hero'];
 async function loadStories(){
@@ -567,22 +778,50 @@ async function loadStories(){
   document.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>fillStory(STORIES[+b.dataset.edit]));
   document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>delStory(b.dataset.del));
 }
+function showStoryPane(which){
+  const mine=which!=='imp';
+  $('stMine').hidden=!mine; $('stImp').hidden=mine;
+  $('stPaneMine').classList.toggle('on', mine);
+  $('stPaneImp').classList.toggle('on', !mine);
+  if(!mine){ loadImports(); loadImportsList(); }
+}
 function fillStory(s){ if(!s)return;
-  $('st-id').value=s.id||'';$('st-title').value=s.title||'';$('st-owned').checked=!!s.owned;
+  $('st-id').value=s.id||'';$('st-import-key').value='';$('st-title').value=s.title||'';$('st-owned').checked=!!s.owned;
   $('st-domains').value=(s.domains||[]).join(', ');$('st-tools').value=(s.tools||[]).join(', ');
   $('st-not_implied').value=(s.not_implied||[]).join(', ');const st=s.star||{};
   $('st-situation').value=st.situation||'';$('st-task').value=st.task||'';$('st-action').value=st.action||'';$('st-result').value=st.result||'';
   $('st-hero').value=s.hero||'';$('st-formtitle').textContent='Edit: '+(s.title||s.id);
-  window.scrollTo(0,0);
+  showStoryPane('mine'); window.scrollTo(0,0);
 }
-function clearStory(){ST_FIELDS.forEach(f=>$('st-'+f).value='');$('st-owned').checked=true;$('st-formtitle').textContent='Add a story';$('st-msg').textContent='';}
+function clearStory(){ST_FIELDS.forEach(f=>$('st-'+f).value='');$('st-import-key').value='';$('st-owned').checked=true;$('st-formtitle').textContent='Add a story';$('st-msg').textContent='';}
 async function saveStory(){const p={};ST_FIELDS.forEach(f=>p[f]=$('st-'+f).value);p.owned=$('st-owned').checked;
+  p.import_key=$('st-import-key').value;
   if(!p.title.trim()){$('st-msg').textContent='Title required';return;}
   const r=await fetch('/api/stories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}).then(x=>x.json());
-  $('st-msg').textContent=r.ok?('saved: '+r.story.id):'save failed';if(r.ok){clearStory();loadStories();}}
+  $('st-msg').textContent=r.ok?('saved: '+r.story.id):'save failed';if(r.ok){clearStory();loadStories();loadImportsList();}}
+async function makeStory(idx){
+  const it=IMPORTS[idx]; if(!it) return;
+  $('st-msg').textContent='drafting...';
+  showStoryPane('mine');
+  const r=await fetch('/api/imports/promote-story',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:it.key})}).then(x=>x.json()).catch(e=>({ok:false,error:String(e)}));
+  if(!r.ok){$('st-msg').textContent=r.error||'draft failed';return;}
+  const d=r.draft||{};
+  clearStory();
+  $('st-import-key').value=it.key;
+  $('st-title').value=d.title||''; $('st-owned').checked=!!d.owned;
+  $('st-domains').value=(d.domains||[]).join(', '); $('st-tools').value=(d.tools||[]).join(', ');
+  $('st-not_implied').value=(d.not_implied||[]).join(', ');
+  $('st-situation').value=d.situation||''; $('st-task').value=d.task||'';
+  $('st-action').value=d.action||''; $('st-result').value=d.result||''; $('st-hero').value=d.hero||'';
+  $('st-formtitle').textContent='Add a story';
+  const gaps=r.gaps||[];
+  $('st-msg').textContent=gaps.length?('Stripped (do not claim): '+gaps.join(', ')+'. Edit, then save.'):'Draft only. Not saved. Edit, then save.';
+}
 async function delStory(id){if(!confirm('Delete this story?'))return;
   await fetch('/api/stories/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});loadStories();}
 $('st-save').onclick=saveStory;$('st-clear').onclick=clearStory;
+$('stPaneMine').onclick=()=>showStoryPane('mine');
+$('stPaneImp').onclick=()=>showStoryPane('imp');
 loadJobs();
 </script>
 </body>

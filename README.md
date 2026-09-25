@@ -29,7 +29,7 @@ No account. No cloud LLM required. Nothing leaves the machine by default.
 - **Import answers you already wrote.** Paste a ChatGPT (or other AI) export. Penates strips
   the "here's a great answer / Option A" wrapper, splits variants, and offers your own wording
   as a review-flagged draft when the question comes back. Browse, edit, and prune them in the
-  Imports tab.
+  Stories tab, and turn any of them into a STAR story with one click (Make a story).
 - **Jobs from the company's ATS, not job-board soup.** Greenhouse, Lever, Ashby, and Workday
   boards into one local queue with title, location, salary, and a real apply URL. Every source
   is a toggle; switch the noisy aggregators off if you only want direct-ATS.
@@ -101,6 +101,8 @@ you to add one, never a fabricated answer.
 
 ![The Stories tab: your STAR story bank](docs/img/stories.png)
 
+![The Profile tab: edit your facts card by card](docs/img/profile.png)
+
 The repo ships `stories.example.yaml` with fake entries. Copy it, delete them, replace with
 yours.
 
@@ -167,9 +169,15 @@ python serve.py                       # http://127.0.0.1:8765/dashboard
   each row opens a preview pane with an Apply + autofill button that hands off to the extension.
 - **Settings** - edit your search terms and turn sources on or off (saved to `config.json`).
 - **Logs** - discovery runs, fills, and answer generations.
-- **Profile** - a read-only view of the facts the answer helper draws on.
+- **Profile** - edit the facts the answer helper draws on, card by card: personal, education,
+  EEO, eligibility and pay, screening answers, skills, a "Do NOT claim" list the honesty guard
+  enforces, work history, and references (used only when a form requires them). Saving a card
+  rewrites only that section of `profile.yaml`, keeps a timestamped backup, and takes effect on
+  the next fill with no restart.
 - **Stories** - add and edit the story bank the answer engine draws on (the interview-grade
-  experiences that never make the résumé), no YAML editing.
+  experiences that never make the résumé), no YAML editing. Imported AI answers live in the same
+  tab; **Make a story** drafts a STAR story from one with the local model (checked against your
+  Do NOT claim list) and pre-fills the form. Nothing is saved until you save it.
 - **Themes** - a color picker in the header (default Slate); pick what is easy on your eyes.
 
 Discovery finds and ranks; the extension fills; you review and submit. Same contract as the
@@ -179,9 +187,9 @@ rest of the tool: nothing leaves the machine, nothing auto-submits.
 
 If a year of job-application questions and answers is buried in a ChatGPT (or any AI)
 thread, import them so Penates can reuse them. Export the chat, convert it to a small JSON
-with any AI (the dashboard **Imports** tab has the exact conversion prompt), then:
+with any AI (the dashboard **Stories** tab, Imported answers pane, has the exact conversion prompt), then:
 
-![The Imports tab: browse, edit, and prune answers imported from an AI chat](docs/img/imports.png)
+![Imported answers in the Stories tab: browse, edit, prune, or make a story](docs/img/imports.png)
 
 ```
 python import_qa.py my_export.json          # heuristic cleaning

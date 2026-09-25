@@ -12,7 +12,7 @@
 (() => {
   if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
   window.__penatesInit = true;
-  const PENATES_BUILD = "build 44";   // shown in the report header; if you don't see it after a reload, the extension didn't update
+  const PENATES_BUILD = "build 48";   // shown in the report header; if you don't see it after a reload, the extension didn't update
   const IS_TOP = window.top === window;
   // The content script is injected only on ATS hosts (manifest matches). When an ATS application
   // form is EMBEDDED as a cross-origin iframe inside a company careers page (e.g. a Greenhouse
@@ -263,6 +263,16 @@
   // not the group's question. That sends the wrong text to the engine. Climb to the container
   // that holds the group's question heading and return that instead.
   function groupQuestion(el) {
+    // ARIA group label first: Workable wraps checkbox/radio sets in div[role=group] /
+    // fieldset[role=radiogroup] with aria-labelledby pointing at the real question. Climbing
+    // innerText instead glued option text onto the question (or returned the option alone).
+    try {
+      const g = el.closest && el.closest('[role="group"][aria-labelledby], [role="radiogroup"][aria-labelledby], fieldset[aria-labelledby]');
+      if (g) {
+        const t = g.getAttribute("aria-labelledby").split(/\s+/).map((i) => (document.getElementById(i) || {}).innerText || "").join(" ").trim();
+        if (t && t.length > 5) return stripSectionHead(clean(t)).slice(0, 240);
+      }
+    } catch (_) {}
     let p = el;
     for (let i = 0; i < 9 && p; i++) {
       p = p.parentElement; if (!p) break;
@@ -662,7 +672,9 @@
       if (score > bestScore) { bestScore = score; best = o; }
     }
     // Nothing overlapped the wanted value -> do NOT blind-click the first option. Leave it for you.
-    if (!best) return false;
+    // Also reject weak overlap: need about half the value's tokens (one loose "use" hit inside
+    // "No usage" is not a match; exact text gets +100).
+    if (!best || bestScore < Math.max(2, vtokens.length)) { try { el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); } catch (_) {} return false; }
     const targetText = norm(best.textContent);
     // Commit order matters. Ashby's own autocomplete (role=combobox, class
     // ashby-application-form-input-autocomplete) renders results as clickable [role=option] divs
@@ -674,7 +686,11 @@
     const clickTarget = best;
     fireMouse(clickTarget);
     await sleep(260);
-    if (comboCommitted(el) || norm(el.value) === targetText || el.getAttribute("aria-expanded") === "false") return true;
+    // A closed menu alone is NOT success (menu also closes on blur with nothing picked). Accept a
+    // committed chip, the input now showing the option (Workable/Ashby), or closed + input not
+    // holding our typed query.
+    const _v = norm(el.value || "");
+    if (comboCommitted(el) || _v === targetText || (el.getAttribute("aria-expanded") === "false" && (!_v || targetText.startsWith(_v)) && _v !== norm(query))) return true;
     // fallback: keyboard nav until the intended option is the active descendant, then Enter. Only
     // commit if we actually reached it - never blind-Enter onto whatever happens to be highlighted.
     let found = false;
@@ -688,7 +704,8 @@
     if (!found) { try { el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); } catch (_) {} return false; }
     el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
     await sleep(240);
-    return el.getAttribute("aria-expanded") === "false" || comboCommitted(el) || norm(el.value) === targetText;
+    const _v2 = norm(el.value || "");
+    return comboCommitted(el) || _v2 === targetText || (el.getAttribute("aria-expanded") === "false" && (!_v2 || targetText.startsWith(_v2)) && _v2 !== norm(query));
   }
 
   async function fillAriaCombobox(el, value) {
@@ -719,7 +736,7 @@
       if (ot === nv) score += 100;
       if (score > bestScore) { bestScore = score; best = o; }
     }
-    if (!best) { try { el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); } catch (_) {} return false; }
+    if (!best || bestScore < Math.max(2, vtokens.length)) { try { el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); } catch (_) {} return false; }
     fireMouse(best);
     await sleep(250);
     const after = norm(el.textContent || "");
@@ -944,6 +961,212 @@
     return _hasEduField();
   }
 
+
+  // ===== ATS ADAPTERS (Greenhouse, Workable) ===================================================
+  // Dedicated path, the way Simplify-class tools work: read the form's own SCHEMA (every question,
+  // required flag, field id and option list) from the ATS's public API, send ONE /answer-batch
+  // with kind + options per field, then fill each field by its known id and verify it took.
+  // Choice fields never go through the essay ladder (server constrains to the options). No DOM
+  // guessing of labels, no per-field engine round-trips, one report row per question.
+  async function _bgJson(url) {
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: "FETCH_JSON", url });
+      return resp && resp.ok ? resp.data : null;
+    } catch (_) { return null; }
+  }
+  async function adapterSchema() {
+    const href = location.href;
+    // --- Greenhouse (job-boards / boards / embed?for=&token=) ---
+    let gh = null;
+    const m1 = href.match(/greenhouse\.io\/([^\/?#]+)\/jobs\/(\d+)/i);
+    if (m1 && !/^embed$/i.test(m1[1])) gh = [m1[1], m1[2]];
+    if (!gh && /greenhouse\.io$/i.test(location.hostname)) {
+      try { const u = new URL(href); const f = u.searchParams.get("for"), t = u.searchParams.get("token") || u.searchParams.get("gh_jid"); if (f && t) gh = [f, t]; } catch (_) {}
+    }
+    if (gh) {
+      const r = await _bgJson("https://boards-api.greenhouse.io/v1/boards/" + gh[0] + "/jobs/" + gh[1] + "?questions=true");
+      if (!r || !Array.isArray(r.questions)) return null;
+      const items = [];
+      const add = (q) => {
+        for (const f of (q && q.fields) || []) {
+          if (f.type === "input_file" || /^(resume_text|cover_letter_text)$/.test(f.name)) continue;
+          const kind = { input_text: "text", textarea: "textarea", multi_value_single_select: "select", multi_value_multi_select: "checkbox" }[f.type];
+          if (!kind) continue;
+          items.push({ ats: "greenhouse", id: f.name, q: clean(q.label || ""), required: !!q.required, kind,
+                       options: (f.values || []).map((v) => clean(String(v.label))).filter(Boolean) });
+        }
+      };
+      (r.questions || []).forEach(add);
+      (r.location_questions || []).forEach(add);
+      (r.compliance || []).forEach((c) => (c.questions || []).forEach(add));
+      // Page-level widgets the schema does not list (phone country, location typeahead, education).
+      const extra = [["country", "Country"], ["candidate-location", "Location (City)"], ["school--0", "School"], ["degree--0", "Degree"], ["discipline--0", "Discipline"]];
+      for (const [id, q] of extra) {
+        const el = document.getElementById(id);
+        if (el && !items.some((i) => i.id === id)) items.push({ ats: "greenhouse", id, q, required: _fieldRequired(el), kind: "combobox", options: null });
+      }
+      return items;
+    }
+    // --- Workable ---
+    const m2 = location.pathname.match(/\/j\/([A-Z0-9]{6,})/i);
+    if (/(^|\.)workable\.com$/i.test(location.hostname) && m2) {
+      let s = null;
+      try { s = await fetch("/api/v1/jobs/" + m2[1] + "/form", { credentials: "include" }).then((x) => (x.ok ? x.json() : null)); } catch (_) {}
+      if (!Array.isArray(s)) return null;
+      const items = [];
+      for (const sec of s) for (const f of (sec.fields || [])) {
+        let kind = { text: "text", email: "text", phone: "text", paragraph: "textarea", boolean: "radio", dropdown: "select", multiple: "checkbox" }[f.type];
+        if (!kind) continue;
+        if (f.type === "multiple" && f.singleOption) kind = "radio";
+        const options = f.type === "boolean" ? ["Yes", "No"] : (f.options || []).map((o) => clean(String(o.value || ""))).filter(Boolean);
+        items.push({ ats: "workable", id: f.id, q: clean(f.label || ""), required: !!f.required, kind, options: options.length ? options : null,
+                     optIds: (f.options || []).map((o) => String(o.name)) });
+      }
+      return items;
+    }
+    return null;
+  }
+  function _adEl(it) {
+    const id = it.id;
+    return document.getElementById(id)
+      || document.getElementById("input_" + id + "_input")
+      || document.querySelector('[name="' + CSS.escape(id) + '"]:not([type="hidden"])')
+      || document.querySelector('[data-ui="' + CSS.escape(id) + '"] input:not([type="hidden"]), [data-ui="' + CSS.escape(id) + '"] textarea');
+  }
+  function _adSetText(el, val) {
+    const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    try {
+      el.focus();
+      Object.getOwnPropertyDescriptor(proto, "value").set.call(el, String(val));
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.dispatchEvent(new Event("blur", { bubbles: true }));
+    } catch (_) {}
+    const a = clean(el.value), b = clean(String(val));
+    if (a === b) return true;
+    // Phone widgets (intl-tel-input) reformat the number: compare digits.
+    const da = a.replace(/\D+/g, ""), db = b.replace(/\D+/g, "");
+    return db.length >= 7 && (da === db || da.endsWith(db) || db.endsWith(da));
+  }
+  // Known-option select (Greenhouse react-select, Workable combobox): open by mouse-down on the
+  // control, click the EXACT option, verify the shown value. No typing, no keyboard nav.
+  async function _adFillSelect(el, pick) {
+    const want = norm(pick);
+    const shownVal = () => {
+      const box = el.closest('.select__container, .select-shell, .select, [data-ui]') || el.parentElement;
+      const sv = box && box.querySelector('[class*="single-value"], [class*="singleValue"]');
+      return norm((sv && sv.textContent) || el.value || "");
+    };
+    if (shownVal() === want) return true;
+    try { const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; if (el.value) { setter.call(el, ""); el.dispatchEvent(new Event("input", { bubbles: true })); } } catch (_) {}
+    const ctrl = el.closest('.select__control, [class*="control"]') || el.parentElement;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try { el.focus(); } catch (_) {}
+      fireMouse(attempt ? el : ctrl);
+      let opts = [];
+      for (let i = 0; i < 20; i++) {
+        await sleep(60);
+        const lb = document.getElementById(el.getAttribute("aria-controls") || el.getAttribute("aria-owns") || "__none__");
+        opts = lb ? [...lb.querySelectorAll('[role="option"]')] : [];
+        if (opts.length) break;
+      }
+      let o = opts.find((x) => norm(x.textContent) === want);
+      if (!o && want) {
+        // Word-level match for free answers vs fixed menus ("Associate" -> "Associate's Degree",
+        // "United States" -> "United States +1"): EVERY answer word must start an option word;
+        // fewest extra words wins. Never a partial overlap.
+        const wt = want.split(" ").filter(Boolean);
+        let best = null, bestExtra = 1e9;
+        for (const x of opts) {
+          const ot = norm(x.textContent).split(" ").filter(Boolean);
+          if (wt.every((w) => ot.some((t) => t.startsWith(w))) && ot.length - wt.length < bestExtra) { best = x; bestExtra = ot.length - wt.length; }
+        }
+        o = best;
+      }
+      if (o) { const _ot = norm(o.textContent); fireMouse(o); await sleep(180); const _sv = shownVal(); if (_sv === want || _sv === _ot) return true; }
+      try { el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); } catch (_) {}
+    }
+    return fillCombobox(el, pick);   // last resort: the generic typeahead path
+  }
+  function _adPickOptions(it, text) {
+    // Map the engine's text (one option, or several joined by " | ") to option labels. Exact
+    // (case/punct-normalized) only: never a prefix, so "No" can't hit "No Kubernetes: ...".
+    const wanted = String(text || "").split(/\s*\|\s*/).map(norm).filter(Boolean);
+    return (it.options || []).filter((o) => wanted.includes(norm(o)));
+  }
+  async function adapterFill(items, rows) {
+    const out = { filled: 0, review: 0, skipped: 0 };
+    const todo = [];
+    for (const it of items) {
+      const el = _adEl(it);
+      it.el = el;
+      if (/cover.?letter/i.test(it.id + " " + it.q)) { if (it.required) { rows.push([it.q.slice(0, 60), "skip", "cover letter required -> dashboard Cover"]); out.skipped++; } continue; }
+      if (!el && it.kind !== "radio" && it.kind !== "checkbox") continue;          // not rendered on this page
+      if (el && (it.kind === "text" || it.kind === "textarea") && clean(el.value)) continue;  // prefilled
+      if (el && (it.kind === "select" || it.kind === "combobox") && (comboCommitted(el) || (clean(el.value) && (it.options || []).some((o) => norm(o) === norm(el.value))))) continue;
+      todo.push(it);
+    }
+    setReport("Answering " + todo.length + " questions in one batch ... NOTHING submitted.", rows);
+    const batch = await askEngineBatch(todo.map((it) => ({ q: it.q, kind: it.kind, options: it.options, required: it.required,
+      limit: it.el && it.el.maxLength > 0 ? it.el.maxLength : null })), 90000);
+    const answers = (batch && !batch.__error && Array.isArray(batch.answers)) ? batch.answers : [];
+    if (!answers.length) { rows.push(["Answer engine", "skip", (batch && batch.__error) || "no batch answers"]); }
+    let i = 0;
+    for (const it of todo) {
+      const a = answers[i++] || {};
+      const label = it.q.slice(0, 60);
+      setReport("Filling " + i + "/" + todo.length + " ... NOTHING submitted.", rows);
+      try {
+        let text = (a && a.ok !== false) ? String(a.text || "").trim() : "";
+        // Required long textarea that the fast batch deferred: draft it now (local model), review.
+        if (!text && it.kind === "textarea" && it.required && a && a.method === "essay-skip") {
+          const d = await askEngine(it.q, it.el && it.el.maxLength > 0 ? it.el.maxLength : null, false, 60000, false);
+          if (d && !d.__error && d.text) { text = String(d.text).trim(); a.method = d.method || "essay"; a.review = true; }
+        }
+        if (!text) { rows.push([label, "skip", (it.required ? "required, " : "") + "no answer -> you"]); out.skipped++; continue; }
+        const isReview = !!(a.review || (a.method && !/^(field|learned|options|literal|choice|profile|guard)/i.test(a.method)));
+        let ok = false, shownVal = text;
+        if (it.kind === "text" || it.kind === "textarea") {
+          if (it.kind === "text" && text.length > 200) { rows.push([label, "skip", "long answer for a one-line field -> you"]); out.skipped++; continue; }
+          ok = _adSetText(it.el, text);
+        } else if (it.kind === "select" || it.kind === "combobox") {
+          const pick = it.options ? _adPickOptions(it, text)[0] : text;
+          if (!pick) { rows.push([label, "skip", "'" + text.slice(0, 30) + "' not an option -> you"]); out.skipped++; continue; }
+          shownVal = pick;
+          ok = await _adFillSelect(it.el, pick);   // exact/word match on the open menu, typeahead fallback inside
+        } else if (it.kind === "radio" || it.kind === "checkbox") {
+          const picks = _adPickOptions(it, text);
+          if (!picks.length) { rows.push([label, "skip", "'" + text.slice(0, 30) + "' not an option -> you"]); out.skipped++; continue; }
+          const scope = document.querySelector('[data-ui="' + CSS.escape(it.id) + '"]') || (it.el && (it.el.closest('fieldset, [role="group"], [role="radiogroup"]')));
+          let n = 0;
+          for (const p of (it.kind === "radio" ? picks.slice(0, 1) : picks)) {
+            // ARIA radio (Workable YES/NO) or native checkbox/radio by option label / option id.
+            const idx = (it.options || []).findIndex((o) => norm(o) === norm(p));
+            const oid = it.optIds && idx >= 0 ? it.optIds[idx] : null;
+            let tgt = null;
+            if (scope) {
+              tgt = [...scope.querySelectorAll('[role="radio"], [role="checkbox"], label')].find((x) => norm(x.innerText) === norm(p))
+                 || (oid ? scope.querySelector('input[name="' + CSS.escape(oid) + '"], input[value="' + CSS.escape(oid) + '"]') : null)
+                 || [...scope.querySelectorAll("input")].find((x) => norm(optionLabel(x)) === norm(p));
+            }
+            if (!tgt) continue;
+            const inp = tgt.tagName === "INPUT" ? tgt : tgt.querySelector("input");
+            if (inp && inp.checked) { n++; continue; }
+            if (tgt.getAttribute("role") === "radio" || tgt.getAttribute("role") === "checkbox") fireMouse(tgt);
+            else if (inp) commitOption(inp); else fireMouse(tgt);
+            await sleep(120);
+            const done = (inp && inp.checked) || tgt.getAttribute("aria-checked") === "true";
+            if (done) n++;
+          }
+          ok = n > 0; shownVal = picks.join(", ");
+        }
+        if (ok) { rows.push([label, isReview ? "review" : "filled", shownVal.slice(0, 60)]); isReview ? out.review++ : out.filled++; }
+        else { rows.push([label, "skip", "couldn't set '" + shownVal.slice(0, 30) + "' -> you"]); out.skipped++; }
+      } catch (e) { rows.push([label, "skip", "error: " + String(e).slice(0, 40)]); out.skipped++; }
+    }
+    return out;
+  }
+
   async function runFillAll() {
     if (fillBusy) return;
     fillBusy = true;
@@ -977,6 +1200,20 @@
       if (rows.length > before && rows[rows.length - 1][1] === "filled") filled++;
     } catch (e) { rows.push(["Resume upload", "skip", String(e).slice(0, 50)]); }
     await sleep(700); // let the file-triggered re-render finish before we grab element refs
+
+    // Dedicated ATS adapter (Greenhouse / Workable): schema -> one batch -> fill by id. When it
+    // runs, the generic heuristic passes below are skipped entirely (no double processing).
+    let _adapterRan = false;
+    try {
+      const _items = await adapterSchema();
+      if (_items && _items.length) {
+        const _r = await adapterFill(_items, rows);
+        filled += _r.filled; review += _r.review; skipped += _r.skipped;
+        _adapterRan = true;
+      }
+    } catch (e) { rows.push(["ATS adapter", "skip", "fell back to generic: " + String(e).slice(0, 40)]); }
+    penGeneric: {
+    if (_adapterRan) break penGeneric;
 
     // Workday repeating Work Experience grid (from your saved work_history). Marks the
     // fields it sets so the generic scan below skips them.
@@ -1090,6 +1327,9 @@
         const scoreOf = (ol) => {
           if (!ol) return -1;
           if (ol === na) return 100;
+          // A bare Yes/No/True/False answer must match an option EXACTLY. Prefix/whole-word would
+          // tick "No Kubernetes: Hasn't worked with it" for an engine "No" (false claim on the form).
+          if (/^(yes|no|true|false|n a|none)$/.test(na)) return -1;
           if (na && ol.startsWith(na)) return 70;
           if (na && na.startsWith(ol) && ol.length >= 3) return 60;
           if (na.length >= 3 && (" " + ol + " ").includes(" " + na + " ")) return 50;  // whole word
@@ -1133,6 +1373,10 @@
         if (skipQuestion(q)) { if (!JUNK_RE.test(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; } continue; }
         const cur = (el.value || el.textContent || "").trim();
         if (cur) { continue; }                        // don't clobber prefilled
+        if (/\bcover\s*letter\b/i.test(q) || /cover_?letter/i.test((el.name || "") + " " + (el.id || ""))) {
+          // A STAR story is not a cover letter. Never auto-write this box.
+          rows.push([q.slice(0, 60), "skip", _fieldRequired(el) ? "cover letter required -> dashboard Cover" : "cover letter optional -> left blank"]); skipped++; continue;
+        }
         const limit = el.maxLength && el.maxLength > 0 ? el.maxLength : null;
         let data = await askCached(q, limit, false, 40000, true);
         if (data && data.method === "essay-skip") {
@@ -1144,7 +1388,7 @@
         if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", data && data.__error ? "engine: " + data.__error : "no answer -> you"]); skipped++; continue; }
         // a bare structured value (tier-1 field match) belongs in an input/select, never a prose
         // box: this is where a demographic token leaks into a free-text field. Leave it for you.
-        // Middle name only when the field is actually required (Shawn preference).
+        // Middle name only when the field is actually required (user preference).
         if (/\bmiddle\s+(name|initial)\b/i.test(q) && !_fieldRequired(el)) {
           rows.push([q.slice(0, 60), "skip", "middle name optional -> left blank"]); skipped++; continue;
         }
@@ -1468,6 +1712,7 @@
       if (fixed) { filled += fixed; rows.push(["Verify pass recovered", "filled", fixed + " control(s)"]); }
     } catch (_) {}
 
+    } // end penGeneric
     try { if (_keepPort) _keepPort.disconnect(); } catch (_) {}   // release the service-worker keep-alive
     _answerCache = null;
     fillBusy = false;
@@ -1537,6 +1782,9 @@
   }
   function setReport(summary, rows) {
     if (!report) return;
+    // Remix/React boards (Greenhouse job-boards) can re-render the whole document mid-fill and drop
+    // foreign nodes; put the panel back instead of silently losing the report.
+    if (!report.isConnected) { try { document.documentElement.appendChild(report); } catch (_) {} }
     const _sumEl = report.querySelector('[data-r="sum"]');
     _sumEl.textContent = summary || "";
     _sumEl.style.color = /^\u2713 DONE/.test(summary || "") ? "#34d399" : "#fbbf24";  // green=done, amber=working
@@ -1599,6 +1847,8 @@
       } catch (_) { try { runFillAll(); } catch (__) {} }
     });
     (document.body || document.documentElement).appendChild(b);
+    // Same re-render hazard for the launcher: re-attach if the page drops it.
+    try { setInterval(() => { if (!b.isConnected) { (document.body || document.documentElement).appendChild(b); try { if (b.hasAttribute("popover")) b.showPopover(); } catch (_) {} } }, 2000); } catch (_) {}
     // Some ATS pages put a transform/filter/overflow-clip on <body>, which "contains" a
     // position:fixed button and cuts off its hit-area. The top layer ignores all that.
     try {
