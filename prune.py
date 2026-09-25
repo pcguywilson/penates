@@ -474,7 +474,9 @@ def main():
             seen.add(k)
         d["last_prune"] = {"at": stamp, "checked": checked, "closed": closed, "expired": expired}
         jobs_store.save(d)
-    print("prune: checked=%d closed=%d expired=%d" % (checked, closed, expired))
+    deleted = jobs_store.apply_retention()
+    print("prune: checked=%d closed=%d expired=%d deleted(retention %sd)=%d"
+          % (checked, closed, expired, jobs_store.retention_days() or "off", deleted))
 
 
 if __name__ == "__main__":
