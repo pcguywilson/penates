@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Rank discovered jobs by PROFILE-RELATIVE fit (rule-based, no LLM).
 
-Scores each row 0-100 against your own profile.yaml, not by absolute
+Scores each row 0-100 against the user's actual profile.yaml, not by absolute
 keyword counts. The old scorer counted JD skill hits in the absolute, so a
 100%-GCP role scored 100 even with zero GCP, and perfect AWS/DevOps fits sat at
 0 on a title miss. This version uses required-COVERAGE (matched / required, the
-Resume-Matcher polarity) + gap penalties + section-aware requirement extraction,
+Resume-Matcher polarity) + gap penalties + career-ops section-aware extraction,
 so a pure-GCP role scores LOW and a real AWS/k8s/Terraform fit scores HIGH.
 
-Every row also gets a human-readable `score_reason` so you can disagree with
-the number. Reference approach borrowed from srbhr/Resume-Matcher. No per-role
-hardcoding: HAVE/GAP come
+Every row also gets a human-readable `score_reason` so the user can disagree with
+the number. Co-designed with Grok (board seq 24-39); reference approach borrowed
+from career-ops + srbhr/Resume-Matcher. No per-role hardcoding: HAVE/GAP come
 from profile.yaml via skills.py.
 
   python rank.py            # score all 'discovered', show top 30
@@ -85,9 +85,15 @@ def score_row(r, HAVE, GAP, SUPP):
     reason = ["band=%s(%d)" % ("/".join(tags), band)]
 
     if found and required:
-        # near-linear: required-coverage carries the score, the title band is the floor
-        score = band + rcov * 60 + pcov * 8 + jac * 8
-        reason.append("req cov=%.0f%% have[%s]" % (rcov * 100, _fmt(rmatch | rsupp)))
+        # near-linear: required-coverage carries the score, the title band is the floor.
+        # Sparse-required damping: a JD whose parsed "required" set is only 1-2 skills is weak
+        # evidence (thin or badly-parsed section) - 100% coverage of it must NOT score like a real
+        # 4+ skill match. Confidence scales with the required-set size (1->.25 .. 4+->1.0), so a
+        # lone [SQL] "requirement" can't reach 90 the way an 8-skill AWS/DevOps match does.
+        conf = min(len(required), 4) / 4.0
+        score = band + rcov * 60 * conf + pcov * 8 + jac * 8
+        reason.append("req cov=%.0f%%%s have[%s]" % (rcov * 100,
+                      "" if conf == 1.0 else " conf=%.2f" % conf, _fmt(rmatch | rsupp)))
     elif preferred:
         # thin/flat JD: no requirements section to trust -> soft preferred signal only
         score = band + pcov * 34 + jac * 12
@@ -96,7 +102,7 @@ def score_row(r, HAVE, GAP, SUPP):
         score = band + jac * 8
         reason.append("title-only")
 
-    # additive gap penalty: only skills you are KNOWN to lack (GAP), already peer-collapsed
+    # additive gap penalty: only skills the user is KNOWN to lack (GAP), already peer-collapsed
     # so a competing cloud/CI tool that is one-of-many in the JD is NOT counted as a gap.
     named_gaps = rgap & GAP
     if found and named_gaps:
@@ -104,7 +110,7 @@ def score_row(r, HAVE, GAP, SUPP):
         score -= pen
         reason.append("GAP[%s]-%d" % (_fmt(named_gaps), pen))
 
-    # pure competitor-cloud shop: a GAP cloud is named and NONE of your clouds appear
+    # pure competitor-cloud shop: a GAP cloud is named and NONE of the user's clouds appear
     jd_all = required | preferred
     if (COMPETITOR_CLOUDS & jd_all) and not (MY_CLOUDS & jd_all):
         score -= 15
@@ -115,7 +121,7 @@ def score_row(r, HAVE, GAP, SUPP):
         score = min(score, 30)
         reason.append("off-target<=30")
 
-    # transparency flags (NOT score factors) so you can disagree with the number
+    # transparency flags (NOT score factors) so the user can disagree with the number
     if r.get("desc_truncated"):
         reason.append("JD-TRUNCATED")
     if not found and (required or preferred or desc):

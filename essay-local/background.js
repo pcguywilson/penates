@@ -55,6 +55,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch((e) => sendResponse({ ok: false, error: String(e) }));
     return true; // async
   }
+  // Public ATS form schema (Greenhouse boards-api). GET only, JSON only; used by the adapter.
+  if (msg.type === "FETCH_JSON" && msg.url && /^https:\/\/boards-api\.greenhouse\.io\//.test(msg.url)) {
+    fetch(msg.url, { method: "GET" })
+      .then((r) => r.json())
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((e) => sendResponse({ ok: false, error: String(e) }));
+    return true; // async
+  }
   // Open the standalone ATS form in a new tab (used when the launcher runs inside an embedded
   // iframe, where window.open is blocked). The URL carries #penates-fill so it auto-fills.
   if (msg.type === "OPEN_FILL_TAB" && msg.url) {

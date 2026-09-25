@@ -11,6 +11,7 @@ identity:
   legal_name: Jane Q. Example
   first_name: Jane
   last_name: Example
+  preferred_name: Jane
   middle_name: Quinn
   email: jane.example@example.com
   phone: "555-555-0100"
@@ -100,6 +101,26 @@ application_defaults:
   how_did_you_hear: LinkedIn
 
 # Universal eligibility answers (invariant about you; safe to pre-fill everywhere).
+# Screening answers some ATS forms ask as fixed-option questions. fields.yaml
+# patterns point here. Use the EXACT option text the form shows. Editable in
+# the dashboard Profile tab.
+screening:
+  english_level: "Near-native (C2)"
+  cloud_most: AWS
+  ai_agents: "Assisted: AI explains and drafts, I write the final code (e.g., chat window, inline completion)"
+  infra_owned: "Builder: Builds pieces of it inside an architecture someone else set"
+  infra_defined: "IaC in CI: in version control, applied by CI, with drift detected"
+  k8s_ops: "Deploys onto it: Deploys onto clusters someone else provisions and maintains"
+  spanish_portuguese: "No"
+  latin_america: "No"
+
+# Professional references. Used ONLY when a question is required AND asks you
+# to provide references. Never used for "who referred you". Editable in the
+# dashboard Profile tab.
+references: []
+#  - {name: "Alex Sample", relationship: "Former manager", company: "Example Corp",
+#     title: "Engineering Manager", email: "alex@example.com", phone: "555-0100", years_known: 4}
+
 eligibility:
   notice_period: "2 weeks"
   earliest_start: "2 weeks from offer"
