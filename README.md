@@ -88,6 +88,74 @@ tool whose whole point is that your data stays home and belongs to you.
 The whole-page fill is early: it is solid on Greenhouse and `react-select` forms and widens
 from there. Salesforce Lightning and Workday shadow forms are still hardening.
 
+## Requirements
+
+- Windows 10/11 (primary); macOS and Linux work for the answer path.
+- Python 3.11 or 3.12, Google Chrome, [Ollama](https://ollama.com), Git.
+
+```bash
+ollama pull llama3.2:3b          # classify + short answers
+ollama pull qwen2.5:7b-instruct  # grounded essays
+```
+
+Everything stays on localhost: Ollama `11434`, the tool's server `8765`, and (only for
+the WIP runner) Chrome's debug port `9222`. No paid API, Docker, or database.
+
+## Quickstart: the answer helper (supported)
+
+1. Start Ollama and pull the two models above.
+2. `pip install -r requirements.txt`
+3. Copy the example configs and fill in your own facts (the real ones are git-ignored):
+   ```
+   cp profile.example.yaml profile.yaml
+   cp data/work_history.example.yaml data/work_history.yaml
+   cp application.example.yaml application.yaml
+   cp stories.example.yaml stories.yaml            # your story bank (or add stories in the dashboard)
+   cp config/companies.example.yml config/companies.yml
+   ```
+4. Start the local server: **Start Autofill Server.bat**, or `python serve.py`
+   (serves `/answer` on `127.0.0.1:8765`).
+5. In `chrome://extensions` (Developer mode, then Load unpacked), load the **`essay-local/`**
+   folder (this is the real fill + answer UI; the `extension/` folder is a legacy
+   dashboard-launcher button - do not load it). It works in your normal Chrome. The install
+   prompt lists only known ATS hosts, not "all sites": the fill bubble auto-mounts on those
+   application pages, and the per-field helper injects on demand (right-click / Alt+A) on any
+   page you invoke it, via `activeTab`.
+6. Focus a written-answer box, then right-click **Answer with local AI**, or press
+   **Alt+A**. The draft is inserted; a toast shows the method and any review flag.
+
+You can run this next to a commercial autofiller: let it do the structured fields, turn
+off its AI on the unique questions, and let Penates handle those.
+
+## Quickstart: WIP full-page autofill (lab)
+
+The Playwright runner drives a Chrome started with `--remote-debugging-port=9222`
+(**Launch Apply Chrome.bat**), attaches over CDP, fills a whole application, and stops
+before Submit. Per-ATS handling for the sites listed above. Experimental.
+
+```
+python run_url.py --attach "<application URL>"
+```
+
+Submit stays blocked unless you set `APPLY_ALLOW_SUBMIT=1`. `APPLY_ICIMS_ADVANCE=1` lets
+the iCIMS runner page through, still stopping before the last step.
+
+## Configuration
+
+| File | What it is | In repo |
+|---|---|---|
+| `profile.yaml` | Your locked facts (source of truth) | `.example` only; real is git-ignored |
+| `data/work_history.yaml` | Dated employment history | `.example` only; real is git-ignored |
+| `data/jobs.json` | Your application queue | `.example` only; real is git-ignored |
+| `application.yaml` | The current job's company blurb | `.example` only; real is git-ignored |
+| `stories.yaml` | Your story bank (interview-grade experiences the answer engine uses) | `.example` only; real is git-ignored |
+| `config/companies.yml` | ATS boards to scan (Greenhouse/Lever/Ashby slugs) | `.example` only; real is git-ignored |
+| `data/imported_answers.json` | Imported AI-chat answers (reference) | git-ignored (runtime) |
+| `fields.yaml` | Field-label to profile mapping rules | shipped |
+| `config.json` | Dashboard search terms + source toggles | `.example` only; runtime is git-ignored |
+| `answers.yaml` | Intent templates for essays | shipped |
+| `secrets.yaml` | Workday login (WIP runner only) | `.example` only; real is git-ignored |
+
 ## The story bank
 
 Your résumé is bullets. Interviews and screening boxes run on stories: the outage you owned,
@@ -101,10 +169,30 @@ you to add one, never a fabricated answer.
 
 ![The Stories tab: your STAR story bank](docs/img/stories.png)
 
-![The Profile tab: edit your facts card by card](docs/img/profile.png)
-
 The repo ships `stories.example.yaml` with fake entries. Copy it, delete them, replace with
 yours.
+
+### Import your answer history
+
+If a year of job-application questions and answers is buried in a ChatGPT (or any AI)
+thread, import them so Penates can reuse them. Export the chat, convert it to a small JSON
+with any AI (the dashboard **Stories** tab, Imported answers pane, has the exact conversion prompt), then:
+
+![Imported answers in the Stories tab: browse, edit, prune, or make a story](docs/img/imports.png)
+
+```
+python import_qa.py my_export.json          # heuristic cleaning
+python import_qa.py my_export.json --llm     # + a local-Ollama pass for the stragglers
+```
+
+Schema: `{"items":[{"question":"...","answer":"...","category":"..."}]}` (Markdown `## Q` /
+answer also works). The importer strips the AI's "here is a great answer / Option A/B"
+wrapper, splits multi-option answers into variants, and writes `data/imported_answers.json`.
+
+These are an **untrusted reference**, not facts. When the same or a very similar question
+appears, the cleaned answer surfaces as a review-flagged draft you edit before inserting;
+approving it (insert) promotes it to your learned store. The gap-guard still governs
+anything generated fresh, and nothing imported is auto-inserted or auto-submitted.
 
 ## Find jobs faster: discovery + dashboard
 
@@ -183,33 +271,7 @@ python serve.py                       # http://127.0.0.1:8765/dashboard
 Discovery finds and ranks; the extension fills; you review and submit. Same contract as the
 rest of the tool: nothing leaves the machine, nothing auto-submits.
 
-## Import your answer history
-
-If a year of job-application questions and answers is buried in a ChatGPT (or any AI)
-thread, import them so Penates can reuse them. Export the chat, convert it to a small JSON
-with any AI (the dashboard **Stories** tab, Imported answers pane, has the exact conversion prompt), then:
-
-![Imported answers in the Stories tab: browse, edit, prune, or make a story](docs/img/imports.png)
-
-```
-python import_qa.py my_export.json          # heuristic cleaning
-python import_qa.py my_export.json --llm     # + a local-Ollama pass for the stragglers
-```
-
-Schema: `{"items":[{"question":"...","answer":"...","category":"..."}]}` (Markdown `## Q` /
-answer also works). The importer strips the AI's "here is a great answer / Option A/B"
-wrapper, splits multi-option answers into variants, and writes `data/imported_answers.json`.
-
-These are an **untrusted reference**, not facts. When the same or a very similar question
-appears, the cleaned answer surfaces as a review-flagged draft you edit before inserting;
-approving it (insert) promotes it to your learned store. The gap-guard still governs
-anything generated fresh, and nothing imported is auto-inserted or auto-submitted.
-
-## What it is not
-
-- Not an auto-apply bot.
-- Not a résumé that grows extra degrees.
-- Not a substitute for reading the posting.
+![The Profile tab: edit your facts card by card](docs/img/profile.png)
 
 ## How it's split
 
@@ -237,73 +299,17 @@ list Security+, it won't claim Security+. A missing fact becomes a review flag, 
 confident lie. You review every answer, and the tool never submits unless you explicitly
 turn it on.
 
-## Requirements
+## What it is not
 
-- Windows 10/11 (primary); macOS and Linux work for the answer path.
-- Python 3.11 or 3.12, Google Chrome, [Ollama](https://ollama.com), Git.
+- Not an auto-apply bot.
+- Not a résumé that grows extra degrees.
+- Not a substitute for reading the posting.
 
-```bash
-ollama pull llama3.2:3b          # classify + short answers
-ollama pull qwen2.5:7b-instruct  # grounded essays
-```
+## Privacy
 
-Everything stays on localhost: Ollama `11434`, the tool's server `8765`, and (only for
-the WIP runner) Chrome's debug port `9222`. No paid API, Docker, or database.
-
-## Quickstart: the answer helper (supported)
-
-1. Start Ollama and pull the two models above.
-2. `pip install -r requirements.txt`
-3. Copy the example configs and fill in your own facts (the real ones are git-ignored):
-   ```
-   cp profile.example.yaml profile.yaml
-   cp data/work_history.example.yaml data/work_history.yaml
-   cp application.example.yaml application.yaml
-   cp stories.example.yaml stories.yaml            # your story bank (or add stories in the dashboard)
-   cp config/companies.example.yml config/companies.yml
-   ```
-4. Start the local server: **Start Autofill Server.bat**, or `python serve.py`
-   (serves `/answer` on `127.0.0.1:8765`).
-5. In `chrome://extensions` (Developer mode, then Load unpacked), load the **`essay-local/`**
-   folder (this is the real fill + answer UI; the `extension/` folder is a legacy
-   dashboard-launcher button - do not load it). It works in your normal Chrome. The install
-   prompt lists only known ATS hosts, not "all sites": the fill bubble auto-mounts on those
-   application pages, and the per-field helper injects on demand (right-click / Alt+A) on any
-   page you invoke it, via `activeTab`.
-6. Focus a written-answer box, then right-click **Answer with local AI**, or press
-   **Alt+A**. The draft is inserted; a toast shows the method and any review flag.
-
-You can run this next to a commercial autofiller: let it do the structured fields, turn
-off its AI on the unique questions, and let Penates handle those.
-
-## Quickstart: WIP full-page autofill (lab)
-
-The Playwright runner drives a Chrome started with `--remote-debugging-port=9222`
-(**Launch Apply Chrome.bat**), attaches over CDP, fills a whole application, and stops
-before Submit. Per-ATS handling for the sites listed above. Experimental.
-
-```
-python run_url.py --attach "<application URL>"
-```
-
-Submit stays blocked unless you set `APPLY_ALLOW_SUBMIT=1`. `APPLY_ICIMS_ADVANCE=1` lets
-the iCIMS runner page through, still stopping before the last step.
-
-## Configuration
-
-| File | What it is | In repo |
-|---|---|---|
-| `profile.yaml` | Your locked facts (source of truth) | `.example` only; real is git-ignored |
-| `data/work_history.yaml` | Dated employment history | `.example` only; real is git-ignored |
-| `data/jobs.json` | Your application queue | `.example` only; real is git-ignored |
-| `application.yaml` | The current job's company blurb | `.example` only; real is git-ignored |
-| `stories.yaml` | Your story bank (interview-grade experiences the answer engine uses) | `.example` only; real is git-ignored |
-| `config/companies.yml` | ATS boards to scan (Greenhouse/Lever/Ashby slugs) | `.example` only; real is git-ignored |
-| `data/imported_answers.json` | Imported AI-chat answers (reference) | git-ignored (runtime) |
-| `fields.yaml` | Field-label to profile mapping rules | shipped |
-| `config.json` | Dashboard search terms + source toggles | `.example` only; runtime is git-ignored |
-| `answers.yaml` | Intent templates for essays | shipped |
-| `secrets.yaml` | Workday login (WIP runner only) | `.example` only; real is git-ignored |
+No telemetry; nothing leaves your machine by default. Never commit `profile.yaml`,
+`secrets.yaml`, résumés, or the contents of `data/`; they're git-ignored. The public tree
+ships only fake example configs.
 
 ## Related projects
 
@@ -345,12 +351,6 @@ the same local store, all in a normal browser. The discovery side (`sources/`,
 - **Next (structured fill without lying):** identity fields for Greenhouse/Rippling/Ashby directly in the extension (no CDP), strict Yes/No polarity, never pick "Decline to self-identify" when a real answer exists, Workday account and experience from `work_history.yaml`, Salesforce Flow shadow-DOM handling.
 - **Later:** interview prep built on the same story bank (rehearse behavioral answers from your own STARs), a tailored résumé/cover-letter path from the same locked facts, an optional cloud OpenAI-compatible endpoint behind the same compose contract, a PII-free application log.
 - **Not planned:** auto-submit as default, mass-apply, hosted SaaS, or inventing skills to raise a match score.
-
-## Privacy
-
-No telemetry; nothing leaves your machine by default. Never commit `profile.yaml`,
-`secrets.yaml`, résumés, or the contents of `data/`; they're git-ignored. The public tree
-ships only fake example configs.
 
 ## License
 
