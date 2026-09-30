@@ -1,73 +1,160 @@
 <!doctype html>
-<html lang="en" data-theme="slate">
+<html lang="en" data-theme="stone">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Penates</title>
 <style>
-  :root{color-scheme:dark;
-    --bg:#0f172a;--panel:#141d2e;--panel2:#1c2740;--line:#334155;--text:#e5e7eb;--muted:#94a3b8;
-    --accent:#38bdf8;--accent2:#0ea5e9;--onaccent:#04222e;--hi:#34d399;--mid:#fbbf24;--lo:#94a3b8;}
-  :root[data-theme="emerald"]{color-scheme:dark;--bg:#0b1410;--panel:#10201a;--panel2:#16281f;--line:#1f3a2e;--text:#e6efe9;--muted:#8aa79a;--accent:#34d399;--accent2:#10b981;--onaccent:#062018;--hi:#6ee7b7;--mid:#fbbf24;--lo:#7f9c8e;}
-  :root[data-theme="amber"]{color-scheme:dark;--bg:#0e0c0a;--panel:#16120c;--panel2:#1c1710;--line:#2a2118;--text:#e9e3d6;--muted:#9c917e;--accent:#e0a83e;--accent2:#c9922f;--onaccent:#20170a;--hi:#e8b451;--mid:#b98f3a;--lo:#8a7f6c;}
-  :root[data-theme="nord"]{color-scheme:dark;--bg:#2e3440;--panel:#353c4a;--panel2:#3b4252;--line:#4c566a;--text:#eceff4;--muted:#a6adba;--accent:#88c0d0;--accent2:#5e81ac;--onaccent:#1b2430;--hi:#a3be8c;--mid:#ebcb8b;--lo:#81a1c1;}
-  :root[data-theme="dracula"]{color-scheme:dark;--bg:#282a36;--panel:#2f313f;--panel2:#343746;--line:#44475a;--text:#f8f8f2;--muted:#a2a6be;--accent:#bd93f9;--accent2:#9d7cd8;--onaccent:#1a1b26;--hi:#50fa7b;--mid:#f1fa8c;--lo:#6272a4;}
-  :root[data-theme="light"]{color-scheme:light;--bg:#f6f5f2;--panel:#ffffff;--panel2:#f0efea;--line:#e2ded5;--text:#1f2937;--muted:#6b7280;--accent:#2563eb;--accent2:#1d4ed8;--onaccent:#ffffff;--hi:#059669;--mid:#b45309;--lo:#6b7280;}
-
+  /* Penates design system (DESIGN.md). New token names + legacy aliases so older inline styles keep working. */
+  :root,:root[data-theme="stone"]{color-scheme:dark;
+    --bg:#0f1317;--surface-1:#151a20;--surface-2:#1b2129;--surface-3:#242b35;--line:#262e38;--line-strong:#34404d;
+    --text:#e4e7eb;--text-2:#a3acb8;--text-3:#6b7684;--accent:#5aa89f;--accent-strong:#72bdb3;--on-accent:#0a1715;
+    --s-new:#8d9aab;--s-match:#6fbf8e;--s-review:#d6a24a;--s-applied:#7c8794;--s-skip:#6b7684;--s-gap:#c98a5e;--s-error:#e0706c;--s-local:#5aa89f;--s-verified:#86add3;}
+  :root[data-theme="slate"]{color-scheme:dark;
+    --bg:#0f172a;--surface-1:#141d2e;--surface-2:#1c2740;--surface-3:#24314d;--line:#26324a;--line-strong:#334155;
+    --text:#e5e7eb;--text-2:#a3b0c2;--text-3:#6b7a90;--accent:#38bdf8;--accent-strong:#7dd3fc;--on-accent:#04222e;
+    --s-new:#94a3b8;--s-match:#34d399;--s-review:#fbbf24;--s-applied:#7c8aa0;--s-skip:#6b7a90;--s-gap:#f59e0b;--s-error:#f87171;--s-local:#38bdf8;--s-verified:#93c5fd;}
+  :root[data-theme="nord"]{color-scheme:dark;
+    --bg:#2e3440;--surface-1:#353c4a;--surface-2:#3b4252;--surface-3:#434c5e;--line:#434c5e;--line-strong:#4c566a;
+    --text:#eceff4;--text-2:#c0c6d2;--text-3:#8b93a4;--accent:#88c0d0;--accent-strong:#8fbcbb;--on-accent:#1b2430;
+    --s-new:#a6adba;--s-match:#a3be8c;--s-review:#ebcb8b;--s-applied:#8b93a4;--s-skip:#8b93a4;--s-gap:#d08770;--s-error:#bf616a;--s-local:#88c0d0;--s-verified:#81a1c1;}
+  :root[data-theme="light"]{color-scheme:light;
+    --bg:#f5f5f3;--surface-1:#ffffff;--surface-2:#f0f0ec;--surface-3:#e7e7e2;--line:#e2e1dc;--line-strong:#cfcdc6;
+    --text:#1c2128;--text-2:#525c68;--text-3:#8a929c;--accent:#2f7f76;--accent-strong:#276b63;--on-accent:#ffffff;
+    --s-new:#6b7684;--s-match:#2f8a57;--s-review:#a86f12;--s-applied:#8a929c;--s-skip:#8a929c;--s-gap:#a35f2e;--s-error:#c0392b;--s-local:#2f7f76;--s-verified:#3d6f9e;}
+  :root{--panel:var(--surface-1);--panel2:var(--surface-2);--muted:var(--text-2);--accent2:var(--accent-strong);--onaccent:var(--on-accent);
+    --hi:var(--s-match);--mid:var(--s-review);--lo:var(--text-3);
+    --ui:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"Cascadia Mono",Consolas,monospace}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,sans-serif}
+  body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 var(--ui)}
+  button,input,select,textarea{font:inherit;color:inherit}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
   a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
-  header{display:flex;align-items:center;gap:16px;padding:12px 22px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
-  .brand{font:600 20px/1 Georgia,'Times New Roman',serif;color:var(--accent);letter-spacing:.02em}
-  .brand-mark{width:22px;height:22px;color:var(--accent);display:block}
-  nav{display:flex;gap:4px;margin-left:4px}
-  nav button{background:none;border:0;color:var(--muted);font:600 13px system-ui;padding:7px 12px;border-radius:7px;cursor:pointer}
-  nav button.on{color:var(--text);background:var(--panel2)}
+  code,.mono{font-family:var(--mono);font-size:12px}
+  /* chrome */
+  header.chrome{height:44px;display:flex;align-items:center;gap:18px;padding:0 20px;border-bottom:1px solid var(--line);background:var(--surface-1);position:sticky;top:0;z-index:20}
+  .brand{display:flex;align-items:center;gap:8px;font-weight:600;font-size:15px;color:var(--text)}
+  .brand-mark{width:20px;height:20px;color:var(--text);display:block}
+  #topnav{display:flex;gap:2px;height:100%}
+  #topnav button{height:100%;background:none;border:0;border-bottom:2px solid transparent;color:var(--text-2);font-weight:600;padding:0 10px;cursor:pointer}
+  #topnav button:hover{color:var(--text)}
+  #topnav button.on{color:var(--text);border-bottom-color:var(--accent)}
   .grow{flex:1}
-  select,.btn{font:600 13px system-ui;border-radius:8px;cursor:pointer}
-  select{background:var(--panel2);color:var(--text);border:1px solid var(--line);padding:7px 10px}
-  .btn{border:1px solid var(--accent2);background:var(--accent);color:var(--onaccent);padding:8px 15px}
+  .ts{color:var(--text-3);font-size:12px;white-space:nowrap}
+  .localchip{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-3);white-space:nowrap}
+  .localchip b{color:var(--text-2);font-weight:600;letter-spacing:.04em}
+  .localchip.down b{color:var(--s-error)}
+  .localchip .sep{opacity:.5}
+  .dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex:none;background:var(--s-new)}
+  .dot.m{background:var(--s-match)} .dot.l{background:var(--s-local)} .dot.e{background:var(--s-error)} .dot.r{background:var(--s-review)}
+  .gearwrap{position:relative}
+  .gear{width:28px;height:28px;border:0;background:none;border-radius:6px;color:var(--text-2);cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .gear:hover,.gear.on{background:var(--surface-2);color:var(--text)}
+  .menu{position:absolute;right:0;top:34px;min-width:210px;background:var(--surface-1);border:1px solid var(--line-strong);border-radius:8px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.4);z-index:30}
+  .menu button,.menu a{display:flex;width:100%;align-items:center;gap:8px;text-align:left;background:none;border:0;border-radius:6px;padding:6px 8px;color:var(--text);cursor:pointer;font-size:13px;text-decoration:none}
+  .menu button:hover,.menu a:hover{background:var(--surface-2);text-decoration:none}
+  .menu .sep{height:1px;background:var(--line);margin:6px 2px}
+  .menu label{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 8px;color:var(--text-2);font-size:12px}
+  .subnav{display:flex;gap:4px;padding:10px 20px 0}
+  .subnav button{height:28px;padding:0 12px;border-radius:6px;border:1px solid transparent;background:none;color:var(--text-2);font-weight:600;cursor:pointer}
+  .subnav button:hover{color:var(--text)}
+  .subnav button.on{background:var(--surface-2);border-color:var(--line-strong);color:var(--text)}
+  /* controls */
+  select{height:28px;padding:0 8px;border-radius:6px;border:1px solid var(--line-strong);background:var(--surface-2);color:var(--text);cursor:pointer}
+  .btn{height:28px;padding:0 12px;border-radius:6px;font-weight:600;border:1px solid var(--accent);background:var(--accent);color:var(--on-accent);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .btn:hover{background:var(--accent-strong);border-color:var(--accent-strong)}
   .btn:disabled{opacity:.5;cursor:default}
-  .btn.ghost{background:transparent;color:var(--text);border-color:var(--line)}
-  .btn.ghost:hover{border-color:var(--accent)}
-  .ts{color:var(--muted);font-size:12px;white-space:nowrap}
-  main{padding:16px 22px 60px}
-  .stats{display:flex;gap:14px;margin-bottom:16px;flex-wrap:wrap}
-  .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:140px}
-  .stat .n{font:700 24px/1 Georgia,serif;color:var(--accent)} .stat .l{color:var(--muted);font-size:12px;margin-top:4px}
-  .toolbar{display:flex;gap:10px;align-items:center;margin-bottom:10px}
-  .ftchk{display:inline-flex;gap:6px;align-items:center;color:var(--text);font:13px system-ui;white-space:nowrap}
-  .ftchk input[type=number]{width:84px;min-width:0;padding:6px 8px;background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--text)}
-  input[type=search],input[type=text]{background:var(--panel);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:8px 12px;font:14px system-ui;min-width:260px}
-  table{width:100%;border-collapse:collapse}
-  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
-  th{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.05em;position:sticky;top:55px;background:var(--bg);cursor:pointer;user-select:none}
-  tr:hover td{background:var(--panel)}
-  .sc{font:700 15px Georgia,serif;width:44px}
-  .sc.hi{color:var(--hi)} .sc.mid{color:var(--mid)} .sc.lo{color:var(--lo)}
-  .co{white-space:nowrap;font-weight:600}
-  .ats{color:var(--muted);font-size:12px;white-space:nowrap}
-  .act{white-space:nowrap;display:flex;gap:6px}
-  .mini{font:600 11px system-ui;padding:4px 9px;border-radius:6px;cursor:pointer;border:1px solid var(--line);background:var(--panel2);color:var(--text)}
-  .mini.apply{background:var(--accent);color:var(--onaccent);border-color:var(--accent2)}
-  .mini.mk{background:transparent;color:var(--muted)}
-  .mini.danger{background:#b91c1c;color:#fff;border-color:#991b1b}
-  tr.applied td{opacity:.4}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
-  .card h3{margin:0 0 8px;font:600 13px system-ui;color:var(--accent);text-transform:uppercase;letter-spacing:.05em}
-  .logline{font:12px/1.5 ui-monospace,monospace;color:var(--muted);border-bottom:1px solid var(--line);padding:4px 0}
-  .logline b{color:var(--text)}
-  textarea{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--text);padding:10px;font:13px/1.5 ui-monospace,monospace;min-height:150px;resize:vertical}
-  pre{white-space:pre-wrap;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:12px;font:12px/1.5 ui-monospace,monospace;max-height:60vh;overflow:auto}
+  .btn.ghost{background:var(--surface-2);color:var(--text);border-color:var(--line-strong)}
+  .btn.ghost:hover{border-color:var(--text-3);background:var(--surface-2)}
+  .btn.quiet{background:none;border-color:transparent;color:var(--text-2)}
+  .btn.quiet:hover{background:var(--surface-2);color:var(--text)}
+  .btn.sm{height:24px;padding:0 9px;font-size:12px}
+  input[type=search],input[type=text],input[type=number],input[type=url]{height:28px;background:var(--surface-2);border:1px solid var(--line-strong);border-radius:6px;color:var(--text);padding:0 10px;min-width:220px}
+  input::placeholder,textarea::placeholder{color:var(--text-3)}
+  textarea{width:100%;background:var(--surface-2);border:1px solid var(--line-strong);border-radius:6px;color:var(--text);padding:8px 10px;font:12px/1.5 var(--mono);min-height:120px;resize:vertical}
+  pre{white-space:pre-wrap;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:12px;font:12px/1.5 var(--mono);max-height:60vh;overflow:auto}
+  .toggle,.ftchk{display:inline-flex;gap:8px;align-items:center;color:var(--text);white-space:nowrap;cursor:pointer;user-select:none}
+  .toggle input[type=checkbox]{appearance:none;width:28px;height:16px;border-radius:8px;background:var(--line-strong);position:relative;cursor:pointer;margin:0;flex:none;transition:background .12s}
+  .toggle input[type=checkbox]::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--text);transition:transform .12s}
+  .toggle input[type=checkbox]:checked{background:var(--accent)}
+  .toggle input[type=checkbox]:checked::after{transform:translateX(12px);background:var(--on-accent)}
+  .ftchk input[type=number]{width:90px;min-width:0}
+  .seg{display:inline-flex;align-self:flex-start;border:1px solid var(--line-strong);border-radius:6px;overflow:hidden;background:var(--surface-2)}
+  .seg button{height:26px;padding:0 10px;border:0;background:none;color:var(--text-2);cursor:pointer;font-weight:600;font-size:12px}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button.on{background:var(--surface-3);color:var(--text)}
   label.src{display:inline-flex;align-items:center;gap:7px;margin-right:18px}
-  .muted{color:var(--muted)} .hint{color:var(--muted);font-size:12px;margin:6px 0}
+  .muted{color:var(--text-2)} .hint{color:var(--text-3);font-size:12px;margin:4px 0}
+  .cap{color:var(--text-3);font-size:11px}
   [hidden]{display:none!important}
+  main{padding:16px 20px 60px}
+  /* jobs */
+  .stats{display:flex;gap:18px;margin:0 0 12px;flex-wrap:wrap;color:var(--text-3);font-size:12px}
+  .stat b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;margin-right:4px}
+  .toolbar{display:flex;gap:14px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:left;padding:0 10px;height:36px;border-bottom:1px solid var(--line);vertical-align:middle}
+  th{height:30px;color:var(--text-3);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;position:sticky;top:44px;background:var(--bg);cursor:pointer;user-select:none;z-index:2}
+  th:hover{color:var(--text-2)}
+  tr:hover td{background:var(--surface-1)}
+  .sc{width:56px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .sc .dot{margin-right:6px;vertical-align:1px}
+  .sc.hi,.sc.mid,.sc.lo{color:var(--text)}
+  .co{white-space:nowrap;font-weight:600}
+  .ats{color:var(--text-2);font-size:12px;white-space:nowrap}
+  .act{white-space:nowrap;text-align:right;width:1%}
+  .mini{height:24px;padding:0 9px;font-size:12px;font-weight:600;border-radius:6px;cursor:pointer;border:1px solid var(--line-strong);background:var(--surface-2);color:var(--text);margin-left:6px}
+  .mini.apply{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+  .mini.apply:hover{background:var(--accent-strong)}
+  .mini.mk{background:none;border-color:transparent;color:var(--text-2)}
+  .mini.mk:hover{background:var(--surface-2);color:var(--text)}
+  .mini.danger{background:none;color:var(--s-error);border-color:var(--s-error)}
+  tr.applied td{color:var(--text-3)}
+  /* cards / search */
+  .card{background:var(--surface-1);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
+  .card h3{margin:0 0 8px;font-size:15px;font-weight:600;color:var(--text)}
+  .card-h{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .card-h h3{margin:0}
+  .sgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px 20px}
+  @media(max-width:1000px){.sgrid{grid-template-columns:1fr}}
+  .fld{display:flex;flex-direction:column;gap:6px;min-width:0}
+  .fld.wide{grid-column:1/-1}
+  .fld>.lbl{font-size:12px;color:var(--text-2);font-weight:600}
+  .fld textarea{min-height:64px}
+  .packs{display:flex;gap:22px;flex-wrap:wrap}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  details.adv{margin-top:14px;border-top:1px solid var(--line);padding-top:10px}
+  details.adv summary{cursor:pointer;color:var(--text-2);font-weight:600;list-style:none}
+  details.adv summary::-webkit-details-marker{display:none}
+  details.adv summary::before{content:"\25B8";display:inline-block;width:14px;color:var(--text-3)}
+  details.adv[open] summary::before{content:"\25BE"}
+  details.adv[open] summary{margin-bottom:12px}
+  .subh{margin:18px 0 6px;font-size:12px;font-weight:600;color:var(--text-2)}
+  .qrow{display:grid;grid-template-columns:190px minmax(0,1fr) auto;gap:12px;align-items:center;min-height:34px;border-bottom:1px solid var(--line)}
+  .qrow .lbl{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .qrow .q{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2);font:12px var(--mono)}
+  .chipbox{min-height:32px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2)}
+  .chipbox input{border:0!important;background:none!important;height:22px!important;min-width:140px!important;padding:0 4px!important;outline:none;flex:1}
+  .logline{font:12px/1.5 var(--mono);color:var(--text-2);border-bottom:1px solid var(--line);padding:4px 0}
+  .logline b{color:var(--text)}
+  .gs-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+  .gs-grid label{display:flex;flex-direction:column;gap:4px}
+  .gs-sub{font-size:11px;color:var(--text-3)}
+  input[type=checkbox]{accent-color:var(--accent)}
+  td a{color:var(--text)} td a:hover{color:var(--accent);text-decoration:none}
+  .drawer footer{gap:8px;align-items:center}
+  .drawer footer button,.drawer footer a{flex:none!important;height:32px;padding:0 14px!important;display:inline-flex;align-items:center;white-space:nowrap;border-radius:6px!important}
+  .drawer footer .b-hide{margin-left:auto;border-color:transparent!important;background:none!important;color:var(--text-2)!important}
+  .drawer footer .b-hide:hover{color:var(--text)!important;background:var(--surface-2)!important}
+  .drawer header{background:var(--surface-1)}
+  .mini,.icon{vertical-align:middle}
 .drawer-ov{position:fixed;inset:0;background:rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:opacity .15s;z-index:40}
 .drawer-ov.open{opacity:1;pointer-events:auto}
 .drawer{position:fixed;top:0;right:0;height:100%;width:min(560px,92vw);background:var(--panel);
   border-left:1px solid var(--line);box-shadow:-8px 0 30px rgba(0,0,0,.35);
   transform:translateX(100%);transition:transform .18s ease;z-index:41;display:flex;flex-direction:column}
 .drawer.open{transform:translateX(0)}
+.drawer:not(.open){box-shadow:none;visibility:hidden;transition:transform .18s ease,visibility 0s .18s}
 .drawer header{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
 .drawer h2{margin:0 0 4px;font-size:18px;line-height:1.3}
 .drawer .co2{color:var(--muted);font-size:14px}
@@ -84,6 +171,13 @@
 .drawer .b-mark{background:var(--panel2);color:var(--text)}
 tr.jobrow{cursor:pointer}
 tr.jobrow:hover{background:var(--panel2)}
+tr.sib td.co{padding-left:28px}
+.grp{margin-left:8px;background:none;border:0;padding:1px 6px;border-radius:5px;color:var(--muted);font:500 11px system-ui;cursor:pointer;vertical-align:1px}
+.grp:hover,.grp:focus-visible{color:var(--text);background:var(--panel2);outline:none}
+.icon{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;margin-left:2px;background:none;border:0;border-radius:6px;color:var(--muted);cursor:pointer;opacity:0;transition:opacity .1s}
+tr.jobrow:hover .icon,.icon:focus-visible{opacity:1}
+.icon:hover,.icon:focus-visible{color:var(--text);background:var(--panel2);outline:none}
+.drawer .b-hide{background:transparent;color:var(--muted)}
 .pcard-h{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .pcard-h h3{margin:0;flex:1}
 .pacts{display:flex;gap:6px;flex-wrap:wrap}
@@ -104,8 +198,8 @@ tr.jobrow:hover{background:var(--panel2)}
 </style>
 </head>
 <body>
-<header>
-  <svg class="brand-mark" aria-hidden="true" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+<header class="chrome">
+  <span class="brand"><svg class="brand-mark" aria-hidden="true" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
     <g fill="currentColor">
       <polygon points="512,96 96,340 928,340"/>
       <rect x="168" y="328" width="688" height="36"/>
@@ -115,41 +209,52 @@ tr.jobrow:hover{background:var(--panel2)}
       <rect x="748" y="808" width="128" height="28"/>
       <path fill-rule="evenodd" d="M 372 400 H 652 V 808 H 372 Z M 512 488 m -58 0 a 58 58 0 1 1 116 0 a 58 58 0 1 1 -116 0 M 488 530 L 536 530 L 556 690 L 468 690 Z"/>
     </g>
-  </svg>
-  <span class="brand">Penates</span>
-  <nav>
-    <button data-tab="jobs" class="on">Jobs</button>
-    <button data-tab="logs">Logs</button>
-    <button data-tab="settings">Settings</button>
-    <button data-tab="profile">Profile</button>
-    <button data-tab="stories">Stories</button>
-    <button data-tab="resume">Resume</button>
+  </svg>Penates</span>
+  <nav id="topnav">
+    <button data-top="jobs" class="on">Jobs</button>
+    <button data-top="search">Search</button>
+    <button data-top="knowledge">Knowledge</button>
   </nav>
   <span class="ts" id="lastAdded"></span>
   <span class="grow"></span>
-  <select id="theme" title="Theme">
-    <option value="slate">Slate</option>
-    <option value="emerald">Emerald</option>
-    <option value="amber">Amber</option>
-    <option value="nord">Nord</option>
-    <option value="dracula">Dracula</option>
-    <option value="light">Light</option>
-  </select>
-  <button class="btn" id="refresh">Refresh jobs</button>
+  <span class="localchip" id="localChip"><span class="dot"></span><b>LOCAL</b><span>checking...</span></span>
+  <div class="gearwrap">
+    <button class="gear" id="gearBtn" title="Settings, logs, theme" aria-label="Settings, logs, theme" aria-haspopup="menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/></svg></button>
+    <div class="menu" id="gearMenu" role="menu" hidden>
+      <button data-go="settings" role="menuitem">Settings</button>
+      <button data-go="logs" role="menuitem">Logs</button>
+      <div class="sep"></div>
+      <a href="/demo" target="_blank" rel="noopener" role="menuitem">Demo application</a>
+      <a href="/qa" target="_blank" rel="noopener" role="menuitem">QA bench</a>
+      <div class="sep"></div>
+      <label>Theme <select id="theme">
+        <option value="stone">Stone</option>
+        <option value="slate">Slate</option>
+        <option value="nord">Nord</option>
+        <option value="light">Light</option>
+      </select></label>
+    </div>
+  </div>
 </header>
+<div class="subnav" id="knowNav" hidden>
+  <button data-tab="profile" class="on">Profile</button>
+  <button data-tab="stories">Stories</button>
+  <button data-tab="resume">Resume</button>
+</div>
 <main>
   <section data-panel="jobs">
     <div class="stats" id="stats"></div>
     <div class="toolbar">
       <input type="search" id="q" placeholder="Filter by company, role, ATS...">
-      <label class="ftchk"><input type="checkbox" id="fRemote" checked> Remote only</label>
-      <label class="ftchk"><input type="checkbox" id="fUS" checked> US only</label>
-      <label class="ftchk">Min $<input type="number" id="fSalary" min="0" step="5000" placeholder="0"></label>
-      <label class="ftchk"><input type="checkbox" id="fClosed"> Show closed</label>
+      <label class="toggle"><input type="checkbox" id="fRemote" checked> Remote</label>
+      <label class="toggle"><input type="checkbox" id="fUS" checked> US only</label>
+      <label class="ftchk">Min $ <input type="number" id="fSalary" min="0" step="5000" placeholder="0"></label>
+      <label class="toggle"><input type="checkbox" id="fClosed"> Closed</label>
       <span class="muted" id="pruneLine"></span>
       <span class="muted" id="count"></span>
       <span class="grow"></span>
-      <span class="muted" id="reflog" style="font:12px ui-monospace,monospace"></span>
+      <span class="cap mono" id="reflog"></span>
+      <button class="btn" id="refresh">Refresh jobs</button>
     </div>
     <table>
       <thead><tr>
@@ -161,6 +266,50 @@ tr.jobrow:hover{background:var(--panel2)}
       <tbody id="rows"></tbody>
     </table>
     <div class="muted" id="empty" hidden style="padding:30px;text-align:center">No jobs yet. Hit "Refresh jobs".</div>
+  </section>
+  <section data-panel="search" hidden>
+    <div class="card">
+      <div class="card-h"><h3>Find jobs on sites Penates can't scan</h3><span class="hint">Google searches you open in a new tab. Good links go in "Add job links" below. Saved to config.json.</span></div>
+      <div class="sgrid">
+        <div class="fld"><span class="lbl">Roles</span>
+          <div class="chips chipbox" data-for="gsRoles"></div><textarea id="gsRoles" hidden></textarea></div>
+        <div class="fld"><span class="lbl">Exclude</span>
+          <div class="chips chipbox" data-for="gsExclude"></div><textarea id="gsExclude" hidden></textarea></div>
+        <div class="fld"><span class="lbl">Look back</span>
+          <div class="row">
+            <div class="seg" id="gsDaysSeg"><button type="button" data-d="1">24h</button><button type="button" data-d="3">3d</button><button type="button" data-d="7">1w</button><button type="button" data-d="14">2w</button><button type="button" data-d="30">1m</button><button type="button" data-d="custom">Custom</button></div>
+            <select id="gsDays" hidden><option value="1">24 hours</option><option value="3">3 days</option><option value="7">1 week</option><option value="14">2 weeks</option><option value="30">1 month</option><option value="custom">Custom...</option></select>
+            <input id="gsDaysN" type="number" min="1" max="365" style="width:80px;min-width:0" hidden placeholder="days">
+            <span class="cap mono" id="gsAfter"></span>
+          </div></div>
+        <div class="fld"><span class="lbl">Filters</span>
+          <div class="row"><label class="toggle"><input type="checkbox" id="gsRemote"> Remote</label></div></div>
+        <div class="fld wide"><span class="lbl">Query packs</span>
+          <div class="packs">
+            <label class="toggle"><input type="checkbox" id="gsVwith"> Senior pack</label>
+            <label class="toggle"><input type="checkbox" id="gsVwithout"> Non-senior pack</label>
+            <label class="toggle"><input type="checkbox" id="gsVclear"> Clearance pack</label>
+          </div>
+          <div class="hint">Each pack adds its own set of searches. Senior and non-senior together is fine.</div></div>
+      </div>
+      <div class="row" style="margin-top:14px"><button class="btn" id="gsSave">Save</button><button class="btn quiet" id="gsReset">Reset to defaults</button><span class="cap" id="gsMsg"></span></div>
+      <details class="adv"><summary>Advanced: sites, extra terms, clearance terms</summary>
+        <div class="sgrid">
+          <div class="fld"><span class="lbl">Site groups <span class="cap">one search per line, sites comma-separated</span></span><textarea id="gsSites" rows="3"></textarea></div>
+          <div class="fld"><span class="lbl">Clearance terms <span class="cap">Clearance pack only, one per line</span></span><textarea id="gsClear" rows="3"></textarea></div>
+          <div class="fld wide"><span class="lbl">Extra must-include <span class="cap">space-separated, quotes allowed; the Remote toggle adds "remote" here</span></span><input id="gsInclude" type="text"></div>
+        </div>
+      </details>
+      <div class="subh">Searches</div>
+      <div id="gsOut"></div>
+    </div>
+    <div class="card">
+      <div class="card-h"><h3>LinkedIn</h3><span class="hint">Refresh already pulls LinkedIn (JobSpy). These open LinkedIn's own search with the same roles and look-back, remote, United States.</span></div>
+      <div id="gsLi"></div></div>
+    <div class="card">
+      <div class="card-h"><h3>Add job links</h3><span class="hint">Paste job URLs from any search, one per line. They land in Jobs, and a Greenhouse, Lever, Ashby, Workday, SmartRecruiters or Workable board gets added for future scans.</span></div>
+      <textarea id="gsUrls" rows="4" placeholder="https://..." style="min-height:90px"></textarea>
+      <div class="row" style="margin-top:8px"><button class="btn" id="gsAdd">Add to Penates</button><span class="cap" id="gsAddMsg"></span></div></div>
   </section>
   <section data-panel="logs" hidden>
     <div class="card"><h3>Job search</h3><div id="lg-pipe"></div></div>
@@ -324,11 +473,12 @@ Rules: one object per distinct question. Put ONLY the final answer text in "answ
     <button class="b-apply" id="dr-apply">Apply + autofill</button>
     <a class="b-open" id="dr-open" target="_blank" rel="noopener">Open posting</a>
     <button class="b-mark" id="dr-mark">Mark applied</button>
+    <button class="b-hide" id="dr-hide" title="Hide this employer from the list (reversible)">Hide</button>
   </footer>
 </aside>
 <script>
 const $=id=>document.getElementById(id), esc=s=>(s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-let JOBS=[], sortKey="discovered_at", sortDir=-1, STORIES=[];
+let JOBS=[], sortKey="discovered_at", sortDir=-1, STORIES=[], EXPANDED=new Set();
 
 // theme
 function applyFavicon(){
@@ -347,21 +497,46 @@ function applyFavicon(){
   link.href='data:image/svg+xml,'+encodeURIComponent(svg);
 }
 function applyTheme(t){ document.documentElement.setAttribute('data-theme',t); try{localStorage.setItem('penates-theme',t);}catch(_){} applyFavicon(); }
-(function(){ let t='slate'; try{t=localStorage.getItem('penates-theme')||'slate';}catch(_){}
+(function(){ let t='stone'; try{t=localStorage.getItem('penates-theme')||'stone';}catch(_){}
+  if(!['stone','slate','nord','light'].includes(t)) t='stone';
   document.documentElement.setAttribute('data-theme',t); applyFavicon(); })();
 $('theme').value=document.documentElement.getAttribute('data-theme');
 $('theme').onchange=e=>applyTheme(e.target.value);
 
-// tabs
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
-  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
-  document.querySelectorAll('[data-panel]').forEach(p=>p.hidden=p.dataset.panel!==b.dataset.tab);
-  if(b.dataset.tab==='logs') loadLogs();
-  if(b.dataset.tab==='settings'){ loadCfg(); loadOllama(); loadRetention(); }
-  if(b.dataset.tab==='resume') loadResumeJobs();
-  if(b.dataset.tab==='profile') loadProfile();
-  if(b.dataset.tab==='stories'){ loadStories(); loadImports(); loadImportsList(); }
-});
+// tabs: top nav (Jobs / Search / Knowledge) + Knowledge sub-tabs + gear menu (Settings / Logs)
+const KNOW=['profile','stories','resume'];
+let LAST_KNOW='profile';
+function showTab(tab){
+  document.querySelectorAll('[data-panel]').forEach(p=>p.hidden=p.dataset.panel!==tab);
+  const top=KNOW.includes(tab)?'knowledge':tab;
+  document.querySelectorAll('#topnav button').forEach(b=>b.classList.toggle('on',b.dataset.top===top));
+  $('knowNav').hidden=top!=='knowledge';
+  if(top==='knowledge'){ LAST_KNOW=tab; document.querySelectorAll('#knowNav button').forEach(b=>b.classList.toggle('on',b.dataset.tab===tab)); }
+  $('gearBtn').classList.toggle('on',tab==='settings'||tab==='logs');
+  if(tab==='logs') loadLogs();
+  if(tab==='search') loadSearch();
+  if(tab==='settings'){ loadCfg(); loadOllama(); loadRetention(); }
+  if(tab==='resume') loadResumeJobs();
+  if(tab==='profile') loadProfile();
+  if(tab==='stories'){ loadStories(); loadImports(); loadImportsList(); }
+  window.scrollTo(0,0);
+}
+document.querySelectorAll('#topnav button').forEach(b=>b.onclick=()=>showTab(b.dataset.top==='knowledge'?LAST_KNOW:b.dataset.top));
+document.querySelectorAll('#knowNav button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+$('gearBtn').onclick=e=>{ e.stopPropagation(); $('gearMenu').hidden=!$('gearMenu').hidden; };
+document.querySelectorAll('#gearMenu [data-go]').forEach(b=>b.onclick=()=>{ $('gearMenu').hidden=true; showTab(b.dataset.go); });
+document.addEventListener('click',e=>{ if(!e.target.closest('.gearwrap')) $('gearMenu').hidden=true; });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') $('gearMenu').hidden=true; });
+
+// local-identity chip: engine up/down + model. Never hidden.
+async function loadLocalChip(){
+  const o=await fetch('/api/ollama').then(r=>r.json()).catch(()=>({reachable:false,server:false}));
+  const c=$('localChip');
+  if(o.server===false){ c.className='localchip down'; c.innerHTML='<span class="dot e"></span><b>SERVER DOWN</b><span>start Penates</span>'; return; }
+  if(!o.reachable){ c.className='localchip down'; c.innerHTML='<span class="dot e"></span><b>ENGINE DOWN</b><span>Ollama not answering</span>'; return; }
+  c.className='localchip'; c.innerHTML='<span class="dot l"></span><b>LOCAL</b><span>'+esc(o.model||'model')+'</span><span class="sep">\u00b7</span><span>profile on disk</span>';
+}
+loadLocalChip(); setInterval(loadLocalChip,60000);
 
 function ago(iso){ if(!iso) return 'never';
   const d=new Date(iso.replace(' ','T')), s=(Date.now()-d.getTime())/1000;
@@ -397,29 +572,61 @@ async function loadJobs(){
   const closedOn=$('fClosed')&&$('fClosed').checked;
   $('stats').innerHTML=[[closedOn?'Closed (review)':'Apply-able jobs',JOBS.length],['Avg score, top 10',avg],
     ['Applied this week',st.applied_this_week??0],['Applied this month',st.applied_this_month??0],['Total applied',st.applied_total??0]]
-    .map(s=>`<div class="stat"><div class="n">${s[1]}</div><div class="l">${s[0]}</div></div>`).join('');
+    .map(s=>`<span class="stat"><b>${s[1]}</b>${s[0].toLowerCase()}</span>`).join('');
   const lp=st.last_prune;
   $('pruneLine').textContent = lp && lp.at ? ((lp.closed||0)+' closed this refresh (hidden)') : '';
   $('lastAdded').textContent='Jobs added: '+ago(st.last_added); $('lastAdded').title=st.last_added||'';
   render();
 }
-function render(){
-  const q=($('q').value||'').toLowerCase();
-  let rows=JOBS.filter(j=>!q||(j.company+' '+j.role+' '+j.ats).toLowerCase().includes(q));
-  rows.sort((a,b)=>{
-    if(sortKey==='score'){ return ((+a.score||0)-(+b.score||0))*sortDir; }
-    if(sortKey==='discovered_at'){
-      const A=a.discovered_at||a.posted||'', B=b.discovered_at||b.posted||'';
-      if(A===B){ return (+b.score||0)-(+a.score||0); }      // score tiebreak, desc
-      return (A<B?-1:1)*sortDir;                            // missing sorts last on desc
-    }
-    const A=a[sortKey]||'',B=b[sortKey]||''; return (A<B?-1:A>B?1:0)*sortDir;
-  });
-  $('count').textContent=rows.length+' shown'; $('empty').hidden=rows.length>0;
-  $('rows').innerHTML=rows.map(j=>{const ap=j.status==='applied';
-    return `<tr class="jobrow ${ap?'applied':''}" data-url="${esc(j.apply)}">
-      <td class="sc ${scCls(j.score||0)}">${j.score||0}</td>
-      <td class="co">${j.company?esc(j.company):'<span class="muted">(unknown)</span>'}</td>
+function scoreNum(j){
+  if(!j || j.score===null || j.score===undefined || j.score==='') return null;
+  const n=Number(j.score);
+  return Number.isFinite(n) ? n : null;
+}
+function scoreTieDesc(a,b){
+  const as=scoreNum(a), bs=scoreNum(b);
+  if(as===null && bs===null) return 0;
+  if(as===null) return 1;   // unscored sorts below every number
+  if(bs===null) return -1;
+  return bs-as;
+}
+function cmpJobs(a,b){
+  if(sortKey==='score'){
+    const as=scoreNum(a), bs=scoreNum(b);
+    if(as===null && bs===null) return 0;
+    if(as===null) return 1;
+    if(bs===null) return -1;
+    return (as-bs)*sortDir;
+  }
+  if(sortKey==='discovered_at'){
+    const A=a.discovered_at||a.posted||'', B=b.discovered_at||b.posted||'';
+    if(A===B) return scoreTieDesc(a,b);
+    return (A<B?-1:1)*sortDir;                            // missing sorts last on desc
+  }
+  const A=a[sortKey]||'', B=b[sortKey]||'';
+  return (A<B?-1:A>B?1:0)*sortDir;
+}
+function pickHead(members){
+  let head=members[0], best=scoreNum(head);
+  for(let i=1;i<members.length;i++){
+    const s=scoreNum(members[i]);
+    if(s===null) continue;
+    if(best===null || s>best){ head=members[i]; best=s; }
+  }
+  return head;
+}
+function jobRowHtml(j, opt){
+  const ap=j.status==='applied';
+  const n=scoreNum(j);
+  const sc=n===null?'<td class="sc"></td>':`<td class="sc">${n>=65?'<span class="dot m" title="match"></span>':''}${n}</td>`;
+  let co=j.company?esc(j.company):'<span class="muted">(unknown)</span>';
+  if(opt.head && opt.extra>0){
+    co+=` <button class="grp exp" data-key="${esc(opt.key)}" title="${opt.open?'Collapse':'Show'} ${opt.extra} more role${opt.extra>1?'s':''}">${opt.open?'\u2212 less':'+'+opt.extra+' more'}</button>`;
+  }
+  const hideBtn=(opt.head&&opt.key)?`<button class="icon hide-emp" data-key="${esc(opt.key)}" title="Hide this employer" aria-label="Hide this employer"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="2"/><path d="M2.5 13.5 13.5 2.5"/></svg></button>`:'<span class="icon" aria-hidden="true" style="visibility:hidden"></span>';
+  return `<tr class="jobrow ${ap?'applied':''} ${opt.head?'':'sib'}" data-url="${esc(j.apply)}" data-key="${esc(opt.key)}">
+      ${sc}
+      <td class="co">${co}</td>
       <td><a href="${esc(j.apply)}" target="_blank" rel="noopener">${esc(j.role)}</a></td>
       <td class="muted" style="white-space:nowrap;font-size:12px">${esc(postedFmt(j.discovered_at))}</td>
       <td class="muted" style="white-space:nowrap;font-size:12px">${esc(postedFmt(j.posted))}</td>
@@ -428,14 +635,60 @@ function render(){
       <td class="ats">${esc(j.ats||'')}${j.closed_reason?' <span class="muted">'+esc(j.closed_reason)+'</span>':''}</td>
       <td class="act">${ap?'<span class="muted">applied</span>':
         `<button class="mini apply" data-url="${esc(j.apply)}">Apply</button>
-         <button class="mini mk" data-url="${esc(j.apply)}" data-co="${esc(j.company)}" data-role="${esc(j.role)}">Mark applied</button>`}</td></tr>`;
-  }).join('');
+         <button class="mini mk" data-url="${esc(j.apply)}" data-co="${esc(j.company)}" data-role="${esc(j.role)}">Mark applied</button>`}${hideBtn}</td></tr>`;
+}
+function render(){
+  const q=($('q').value||'').toLowerCase();
+  const matched=JOBS.filter(j=>!q||(j.company+' '+j.role+' '+j.ats+' '+(j.employer_key||'')).toLowerCase().includes(q));
+  const groups=new Map();
+  matched.forEach(j=>{
+    const k=j.employer_key||((j.company||'').toLowerCase())||j.apply||'';
+    if(!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(j);
+  });
+  const list=[...groups.entries()].map(([k,members])=>({k, members, head:pickHead(members)}));
+  list.sort((a,b)=>cmpJobs(a.head, b.head));
+  const roles=list.reduce((n,g)=>n+g.members.length,0);
+  $('count').textContent=list.length+' employers \u00b7 '+roles+' roles';
+  $('empty').hidden=list.length>0;
+  const html=[];
+  list.forEach(g=>{
+    const open=!!q || EXPANDED.has(g.k);
+    const sibs=g.members.filter(j=>j!==g.head).sort(cmpJobs);
+    html.push(jobRowHtml(g.head, {head:true, key:g.k, extra:sibs.length, open}));
+    if(open) sibs.forEach(j=>html.push(jobRowHtml(j, {head:false, key:g.k})));
+  });
+  $('rows').innerHTML=html.join('');
   document.querySelectorAll('.mini.apply').forEach(b=>b.onclick=e=>{e.stopPropagation();doApply(b.dataset.url);});
-  document.querySelectorAll('.mini.mk').forEach(b=>b.onclick=e=>{e.stopPropagation();mark(e.currentTarget);});
+  document.querySelectorAll('.mini.mk').forEach(b=>{
+    if(b.classList.contains('hide-emp')) return;
+    b.onclick=e=>{e.stopPropagation();mark(e.currentTarget);};
+  });
+  document.querySelectorAll('.exp').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    const k=b.dataset.key;
+    if(EXPANDED.has(k)) EXPANDED.delete(k); else EXPANDED.add(k);
+    render();
+  });
+  document.querySelectorAll('.hide-emp').forEach(b=>b.onclick=e=>{
+    e.stopPropagation();
+    hideEmployer(b.dataset.key);
+  });
   document.querySelectorAll('tr.jobrow').forEach(tr=>tr.onclick=e=>{
     if(e.target.closest('button')||e.target.closest('a'))return;
-    const j=JOBS.find(x=>x.apply===tr.dataset.url); if(j)openDrawer(j);
+    const j=JOBS.find(x=>x.apply===tr.dataset.url && (x.employer_key||'')===tr.dataset.key)
+      || JOBS.find(x=>x.apply===tr.dataset.url);
+    if(j) openDrawer(j);
   });
+}
+async function hideEmployer(key){
+  if(!key) return;
+  if(!confirm('Hide this employer ('+key+')? Its roles leave the list. Application status stays as it is.')) return;
+  const r=await fetch('/api/employers/hide',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({key:key, hidden:true})}).then(x=>x.json()).catch(()=>({ok:false}));
+  if(!r.ok) return;
+  closeDrawer();
+  loadJobs();
 }
 let DRJOB=null;
 function openDrawer(j){
@@ -443,7 +696,8 @@ function openDrawer(j){
   $('dr-role').textContent=j.role||'';
   $('dr-co').textContent=j.company||'';
   const chips=[];
-  if(j.score)chips.push(['Score',j.score]);
+  const scN=scoreNum(j);
+  if(scN!==null)chips.push(['Score',scN]);
   if(j.posted)chips.push(['Posted',postedFmt(j.posted)]);
   if(j.location)chips.push(['Location',j.location]);
   if(j.workplace&&j.workplace!==j.location)chips.push(['',j.workplace]);
@@ -465,6 +719,7 @@ function closeDrawer(){ $('drawer').classList.remove('open'); $('drov').classLis
 $('dr-x').onclick=closeDrawer; $('drov').onclick=closeDrawer;
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer();});
 $('dr-apply').onclick=()=>{ if(DRJOB)doApply(DRJOB.apply); };
+$('dr-hide').onclick=()=>{ if(DRJOB && DRJOB.employer_key) hideEmployer(DRJOB.employer_key); };
 $('dr-mark').onclick=async()=>{ if(!DRJOB)return;
   await fetch('/applied',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({url:DRJOB.apply,company:DRJOB.company,role:DRJOB.role})}).catch(()=>{});
@@ -534,7 +789,7 @@ $('olTest').onclick=async()=>{ $('olMsg').textContent='testing '+$('olModel').va
   $('olMsg').textContent=r.ok?('OK: '+r.model+' replied "'+r.reply+'" in '+(r.ms/1000).toFixed(1)+'s'):('failed: '+(r.error||'')); };
 async function loadCfg(){ const c=await fetch('/config').then(r=>r.json()).catch(()=>({}));
   $('terms').value=(c.terms||[]).join('\n'); const src=c.sources||{};
-  const SRC_LABELS={ats:'ATS boards (Greenhouse/Lever/Ashby)',discover:'JobSpy (LinkedIn/Indeed/ZipRecruiter/Google)',hiringcafe:'hiring.cafe',builtin:'Built In',remotive:'Remotive',remoteok:'RemoteOK'};
+  const SRC_LABELS={ats:'ATS boards (Greenhouse/Lever/Ashby/Workday/SmartRecruiters/Workable)',discover:'JobSpy (LinkedIn/Indeed/ZipRecruiter/Google)',hiringcafe:'hiring.cafe',builtin:'Built In',remotive:'Remotive',remoteok:'RemoteOK'};
   $('srcs').innerHTML=Object.keys(SRC_LABELS).map(k=>`<label class="src"><input type="checkbox" data-src="${k}" ${src[k]!==false?'checked':''}> ${SRC_LABELS[k]}</label>`).join('');
 }
 $('saveCfg').onclick=async()=>{ const terms=$('terms').value.split('\n').map(t=>t.trim()).filter(Boolean);
@@ -886,6 +1141,83 @@ $('st-save').onclick=saveStory;$('st-clear').onclick=clearStory;
 $('stPaneMine').onclick=()=>showStoryPane('mine');
 $('stPaneImp').onclick=()=>showStoryPane('imp');
 loadJobs();
+// ---- Search tab: Google site: query editor + LinkedIn links + paste-to-add ----
+const GS_DEFAULT={sites:["recruiting.paylocity.com, recruit.hirebridge.com","boards.bamboohr.com"],
+  roles:["devops","system engineer","SRE","systems administrator"],include:'"remote"',
+  exclude:["principal"],clearance:["secret clearance","security clearance","active clearance","ability to obtain","clearable"],
+  days:7,variants:{with:true,without:true,clearance:true}};
+let GS=null;
+const gsLines=v=>v.split('\n').map(s=>s.trim()).filter(Boolean);
+const gsQ=s=>/^".*"$/.test(s)?s:(/\s/.test(s)?'"'+s+'"':s);
+function gsDays(){ const v=$('gsDays').value; return v==='custom'?Math.max(1,parseInt($('gsDaysN').value||'7')):parseInt(v); }
+function gsRead(){ return {sites:gsLines($('gsSites').value),roles:gsLines($('gsRoles').value),include:$('gsInclude').value.trim(),
+  exclude:gsLines($('gsExclude').value),clearance:gsLines($('gsClear').value),days:gsDays(),
+  variants:{with:$('gsVwith').checked,without:$('gsVwithout').checked,clearance:$('gsVclear').checked}}; }
+function gsFill(c){ $('gsSites').value=c.sites.join('\n'); $('gsRoles').value=c.roles.join('\n'); $('gsInclude').value=c.include||'';
+  $('gsExclude').value=(c.exclude||[]).join('\n'); $('gsClear').value=(c.clearance||[]).join('\n');
+  const preset=['1','3','7','14','30'].includes(String(c.days)); $('gsDays').value=preset?String(c.days):'custom';
+  $('gsDaysN').hidden=preset; $('gsDaysN').value=c.days; const v=c.variants||{};
+  $('gsVwith').checked=v.with!==false; $('gsVwithout').checked=v.without!==false; $('gsVclear').checked=v.clearance!==false;
+  chipAll(); gsSegSync(); $('gsRemote').checked=/"remote"/i.test($('gsInclude').value); }
+// chip inputs backed by the hidden one-per-line textareas (same data the builder always read)
+function chipRender(box){
+  const ta=$(box.dataset.for), items=gsLines(ta.value);
+  box.innerHTML=items.map((t,i)=>`<span class="chip">${esc(t)}<button type="button" data-i="${i}" title="Remove" aria-label="Remove ${esc(t)}">\u00d7</button></span>`).join('')
+    +`<input type="text" placeholder="${box.dataset.for==='gsRoles'?'Add a role, Enter':'Add a word or phrase, Enter'}">`;
+  const inp=box.querySelector('input');
+  const commit=()=>{ const v=inp.value.replace(/,$/,'').trim(); if(!v) return; ta.value=[...items,v].join('\n'); ta.dispatchEvent(new Event('input')); chipRender(box); box.querySelector('input').focus(); };
+  inp.onkeydown=e=>{ if(e.key==='Enter'||e.key===','){ e.preventDefault(); commit(); }
+    else if(e.key==='Backspace'&&!inp.value&&items.length){ ta.value=items.slice(0,-1).join('\n'); ta.dispatchEvent(new Event('input')); chipRender(box); box.querySelector('input').focus(); } };
+  inp.onblur=commit;
+  box.querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>{ const k=+b.dataset.i; ta.value=items.filter((_,x)=>x!==k).join('\n'); ta.dispatchEvent(new Event('input')); chipRender(box); });
+}
+function chipAll(){ document.querySelectorAll('.chipbox[data-for]').forEach(chipRender); }
+function gsSegSync(){ const v=$('gsDays').value; document.querySelectorAll('#gsDaysSeg button').forEach(b=>b.classList.toggle('on',b.dataset.d===v)); $('gsDaysN').hidden=v!=='custom'; }
+function gsAfter(days){ const d=new Date(); d.setDate(d.getDate()-days); return d.toISOString().split('T')[0]; }
+function gsQuery(sites,c,variant,after){
+  const siteStr=sites.split(',').map(s=>s.trim()).filter(Boolean).map(s=>'site:'+s).join(' OR ');
+  const roles=c.roles.length?'('+c.roles.map(r=>'"'+r.replace(/"/g,'')+'"').join(' OR ')+')':'';
+  const clear=variant==='clearance'&&c.clearance.length?' ('+c.clearance.map(r=>'"'+r.replace(/"/g,'')+'"').join(' OR ')+')':'';
+  const excl=c.exclude.map(e=>' -'+gsQ(e)).join('')+(variant==='without'?' -"senior"':'');
+  return ('('+siteStr+') '+roles+clear+(c.include?' '+c.include:'')+' after:'+after+excl).replace(/\s+/g,' ').trim(); }
+function gsRow(label, q, href){
+  return `<div class="qrow"><span class="lbl" title="${esc(label)}">${esc(label)}</span><span class="q" title="${esc(q)}">${esc(q)}</span>`
+    +`<span class="row"><button type="button" class="btn ghost sm gs-copy" data-q="${esc(q)}">Copy</button><a class="btn ghost sm" target="_blank" rel="noopener" href="${href}">Open</a></span></div>`;
+}
+function gsRender(){ const c=gsRead(), after=gsAfter(c.days); $('gsAfter').textContent='after '+after;
+  const V=[['with','Senior'],['without','Non-senior'],['clearance','Clearance']].filter(([k])=>c.variants[k]);
+  let h='';
+  for(const [k,lbl] of V){
+    c.sites.forEach(s=>{ const q=gsQuery(s,c,k,after);
+      const site=(s.split(',')[0]||'').trim().replace(/^(www|recruiting|recruit|boards|jobs)\./,'').split('.')[0];
+      h+=gsRow(lbl+' \u00b7 '+site+(s.includes(',')?' +'+(s.split(',').length-1):''), q, 'https://www.google.com/search?q='+encodeURIComponent(q)); }); }
+  $('gsOut').innerHTML=h||'<div class="hint">Turn on at least one pack and add a site group under Advanced.</div>';
+  const kw=c.roles.map(r=>'"'+r.replace(/"/g,'')+'"').join(' OR ');
+  const li=(extra,lbl)=>{ const q='('+kw+')'+extra; return gsRow(lbl, q+' \u00b7 remote \u00b7 United States \u00b7 last '+c.days+'d',
+    'https://www.linkedin.com/jobs/search/?keywords='+encodeURIComponent(q)+'&f_WT=2&geoId=103644278&f_TPR=r'+(c.days*86400)); };
+  $('gsLi').innerHTML=(c.variants.with?li('','Senior'):'')+(c.variants.without?li(' NOT senior','Non-senior'):'')+(c.variants.clearance?li(' AND clearance','Clearance'):'')
+    ||'<div class="hint">Turn on a pack above.</div>';
+  document.querySelectorAll('.gs-copy').forEach(b=>b.onclick=async()=>{ try{ await navigator.clipboard.writeText(b.dataset.q); b.textContent='Copied'; setTimeout(()=>b.textContent='Copy',1200);}catch(_){ b.textContent='Copy failed'; } });
+}
+async function loadSearch(){ if(!GS){ const c=await fetch('/config').then(r=>r.json()).catch(()=>({}));
+    GS=Object.assign({},GS_DEFAULT,c.google_search||{}); gsFill(GS);
+    ['gsSites','gsRoles','gsInclude','gsExclude','gsClear','gsDaysN'].forEach(id=>$(id).addEventListener('input',gsRender));
+    ['gsVwith','gsVwithout','gsVclear'].forEach(id=>$(id).addEventListener('change',gsRender));
+    $('gsDays').addEventListener('change',()=>{ gsSegSync(); gsRender(); });
+    document.querySelectorAll('#gsDaysSeg button').forEach(b=>b.onclick=()=>{ $('gsDays').value=b.dataset.d; $('gsDays').dispatchEvent(new Event('change')); if(b.dataset.d==='custom') $('gsDaysN').focus(); });
+    $('gsRemote').addEventListener('change',()=>{ let v=$('gsInclude').value.replace(/\s*"remote"\s*/ig,' ').trim();
+      if($('gsRemote').checked) v=('"remote" '+v).trim(); $('gsInclude').value=v; gsRender(); });
+    $('gsInclude').addEventListener('input',()=>{ $('gsRemote').checked=/"remote"/i.test($('gsInclude').value); }); }
+  gsRender(); }
+$('gsSave').onclick=async()=>{ document.querySelectorAll('.chipbox input').forEach(i=>i.blur()); GS=gsRead();
+  const r=await fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({google_search:GS})}).then(r=>r.json()).catch(()=>({}));
+  $('gsMsg').textContent=r.ok?'saved':'save failed'; setTimeout(()=>$('gsMsg').textContent='',2500); };
+$('gsReset').onclick=()=>{ gsFill(GS_DEFAULT); gsRender(); $('gsMsg').textContent='defaults loaded (not saved yet)'; };
+$('gsAdd').onclick=async()=>{ const urls=gsLines($('gsUrls').value).filter(u=>/^https?:\/\//i.test(u));
+  if(!urls.length){ $('gsAddMsg').textContent='no http(s) links found'; return; }
+  const r=await fetch('/api/jobs/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls})}).then(r=>r.json()).catch(e=>({ok:false,error:String(e)}));
+  $('gsAddMsg').textContent=r.ok?(r.added+' added, '+(urls.length-r.added)+' already in Penates'+(r.boards?(' . '+r.boards+' new company board(s) queued for the next scan'):'')):('failed: '+(r.error||''));
+  if(r.ok) $('gsUrls').value=''; };
 </script>
 </body>
 </html>

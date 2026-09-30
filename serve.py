@@ -37,9 +37,17 @@ Routes:
   A required question that asks the candidate to provide references is filled
   from profile.references. Optional, willingness, and referred-by stay as before.
   /ranked  (GET)   -> scored job list. Optional filters (AND, post-sort):
-                      remote_only=0|1, us_only=0|1, salary_min=<int annual USD>.
-                      Structured fields first; text fallback only when empty.
-                      Missing/unknown salary or location is KEPT (not hidden).
+                      remote_only=0|1, us_only=0|1, salary_min=<int annual USD>,
+                      show_hidden=0|1.
+                      Every row includes employer_key. Keys listed in
+                      config.json employers_hidden are dropped unless
+                      show_hidden=1. score is null when the row is unscored.
+                      remote_only drops a city/state location that has no remote
+                      token in location, workplace, or title (role). Country-only
+                      values (United States, USA, Multiple Locations) stay.
+                      Missing salary is KEPT.
+  /api/employers/hide (POST) -> JSON {key, hidden:bool}. Writes
+                      employers_hidden. Reversible. Does not change job status.
 
 Leave this window running in the background.
 """
@@ -338,7 +346,11 @@ def _shape(r):
 def _match_field_key(label, fields):
     """Re-derive the fields.yaml value path for a label (serve.py lane; apply.match_field
     only returns resolved text). Same first-match-wins order as match_field."""
-    lab = (label or "").lower()
+    try:
+        import apply as _ap
+        lab = _ap._clean_label(label)
+    except Exception:
+        lab = (label or "").lower()
     for rule in (fields or {}).get("fields") or []:
         try:
             if re.search(rule["pattern"], lab, re.I):
@@ -393,6 +405,14 @@ def _pick_yes_no_option(yn, options):
             return o
         if (not want_yes) and (no in ("no", "n", "false") or (no.startswith("no") and len(no) <= 12)):
             return o
+    # Qualified variants ("Yes, Currently Active" / "Yes, Inactive"): a plain Yes means the
+    # current/active one; a plain No takes the bare-No-led option. Only when exactly one fits.
+    pre = "yes" if want_yes else "no"
+    led = [o for o in options if re.match(r"^" + pre + r"\b", _norm_option(o))]
+    if want_yes:
+        led = [o for o in led if not re.search(r"inactive|expired|lapsed|previous|former|not current|in process|pending", o, re.I)]
+    if len(led) == 1:
+        return led[0]
     return None
 
 
@@ -499,7 +519,7 @@ _CO_STOP = {"the", "and", "of", "a", "an"}
 
 
 def _company_tokens(name):
-    """Case/punct/Inc/LLC-normalized tokens. Slashes become spaces (alias split)."""
+    """Case/punct/Inc/LLC-normalized tokens. Slashes become spaces (LiveNation split)."""
     s = (name or "").lower().replace("&", " and ")
     s = re.sub(r"[^\w\s]", " ", s)
     s = _LEGAL_SUFFIX.sub(" ", s)
@@ -522,7 +542,7 @@ def _token_slice_match(left, right):
 def _companies_match(target, employer):
     """Both ways: 'Acme' hits 'Acme/Globex'; a leading phrase hits the legal name.
 
-    Slash/pipe components are compared on their own so either alias matches.
+    Slash/pipe components are compared on their own so LiveNation matches the stored alias.
     A one-word name matches only the first token of the other (not a trailing 'Solutions').
     """
     t_parts = [p for p in re.split(r"[/|]", target or "") if p.strip()]
@@ -857,7 +877,65 @@ def _fit_value_to_options(val, opts):
     yn = _yes_no_from_text(s)
     if yn:
         return _pick_yes_no_option(yn, opts)
-    return _fit_degree_word(s, opts)
+    money = _fit_money_bracket(s, opts)
+    if money:
+        return money
+    deg = _fit_degree_word(s, opts)
+    if deg:
+        return deg
+    return _fit_contained(s, opts)
+
+
+_MONEY_RE = re.compile(r"\$?\s*(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*(k)?", re.I)
+
+
+def _money_vals(label):
+    out = []
+    for m in _MONEY_RE.finditer(label or ""):
+        v = float(m.group(1).replace(",", ""))
+        if m.group(2):
+            v *= 1000
+        if v >= 1000:
+            out.append(v)
+    return out
+
+
+def _fit_money_bracket(val, opts):
+    """Numeric salary -> the option whose $ range contains it ('$120,000 - $139,999', '$180,000+',
+    'Less than $60,000', '120k-140k'). None when the options are not money brackets."""
+    try:
+        v = float(str(val).replace(",", "").replace("$", "").strip())
+    except ValueError:
+        return None
+    if v < 1000:
+        return None
+    best = None
+    for o in opts:
+        nums = _money_vals(o)
+        if not nums:
+            continue
+        lo_s = o.lower()
+        if len(nums) >= 2:
+            lo, hi = min(nums[:2]), max(nums[:2])
+        elif re.search(r"\+|above|over|more than|or more|and up|greater", lo_s):
+            lo, hi = nums[0], float("inf")
+        elif re.search(r"less than|under|below|up to", lo_s):
+            lo, hi = 0.0, nums[0]
+        else:
+            continue
+        if lo <= v <= hi:
+            best = o
+            break
+    return best
+
+
+def _fit_contained(val, opts):
+    """'Active Secret' -> 'Secret' (not 'Top Secret'): the longest option whose words all appear,
+    in order, as a whole-word run inside the value. Never used for yes/no."""
+    w = lambda x: " " + re.sub(r"[^a-z0-9]+", " ", (x or "").lower()).strip() + " "
+    nv = w(val)
+    hits = [o for o in opts if len(w(o).strip()) >= 3 and w(o) in nv]
+    return max(hits, key=lambda o: len(w(o))) if hits else None
 
 
 def _parse_years_token(val):
@@ -1082,13 +1160,16 @@ def _fit_degree_word(val, opts):
                 break
     if not token:
         return None
+    hits = []
     for o in opts or []:
         ol = (o or "").lower().replace("'", "").replace("\u2019", "")
-        if token == "associate" and "associate" in ol:
-            return o
-        if token != "associate" and token in ol:
-            return o
-    return None
+        if (token == "associate" and "associate" in ol) or (token != "associate" and token in ol):
+            hits.append(o)
+    if not hits:
+        return None
+    # A real degree beats "... or equivalent" / "... in progress": "Associates" over "Associates or equivalent".
+    plain = [o for o in hits if not re.search(r"equivalent|in progress|pursuing|some|incomplete", o, re.I)]
+    return min(plain or hits, key=len)
 
 
 def _education_degree_text(prof):
@@ -1825,11 +1906,23 @@ def do_answer_batch(payload):
 
 # ---- refresh pipeline (dashboard "Refresh jobs" button) --------------------
 # ---- /ranked list filters (structured-first; post score-sort; AND) ----------
-_REMOTE_OK_RE = re.compile(
-    r"\bremote\b|work[\s-]?from[\s-]?home|\bwfh\b|distributed\s+team", re.I)
-_ONSITE_RE = re.compile(
-    r"\bonsite\b|\bon-site\b|\bin-office\b|\bhybrid\b|office[\s-]?based|"
-    r"must\s+relocate|relocation\s+required", re.I)
+# City/state remote-only gate. Same country tokens and remote tokens as
+# scan_ats._COUNTRY_ONLY / _remote_signal (title lives on role; title is
+# checked too when a row has one).
+_RANK_COUNTRY_ONLY = re.compile(
+    r"(?i)\b(united states( of america)?|usa|u\.s\.a?\.?|us|america|nationwide|"
+    r"multiple locations|\d+ locations?|anywhere)\b|[-,/()|.]")
+_RANK_REMOTE_RE = re.compile(
+    r"(?i)\b(remote|work from home|wfh|telecommut|virtual|distributed)\b")
+_EMPLOYER_PAREN_RE = re.compile(r"\s*\([^)]*\)\s*$")
+_EMPLOYER_SUFFIX_RE = re.compile(
+    r"(?:,\s*|\s+)\b(?:inc|llc|corp|co|ltd)\b\.?\s*$", re.I)
+_EMPLOYER_ALIAS = {
+    "gdit": "gdit",
+    "general dynamics it": "gdit",
+    "general dynamics information technology": "gdit",
+}
+_AGGREGATOR_KEYS = {"jobgether"}
 _US_POS_RE = re.compile(
     r"\bunited\s+states(?:\s+of\s+america)?\b|\busa\b|\bu\.?\s*s\.?\s*a\.?\b|"
     r"\bu\.s\.\b|\bremote\s*[-–—]?\s*us\b|\bremote\s*[-–—]?\s*americas\b|"
@@ -1844,7 +1937,14 @@ _NON_US_RE = re.compile(
     r"\bphilippines\b|\bmexico\b|\bbrazil\b|\blatam\b|\blatin\s+america\b|"
     r"\bhong\s+kong\b|\bargentina\b|\buruguay\b|\bchile\b|\bcolombia\b|"
     r"\bbuenos\s+aires\b|\bs[aã]o\s+paulo\b|\bmontevideo\b|\bsantiago\b|\bbogot[aá]\b|"
-    r"\bpakistan\b|\bwarsaw\b|\bpoland\b", re.I)
+    r"\bpakistan\b|\bwarsaw\b|\bpoland\b|"
+    r"\bfinland\b|\bhelsinki\b|\bsweden\b|\bstockholm\b|\bnorway\b|\boslo\b|\bdenmark\b|\bcopenhagen\b|"
+    r"\bspain\b|\bmadrid\b|\bbarcelona\b|\bportugal\b|\blisbon\b|\bitaly\b|\bmilan\b|\bswitzerland\b|\bzurich\b|"
+    r"\bczech\b|\bprague\b|\bromania\b|\bbucharest\b|\bukraine\b|\bkyiv\b|\bserbia\b|\bbelgrade\b|\bhungary\b|\bbudapest\b|"
+    r"\bbelgium\b|\bbrussels\b|\baustria\b|\bvienna\b|\bgreece\b|\bturkey\b|\bistanbul\b|\begypt\b|\bnigeria\b|\bkenya\b|"
+    r"\bsouth\s+africa\b|\bjapan\b|\btokyo\b|\bkorea\b|\bseoul\b|\bbusan\b|\bchina\b|\bshanghai\b|\bbeijing\b|\btaiwan\b|\btaipei\b|"
+    r"\bvietnam\b|\bthailand\b|\bmalaysia\b|\bindonesia\b|\bjakarta\b|\bnew\s+zealand\b|\bgurugram\b|\bgurgaon\b|"
+    r"\bhyderabad\b|\bpune\b|\bchennai\b|\bnoida\b|\bcosta\s+rica\b|\bperu\b|\bguadalajara\b|\buae\b|\bdubai\b", re.I)
 # HQ / timezone / client-list mentions are not the job's location.
 # "based in <place>" through end of line is the About/HQ form of
 # "company based in" / "headquartered in" (e.g. "Based in San Francisco").
@@ -1949,31 +2049,103 @@ def _without_us_boilerplate(text):
 def _text_has_non_us(text):
     return bool(text and _NON_US_RE.search(text))
 
-def _passes_remote_only(r):
-    """KEEP by default; DROP only when clearly not remote.
+def _ranked_remote_signal(r):
+    """True when the row is flagged remote or a remote token is in location, workplace, or title."""
+    blob = " ".join(str(r.get(k) or "") for k in ("location", "workplace", "role", "title"))
+    if r.get("remote") is True:
+        return True
+    return _RANK_REMOTE_RE.search(blob) is not None
 
-    Unknown remote/workplace (common in discovery) stay; only explicit
-    onsite/hybrid structured values or onsite-only text signals drop.
+def _passes_remote_only(r):
+    """Drop a city/state location with no remote token. Country-only stays.
+
+    Mirrors scan_ats._remote_signal / _COUNTRY_ONLY. A location that still
+    has text after country-only tokens are removed, and no remote token in
+    location, workplace, or title (role), is onsite or unknown and drops.
+    Empty location stays. 'United States', 'USA', and 'Multiple Locations' stay.
     """
-    remote = r.get("remote")
-    workplace = r.get("workplace")
-    if remote is False:
+    loc = str(r.get("location") or "").strip()
+    if loc and not _ranked_remote_signal(r) and _RANK_COUNTRY_ONLY.sub(" ", loc).strip():
         return False
-    wp = workplace.strip() if isinstance(workplace, str) else workplace
-    if wp not in (None, ""):
-        if str(wp).strip().lower() != "remote":
-            return False
-    # Structured empty: text fallback. DROP only onsite/hybrid with no remote signal.
-    # Include role — many rows carry '(remote)' only in the title.
-    structured_empty = remote is None and wp in (None, "")
-    if structured_empty:
-        blob = "%s\n%s\n%s" % (
-            r.get("role") or "", r.get("location") or "", r.get("desc") or "")
-        has_remote = bool(_REMOTE_OK_RE.search(blob))
-        has_onsite = bool(_ONSITE_RE.search(blob))
-        if has_onsite and not has_remote:
-            return False
     return True
+
+def _strip_employer_noise(name):
+    """Lowercase, drop a trailing parenthetical and Inc/LLC/Corp/Co/Ltd, collapse space."""
+    s = re.sub(r"\s+", " ", str(name or "").strip().lower())
+    prev = None
+    while s and s != prev:
+        prev = s
+        s = _EMPLOYER_PAREN_RE.sub("", s).strip()
+        s = _EMPLOYER_SUFFIX_RE.sub("", s).strip()
+        s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def _aggregator_hiring_name(role):
+    """Hiring company from 'Company | Role' or 'Role at Company'. Empty when neither fits."""
+    text = str(role or "").strip()
+    if not text:
+        return ""
+    if "|" in text:
+        left = text.split("|", 1)[0].strip()
+        if left:
+            return left
+    m = re.search(r"\bat\s+(.+)$", text, re.I)
+    if m:
+        return m.group(1).strip()
+    return ""
+
+def employer_key(company, role=""):
+    """Stable employer key. Does not rewrite the stored company.
+
+    Aggregator rows (Jobgether, or a company whose name says staffing) key
+    on the hiring company parsed from the role when that parse succeeds.
+    """
+    base = _strip_employer_noise(company)
+    if base in _AGGREGATOR_KEYS or re.search(r"\bstaffing\b", base):
+        hired = _strip_employer_noise(_aggregator_hiring_name(role))
+        if hired:
+            base = hired
+    return _EMPLOYER_ALIAS.get(base, base)
+
+def _employers_hidden():
+    """Lowercased keys from config.json employers_hidden. Missing key => empty."""
+    try:
+        import jobs_store
+        raw = jobs_store.load_config().get("employers_hidden") or []
+    except Exception:
+        return set()
+    if not isinstance(raw, list):
+        return set()
+    return {str(k).strip().lower() for k in raw if str(k).strip()}
+
+def hide_employer(key, hidden):
+    """Add or remove one employers_hidden key. Does not read or write job status.
+
+    Returns (keys, error). error is set when key is empty.
+    """
+    import jobs_store
+    norm = str(key or "").strip().lower()
+    if not norm:
+        return None, "key required"
+    cfg = jobs_store.load_config()
+    if not isinstance(cfg, dict):
+        cfg = {}
+    cur = cfg.get("employers_hidden")
+    if not isinstance(cur, list):
+        cur = []
+    keys = []
+    for item in cur:
+        s = str(item or "").strip().lower()
+        if s and s not in keys:
+            keys.append(s)
+    if hidden:
+        if norm not in keys:
+            keys.append(norm)
+    else:
+        keys = [k for k in keys if k != norm]
+    cfg["employers_hidden"] = keys
+    jobs_store.save_config(cfg)
+    return keys, None
 
 def _passes_us_only(r):
     """KEEP US / US-inclusive; KEEP unknowns; DROP explicit non-US-only.
@@ -2035,11 +2207,16 @@ def _passes_salary_min(r, minimum):
     return top >= minimum
 
 def _filter_ranked(rows, qs):
-    """Apply optional remote_only / us_only / salary_min after score-sort (AND)."""
+    """Apply optional remote_only / us_only / salary_min / employers_hidden (AND).
+
+    Hidden employer keys drop unless show_hidden=1. Job status is not changed.
+    """
     want_remote = _qs_flag(qs, "remote_only")
     want_us = _qs_flag(qs, "us_only")
+    show_hidden = _qs_flag(qs, "show_hidden")
     sal_min = _qs_int(qs, "salary_min")
-    if not want_remote and not want_us and sal_min is None:
+    hidden = set() if show_hidden else _employers_hidden()
+    if not want_remote and not want_us and sal_min is None and not hidden:
         return rows
     out = []
     for r in rows:
@@ -2048,6 +2225,8 @@ def _filter_ranked(rows, qs):
         if want_us and not _passes_us_only(r):
             continue
         if sal_min is not None and not _passes_salary_min(r, sal_min):
+            continue
+        if hidden and employer_key(r.get("company") or "", r.get("role") or "") in hidden:
             continue
         out.append(r)
     return out
@@ -2110,7 +2289,7 @@ _REF_KEYS = ("name", "relationship", "company", "title", "email", "phone", "year
 
 
 # Tests assign these to temp copies. None means the repo file. .bak is written
-# beside whichever path is live, so a test crash cannot touch the user's profile.
+# beside whichever path is live, so a test crash cannot touch the real profile.
 PROFILE_PATH = None
 WORK_HISTORY_PATH = None
 ANSWER_CACHE_PATH = None
@@ -2332,7 +2511,7 @@ def _validate_section(section, body):
     return None, "unknown section"
 
 
-SERVE_BUILD = "serve-2026-09-25b profile-splice"
+SERVE_BUILD = "serve-2026-09-30 employer-groups"
 
 
 def _splice_top_blocks(text, updates):
@@ -2743,8 +2922,12 @@ class H(BaseHTTPRequestHandler):
                 qs = urllib.parse.parse_qs(parsed.query)
                 st = (qs.get("status") or ["discovered"])[0].strip() or "discovered"
                 rows = _filter_ranked(jobs_store.ranked(status=st), qs)
-                out = [{"company": r.get("company", ""), "role": r.get("role", ""),
-                        "score": r.get("score") or 0, "ats": r.get("ats", ""),
+                out = []
+                for r in rows:
+                    raw_score = r.get("score")
+                    score_out = None if raw_score is None or raw_score == "" else raw_score
+                    out.append({"company": r.get("company", ""), "role": r.get("role", ""),
+                        "score": score_out, "ats": r.get("ats", ""),
                         "status": r.get("status"), "source": r.get("source", ""),
                         "posted": r.get("posted", ""),
                         "discovered_at": r.get("discovered_at"),
@@ -2753,7 +2936,8 @@ class H(BaseHTTPRequestHandler):
                         "salary": r.get("salary", ""), "desc": r.get("desc", ""),
                         "url": r.get("url", ""),
                         "apply": r.get("apply_url") or r.get("url", ""),
-                        "closed_reason": r.get("closed_reason") or ""} for r in rows]
+                        "closed_reason": r.get("closed_reason") or "",
+                        "employer_key": employer_key(r.get("company") or "", r.get("role") or "")})
                 return self._json(200, {"count": len(out), "jobs": out})
             except Exception as e:
                 return self._json(500, {"error": str(e)})
@@ -2791,8 +2975,13 @@ class H(BaseHTTPRequestHandler):
                         return f.read()
                 except Exception:
                     return ""
+            try:
+                _refs = _public_references((_load_yaml_dict(_profile_path()) or {}).get("references"))
+            except Exception:
+                _refs = []
             return self._json(200, {"profile": _read("profile.yaml"),
-                                    "work_history": _read(os.path.join("data", "work_history.yaml"))})
+                                    "work_history": _read(os.path.join("data", "work_history.yaml")),
+                                    "references": _refs})
         if parsed.path == "/stats":
             try:
                 import jobs_store
@@ -2814,6 +3003,20 @@ class H(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         n = int(self.headers.get("Content-Length", 0) or 0)
         raw = self.rfile.read(n) if n else b""
+        if parsed.path == "/api/employers/hide":
+            try:
+                payload = json.loads(raw or b"{}")
+            except Exception:
+                return self._json(400, {"ok": False, "error": "bad json"})
+            if not isinstance(payload, dict):
+                return self._json(400, {"ok": False, "error": "bad json"})
+            stored = employer_key(payload.get("key"))
+            keys, err = hide_employer(stored, bool(payload.get("hidden")))
+            if err:
+                return self._json(400, {"ok": False, "error": err})
+            return self._json(200, {"ok": True, "key": stored,
+                                    "hidden": bool(payload.get("hidden")),
+                                    "employers_hidden": keys})
         if parsed.path == "/discover":
             started = _start_pipeline()
             return self._json(200, {"started": started, "running": _PIPE.get("running", False)})
@@ -2824,7 +3027,32 @@ class H(BaseHTTPRequestHandler):
                 payload = {}
             payload["t"] = int(time.time())
             _FILL_LOG.insert(0, payload); del _FILL_LOG[30:]
+            try:   # durable copy: one JSON line per fill, all rows (logs/fills.jsonl)
+                os.makedirs(os.path.join(HERE, "logs"), exist_ok=True)
+                with open(os.path.join(HERE, "logs", "fills.jsonl"), "a", encoding="utf-8") as _f:
+                    _f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            except Exception:
+                pass
             return self._json(200, {"ok": True})
+        if parsed.path == "/api/jobs/add":
+            # Paste-to-add from the Search tab: URLs land as discovered; ATS boards are harvested.
+            try:
+                payload = json.loads(raw or b"{}")
+                urls = [u.strip() for u in (payload.get("urls") or []) if isinstance(u, str)
+                        and re.match(r"^https?://", u.strip(), re.I)][:200]
+                import jobs_store
+                added = jobs_store.add_discovered([{"url": u, "source": "manual"} for u in urls])
+                boards = 0
+                try:
+                    import scan_ats
+                    p = scan_ats.cfg_path()
+                    if p and p.endswith("companies.yml"):
+                        boards = scan_ats.harvest(scan_ats.load_cfg(), p)
+                except Exception:
+                    pass
+                return self._json(200, {"ok": True, "added": added, "boards": boards})
+            except Exception as e:
+                return self._json(500, {"ok": False, "error": str(e)})
         if parsed.path == "/config":
             try:
                 new = json.loads(raw or b"{}")

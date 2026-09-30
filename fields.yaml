@@ -19,7 +19,8 @@ fields:
   - {pattern: "supervisor (position|title|phone|email)|supervisor's (phone|email|title)", value: "pause:optional"}
   - {pattern: "have you applied.*before|applied for a job with us before|previously applied", value: "literal:No"}
   - {pattern: "may we use sms|sms during the hiring|receive text messages|consent to.*text", value: "literal:Yes"}
-  - {pattern: "may we contact you|contact you\\b|ok to contact you|best way to contact you|preferred contact method", value: "literal:Yes"}
+  - {pattern: "preferred (method of )?contact|preferred contact method|best way to reach you|how should we contact you", value: "application_defaults.preferred_contact_method"}
+  - {pattern: "may we contact you|contact you\\b|ok to contact you|best way to contact you", value: "literal:Yes"}
   - {pattern: "contact for reference|may we contact|contact (this|the|your|current|prior).*(employer|supervisor|manager|company|reference)|contact (them|him)|contact your (employer|supervisor|manager|references?)", value: "literal:No"}
   - {pattern: "^position$|position title|^job title$", value: "identity.current_title"}
   # --- iCIMS generic one-word labels (username field + phone Type/Number columns) ---
@@ -39,13 +40,19 @@ fields:
   - {pattern: "employee id|employee number|associate id", value: "pause:optional"}
   - {pattern: "north korea|\\biran\\b|\\bsyria\\b|\\bcuba\\b|crimea|donetsk|luhansk", value: "literal:No"}
   # --- yes/no + salary (specific intent) ---
+  # Conflict-of-interest / relationship screeners: the honest default is No. Follow-up
+  # "list name(s) and nature of relationship" boxes only appear after a Yes -> skip.
+  - {pattern: "(relative|family member|close friend|related to|relationship with).{0,60}(employee|customer|client|vendor|subcontractor|supplier|board|officer|government official)", value: "literal:No"}
+  - {pattern: "(owner|employee|officer|director).{0,40}(outside|other) (company|business|organization).{0,80}(business with|doing business|contract)|(financial|ownership) interest in .{0,60}(vendor|supplier|competitor|customer)", value: "literal:No"}
+  - {pattern: "list (the )?name\\(?s?\\)? and (the )?nature of (the )?relationship|nature of (the )?relationship|divest (your|the)? ?interest", value: "pause:optional"}
+  - {pattern: "highest (level )?(of )?(security )?clearance|clearance level (previously|currently|held|obtained)|level of (security )?clearance", value: "literal:Secret"}
   # Negative lookahead: auth-without-sponsorship must NOT match (falls through to Yes).
   # Pure sponsorship-NEED questions still match -> No.
   - {pattern: "^(?!.*(authoriz|eligible to work|permitted to work|right to work|legally.{0,18}work)).*\\bsponsor", value: "literal:No"}
   # Sponsorship-NEED even when a parenthetical says "work authorization".
   # That phrase must not fall through to authoriz->Yes. Keyed on sponsor so
   # "authorized to work" (no sponsor) still hits the Yes rule below.
-  - {pattern: "require[s]?\\s.{0,40}sponsor|(need|requir\\w+).{0,25}sponsor|visa sponsor|immigration sponsor|sponsorship .{0,40}(now|future|attain|maintain|employ)", value: "literal:No"}
+  - {pattern: "^(?!.*(authoriz|eligible|permitted|right to work|legally.{0,18}work).{0,60}without.{0,15}sponsor).*?(?:require[s]?\\s.{0,40}sponsor|(need|requir\\w+).{0,25}sponsor|visa sponsor|immigration sponsor|sponsorship .{0,40}(now|future|attain|maintain|employ))", value: "literal:No"}
   - {pattern: "secondary employment|competitive in nature|conflict with your (ability|working|duties)|hold any secondary|outside (employment|business)", value: "literal:No"}
   - {pattern: "located in the (nyc|new york)|\\bnyc area\\b|located in .{0,15}new york city|in the (nyc|new york) (metro|area)", value: "literal:No"}
   - {pattern: "authoriz\\w* .{0,20}\\bwork\\b|work authoriz|legally .{0,18}work|(eligible|right|permitted|entitled) to .{0,10}work|lawfully work", value: "literal:Yes"}
@@ -55,7 +62,7 @@ fields:
   - {pattern: "do you (currently )?(have|hold|possess).{0,20}clearance|currently have this clearance|have (this|a) .{0,20}clearance", value: "literal:Yes"}
   - {pattern: "security clearance|clearance",                                     value: "clearance.level"}
   - {pattern: "highest level of education|level of education completed|education level", value: "education.degree"}
-  - {pattern: "how many years of (work )?experience|years of (work )?experience|years of relevant experience", value: "literal:10+ years"}
+  - {pattern: "(how many years of|years of) (relevant |professional |work |total |industry )*experience(?!.{0,40}\\b(with|using|working|managing|administering|supporting|developing|building|designing|writing|maintaining|implementing|deploying|configuring|leading|operating|automating|programming|coding)\\b)", value: "candidate.years_it"}
   - {pattern: "able to work a .{0,15}contract|work a contract position|contract position|open to contract", value: "literal:Yes"}
   # Willingness only. "Please provide three professional references" is a
   # name list, not a Yes/No, and must not hit this rule.
@@ -94,7 +101,7 @@ fields:
   - {pattern: "linkedin",                                  value: "identity.linkedin"}
   - {pattern: "current (job )?title|present (job )?title|current position|current role|most recent (job )?title|^job title$|^title$", value: "identity.current_title"}
   - {pattern: "current employer|current company|present employer|present company|most recent employer|most recent company|^employer$|company name", value: "identity.current_company"}
-  - {pattern: "years of professional experience|total years of experience|^years of experience$|how many years of.*experience|years of relevant experience", value: "candidate.years_it"}
+  - {pattern: "(years of professional experience|total years of experience|years of relevant experience)(?!.{0,40}\\b(with|using|working|managing|administering|supporting|developing|building|designing|writing|maintaining|implementing|deploying|configuring|leading|operating|automating|programming|coding)\\b)|^years of experience$", value: "candidate.years_it"}
   - {pattern: "brought you to this (job )?posting|what brought you|how did you (find|hear about) this (job|posting|role)|where did you (find|see) this", value: "application_defaults.how_did_you_hear"}
   - {pattern: "how did you (hear|learn|find out)|where did you (hear|learn)|referral source|how were you referred", value: "literal:LinkedIn"}
   - {pattern: "time ?zone|what time zone", value: "literal:Eastern Time"}
@@ -112,7 +119,7 @@ fields:
   - {pattern: "built .{0,30}(tooling|automation)|production tooling|automation to (improve|reduce|solve)|automating infrastructure", value: "literal:Yes"}
   - {pattern: "experience with (monitoring|observability)|monitoring and observability|hands-on .{0,20}(monitoring|observability)", value: "literal:Yes"}
   - {pattern: "code (diff|review)|technical interview includes|comfortable .{0,20}(code review|pair)|participate in a (pair|live coding)", value: "literal:Yes"}
-  - {pattern: "hands-on .{0,30}(kubernetes|docker|containers?|terraform|ansible|ci/?cd|infrastructure as code|linux|aws|cloud)", value: "literal:Yes"}
+  - {pattern: "^(?!.*(how many|number of) years).*hands-on .{0,30}(kubernetes|docker|containers?|terraform|ansible|ci/?cd|infrastructure as code|linux|aws|cloud)", value: "literal:Yes"}
   # --- standard Workday eligibility yes/no questions (answered from profile) ---
   - {pattern: "legally permitted to work|legally authorized to work|authorized to work|eligible to work|right to work", value: "literal:Yes"}
   - {pattern: "must be a u\\.?s\\.? citizen|u\\.?s\\.? citizen|citizen of the united states|do you satisfy that requirement", value: "literal:Yes"}

@@ -125,7 +125,7 @@ _PREF_HEADER = re.compile(
     r"preferred\s+qualifications|nice\s+to\s+haves?|great\s+to\s+have)\b",
     re.I)
 _NONREQ_HEADER = re.compile(
-    r"^\s{0,6}(?:you\s+will(?!\s+have)|responsib|benefits?|perks?|compensation|"
+    r"^\s{0,6}(?:you\s+will(?!\s+have)|responsib\w*|benefits?|perks?|compensation|"
     r"salary|pay\s+range|what\s+we\s+offer|why\s+(?:join|work)|"
     r"about\s+(?:us|the\s+company|the\s+team|the\s+role)|how\s+(?:and\s+where\s+)?we\s+work|"
     r"equal\s+opportunity|eeo|diversity|interview\s+process|how\s+to\s+apply|to\s+apply|"
@@ -204,6 +204,58 @@ def extract_jd_skills(desc):
         preferred = canon_skills_in(text)
         required = set()
     return required, preferred, found_req_section
+
+def required_block_text(desc):
+    """Text of lines under REQUIRED headers only (same state machine as extract_jd_skills)."""
+    text = _split_inline_headers(clean_desc(desc))
+    out, mode = [], None
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if not line:
+            continue
+        if _NONREQ_HEADER.match(line):
+            mode = None
+        elif _PREF_HEADER.match(line):
+            mode = "pref"
+        elif _REQ_HEADER.match(line):
+            mode = "req"
+        if mode == "req":
+            out.append(line)
+    return "\n".join(out)
+
+
+# Tech the user's vocabulary (CANON) does not know. A required hit here is a 0-credit unit so an
+# out-of-lane requirement (Databricks, Spark, CUDA, Go, React...) lowers coverage instead of
+# vanishing from the denominator. Word-boundary, case-insensitive; CANON surfaces are excluded.
+OTHER_TECH = [
+    "databricks", "spark", "pyspark", "hadoop", "hive", "airflow", "dagster", "dbt", "flink", "beam",
+    "kafka", "snowflake", "redshift", "bigquery", "clickhouse", "cassandra", "mongodb", "dynamodb",
+    "elasticsearch", "opensearch", "redis", "rabbitmq",
+    "cuda", "pytorch", "tensorflow", "mlops", "llm", "llms", "triton", "nccl", "infiniband", "slurm",
+    "golang", "go", "java", "scala", "kotlin", "rust", "c++", "c#", "ruby", "javascript", "typescript",
+    "node.js", "react", "angular", "vue", "django", "flask", "spring", "graphql", "grpc",
+    ".net", "dotnet", "swift", "objective-c", "android", "ios", "embedded", "firmware", "fpga", "verilog",
+    "rtos", "autosar", "selenium", "cypress", "salesforce", "sap", "servicenow", "workday",
+]
+_OTHER_RE = re.compile(r"(?<![A-Za-z0-9+#.])(" + "|".join(re.escape(t) for t in sorted(OTHER_TECH, key=len, reverse=True))
+                       + r")(?![A-Za-z0-9+#])", re.I)
+_CANON_LOWER = {k.lower() for k in CANON} | {v.lower() for v in CANON.values()}
+UNKNOWN_CAP = 8
+
+
+def unknown_required(desc):
+    """Out-of-vocabulary tech named in the REQUIRED block (canonicalized lower-case, capped)."""
+    req = required_block_text(desc)
+    found = []
+    for m in _OTHER_RE.finditer(req):
+        t = m.group(1).lower()
+        if t == "go" and not re.search(r"\bgo\b(?=\s*(?:,|/|\)|and|or|programming|language|lang|developer)|golang)", req[m.start():m.start()+30], re.I):
+            continue  # bare "go" is usually the verb
+        if t in _CANON_LOWER or t in found:
+            continue
+        found.append(t)
+    return found[:UNKNOWN_CAP]
+
 
 # --------------------------------------------------------------- profile -> HAVE / GAP
 _HAVE_KEYS = ["cloud", "iac", "containers", "cicd", "monitoring_security",
@@ -310,6 +362,16 @@ def coverage(required, HAVE, SUPP):
         else:
             gaps.add(sk)
     return (credit / units if units else 0.0), matched, supported, gaps
+
+
+def coverage_units(required):
+    """Number of units coverage() divides by (multi-member peer groups collapse to 1)."""
+    required = set(required); consumed = set(); units = 0
+    for grp in PEER_GROUPS:
+        inter = required & grp
+        if len(inter) >= 2:
+            units += 1; consumed |= inter
+    return units + len(required - consumed)
 
 
 # --------------------------------------------------------------- jaccard (Resume-Matcher)

@@ -99,6 +99,7 @@ defaults:
 
 application_defaults:
   how_did_you_hear: LinkedIn
+  preferred_contact_method: Email   # Email / Mobile Phone / Home Phone as the form lists them
 
 # Universal eligibility answers (invariant about you; safe to pre-fill everywhere).
 # Screening answers some ATS forms ask as fixed-option questions. fields.yaml

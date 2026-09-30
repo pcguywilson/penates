@@ -61,3 +61,60 @@ def fetch_description(url, timeout=6):
         return base.strip_html(info.get("jobDescription") or "")
     except Exception:
         return ""
+
+
+# ---- board crawl (scan_ats) -------------------------------------------------
+# companies.yml slug form: "<tenant>.<wdN>/<site>"  e.g. "zoll.wd5/ZOLLMedicalCorp"
+def _terms():
+    try:
+        import jobs_store
+        return jobs_store.config_terms(["devops engineer", "site reliability engineer", "cloud engineer"])
+    except Exception:
+        return ["devops engineer", "site reliability engineer", "cloud engineer"]
+
+
+PAGE = 20          # CXS max page size
+MAX_PER_TERM = 200  # hard cap per search term
+
+
+def fetch(board, company=None):
+    host, site = board.split("/", 1)
+    tenant, dc = host.split(".", 1)
+    root = "https://%s.%s.myworkdayjobs.com" % (tenant, dc)
+    api = "%s/wday/cxs/%s/%s/jobs" % (root, tenant, site)
+    seen, out, errs, terms = set(), [], [], _terms()
+    for term in terms:
+        offset, total = 0, None
+        while offset < MAX_PER_TERM and (total is None or offset < total):
+            try:
+                d = base.http_post_json(api, {"appliedFacets": {}, "limit": PAGE, "offset": offset,
+                                              "searchText": term}, timeout=15)
+            except Exception as e:
+                errs.append(str(e)[:80])
+                break
+            if total is None:
+                try:
+                    total = int(d.get("total") or 0)
+                except (TypeError, ValueError):
+                    total = 0
+            posts = d.get("jobPostings") or []
+            for j in posts:
+                path = j.get("externalPath") or ""
+                if not path or path in seen:
+                    continue
+                seen.add(path)
+                loc = j.get("locationsText") or ""
+                if not loc or re.match(r"^\d+ Locations?$", loc, re.I):
+                    seg = path.split("/job/", 1)[-1].split("/")
+                    loc = seg[0].replace("-", " ") if len(seg) > 1 else ""
+                out.append(base.job(
+                    "workday", board, path.split("/job/", 1)[-1],
+                    title=j.get("title"), company=company or tenant,
+                    url="%s/%s%s" % (root, site, path), location=loc,
+                    remote=True if re.search(r"remote", loc + path, re.I) else None))
+            if len(posts) < PAGE:
+                break
+            offset += PAGE
+    if errs and len(errs) >= len(terms) and not out:
+        raise RuntimeError(errs[0])  # whole board failed: report as a board error
+    return out

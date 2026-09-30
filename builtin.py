@@ -45,7 +45,7 @@ def _session():
 
 
 def _fetch(s, term, page):
-    url = "%s/jobs/remote?search=%s&allLocations=true" % (BASE, quote_plus(term))
+    url = "%s/jobs/remote?search=%s" % (BASE, quote_plus(term))  # allLocations=true pulled in non-US postings
     if page > 1:
         url += "&page=%d" % page
     r = s.get(url, timeout=30); r.raise_for_status()
@@ -72,6 +72,38 @@ def _card_for(a):
     return card
 
 
+def _card_meta(card, icon):
+    """Text beside a card badge icon (fa-house-building = workplace, fa-location-dot = location)."""
+    i = card.find("i", class_=icon)
+    if i is None:
+        return ""
+    box = i.parent.parent if i.parent is not None and i.parent.parent is not None else i.parent
+    return re.sub(r"\s+", " ", box.get_text(" ", strip=True)).strip()[:80] if box else ""
+
+
+def _geo(r):
+    """(location, workplace, remote, keep) for a parsed card. Drops onsite/hybrid-only and
+    explicit non-US locations at scan time so they never enter the store."""
+    wp_raw = (r.get("workplace") or "").lower()
+    loc = r.get("location") or ""
+    if re.match(r"^\d+ locations?$", loc, re.I):
+        loc = ""
+    if "remote" in wp_raw:
+        wp, remote = "Remote", True
+    elif wp_raw:
+        return loc, wp_raw.title(), False, False
+    else:
+        wp, remote = None, None
+    if loc:
+        try:
+            import serve
+            if not serve._text_has_us(loc) and serve._text_has_non_us(loc):
+                return loc, wp, remote, False
+        except Exception:
+            pass
+    return loc, wp, remote, True
+
+
 def _parse(html, include_easy=False):
     soup = BeautifulSoup(html, "html.parser")
     out, last_company = [], ""
@@ -86,7 +118,9 @@ def _parse(html, include_easy=False):
             if easy and not include_easy:
                 continue
             out.append({"title": text, "company": last_company,
-                        "url": BASE + href.split("?")[0], "easy": easy})
+                        "url": BASE + href.split("?")[0], "easy": easy,
+                        "workplace": _card_meta(card, "fa-house-building"),
+                        "location": _card_meta(card, "fa-location-dot")})
     return out
 
 
@@ -201,7 +235,7 @@ def main():
             print("   %s%-22s %s" % (tag, r["company"][:22], r["title"][:50]))
         return
 
-    batch, seen = [], set()
+    batch, seen, dropped = [], set(), 0
     for term in terms:
         kept = 0
         for page in range(1, a.pages + 1):
@@ -217,7 +251,15 @@ def main():
                 if TITLE_NO.search(r["title"]) or not TITLE_OK.search(r["title"]):
                     continue
                 seen.add(r["url"])
-                batch.append({"url": r["url"], "company": r["company"], "role": r["title"][:120], "source": "builtin"})
+                loc, wp, remote, keep = _geo(r)
+                if not keep:
+                    dropped += 1
+                    continue
+                row = {"url": r["url"], "company": r["company"], "role": r["title"][:120], "source": "builtin"}
+                if loc: row["location"] = loc
+                if wp: row["workplace"] = wp
+                if remote is not None: row["remote"] = remote
+                batch.append(row)
                 kept += 1
         print("  %-30s %d in-lane" % (term, kept))
     # fetch the JD from each NEW posting's builtin job page (schema.org JobPosting); skip
@@ -240,7 +282,7 @@ def main():
         print("  fetched JD for %d/%d new postings" % (got, len(fresh)))
 
     added = jobs_store.add_discovered(batch)
-    print("\n%d in-lane builtin postings, %d NEW added to the store." % (len(batch), added))
+    print("\n%d in-lane builtin postings, %d NEW added to the store (%d non-US/onsite skipped)." % (len(batch), added, dropped))
 
 
 if __name__ == "__main__":
