@@ -55,3 +55,4 @@ stories.yaml
 config/companies.yml
 data/imported_answers.json
 imports/
+*.bak-*

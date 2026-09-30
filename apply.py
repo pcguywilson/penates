@@ -78,11 +78,33 @@ def ollama_up():
         return False
 
 # ---- 1. identity field matcher --------------------------------------------
+_YEARS_TECH_EXTRA = re.compile(
+    r"(?<![a-z0-9])(sql|linux|unix|windows server|sap|crystal|salesforce|c\+\+|c#|golang|shell scripting|"
+    r"cloud|networking|cisco|security|devops|sre|kubernetes)(?![a-z0-9])", re.I)
+
+
+def _names_tech(label):
+    """True when a question names a technology/domain (lexicon or a small extra list)."""
+    if _YEARS_TECH_EXTRA.search(label or ""):
+        return True
+    return any(_tech_re(t).search(label or "") for t in TECH_LEXICON)
+
+
+def _clean_label(label):
+    """Drop required markers and Workday's 'Select One' placeholder so anchored rules (^degree$) match."""
+    lab = (label or "").lower()
+    lab = re.sub(r"\s*\(required\)|\s*\*+", " ", lab)
+    lab = re.sub(r"\s+select one\s*$", "", lab)
+    return re.sub(r"\s+", " ", lab).strip()
+
+
 def match_field(label, profile, fields, required=False):
-    lab = label.lower()
+    lab = _clean_label(label)
     for rule in fields["fields"]:
         if re.search(rule["pattern"], lab, re.I):
             val = rule["value"]
+            if val == "candidate.years_it" and _names_tech(label):
+                continue  # "years of X experience" is not total IT years; leave it to the gap-aware path
             if val.startswith("literal:"): return val[8:], "field"
             if val.startswith("pause:"):   return None, "pause:" + val[6:]
             if val.startswith("ifreq:"):

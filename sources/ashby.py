@@ -3,7 +3,8 @@ from . import base
 URL = "https://api.ashbyhq.com/posting-api/job-board/%s?includeCompensation=true"
 
 def fetch(board, company=None):
-    data = base.http_json(URL % board)
+    import urllib.parse
+    data = base.http_json(URL % urllib.parse.quote(urllib.parse.unquote(board), safe=""))
     out = []
     for j in data.get("jobs", []) or []:
         out.append(base.job(

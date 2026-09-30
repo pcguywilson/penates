@@ -93,10 +93,11 @@ Applying is only half the grind. The other half is finding the postings worth ap
 Penates now pulls openings from several sources into one local queue, ranks them against
 your lane, and shows them in a dashboard so you stop checking five sites by hand every day.
 
-![Penates dashboard cycling color themes](docs/img/penates-themes.gif)
+![Penates Jobs view: one row per employer, profile-relative fit scores, remote and US filters](docs/img/jobs.png)
 
-*The dashboard cycling through its color themes. The toolbar's Remote-only, US-only and
-minimum-salary filters and the per-row profile-relative fit score are visible throughout.*
+*The Jobs view (demo data). One row per employer with its best-scoring role; "+N more" expands
+the rest. A dot marks a strong fit. The header chip shows the local model and goes red if the
+engine is down.*
 
 Click any row for a preview pane with the posting's details and a one-click path to the
 real apply page:
@@ -107,8 +108,9 @@ real apply page:
 
 | Source | How | Notes |
 |---|---|---|
-| **Company ATS boards** | **direct public APIs (Greenhouse, Lever, Ashby, Workday)** | **the reliable spine: clean titles, locations, posted dates, real apply URLs; from `config/companies.yml`** |
+| **Company ATS boards** | **direct public APIs (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable)** | **the reliable spine: clean titles, locations, posted dates, real apply URLs; from `config/companies.yml`, which grows by itself: any board seen in a discovered job is added** |
 | LinkedIn / Indeed / Google | JobSpy (MIT) | Easy Apply on LinkedIn is skipped (no employer link to fill) |
+| Sites with no API (Paylocity, Hirebridge, BambooHR, ...) | dashboard **Search** tab | an editable Google `site:` query builder (sites, role names, look-back, senior/clearance variants) plus LinkedIn search links; paste good links back and Penates adds them |
 | hiring.cafe | public `_next/data` JSON | direct employer apply URLs, salary, posted date |
 | Built In | server-rendered HTML | Easy Apply cards skipped; resolves to the employer ATS |
 | RemoteOK | public JSON API | remote-only, no key |
@@ -124,7 +126,7 @@ store, deduped by URL. Then `resolve.py` turns listing links into real apply URL
 can, and `rank.py` scores each row against your lane.
 
 ```
-python scan_ats.py       # company ATS boards (Greenhouse/Lever/Ashby/Workday) - the spine
+python scan_ats.py       # company ATS boards (Greenhouse/Lever/Ashby/Workday/SmartRecruiters/Workable) - the spine
 python discover.py       # LinkedIn / Indeed / Google via JobSpy
 python hiringcafe.py     # hiring.cafe
 python builtin.py        # Built In (employer-direct only)
@@ -137,6 +139,14 @@ python rank.py           # score against your lane
 Or skip the CLI: open the dashboard and hit **Refresh jobs**, which runs the whole pipeline
 in the background and respects the source toggles in **Settings**.
 
+For job sites with no public API (Paylocity, Hirebridge, BambooHR and similar), the **Search**
+tab builds the Google `site:` searches for you from roles, excludes, a look-back window and
+query packs (senior, non-senior, clearance). Each search is one row with Copy and Open; paste
+good links back in and Penates adds them, plus the company's whole board when it is a
+Greenhouse, Lever, Ashby, Workday, SmartRecruiters or Workable board.
+
+![Search: roles, excludes, look back, query packs, and generated searches](docs/img/search.png)
+
 ![Settings: Ollama connection and model picker, local test pages, job sources, search terms](docs/img/settings.png)
 
 ### Dashboard
@@ -145,17 +155,22 @@ in the background and respects the source toggles in **Settings**.
 python serve.py                       # http://127.0.0.1:8765/dashboard
 ```
 
-- **Jobs** - a list scored against your profile, with a per-row fit score and the reason
-  behind it. Filter to remote-only, US-only and a minimum salary; sort by score or newest;
-  each row opens a preview pane with an Apply + autofill button that hands off to the extension.
-- **Settings** - edit your search terms and turn sources on or off (saved to `config.json`),
+- **Jobs** - a list scored against your profile, grouped one row per employer, with a per-row
+  fit score and the reason behind it. Filter to remote-only, US-only and a minimum salary; sort
+  by score or newest; hide an employer you never want to see (reversible, from the row's hover
+  icon or the preview pane); each row opens a preview pane with an Apply + autofill button that
+  hands off to the extension.
+- **Search** - Google `site:` searches for sites Penates can't scan, LinkedIn links with the same
+  roles, and a paste box that adds job links (and their company boards) to the queue.
+- **Knowledge** - Profile, Stories and Resume, everything Penates knows about you (below).
+- **Settings** (gear menu) - edit your search terms and turn sources on or off (saved to `config.json`),
   set job retention (delete jobs older than 1 week / 2 weeks / 1 month / custom days, or never;
   jobs you applied to or marked go/verify are always kept, and deleted jobs are not re-added),
   check the Ollama connection and choose the answers and essay models, and open the local
   test pages: **Demo application** (`/demo`, a realistic fake application to run a full fill
   end to end) and **QA bench** (`/qa`, ask any question and see the answer, the tier that
   answered it, and the timing).
-- **Logs** - discovery runs, fills, and answer generations.
+- **Logs** (gear menu) - discovery runs, fills, and answer generations.
 - **Profile** - edit the facts the answer helper draws on, card by card: personal, education,
   EEO, eligibility and pay, screening answers, skills, a "Do NOT claim" list the honesty guard
   enforces, work history, and references (used only when a form requires them). Saving a card
@@ -165,7 +180,9 @@ python serve.py                       # http://127.0.0.1:8765/dashboard
   experiences that never make the résumé), no YAML editing. Imported AI answers live in the same
   tab; **Make a story** drafts a STAR story from one with the local model (checked against your
   Do NOT claim list) and pre-fills the form. Nothing is saved until you save it.
-- **Themes** - a color picker in the header (default Slate); pick what is easy on your eyes.
+- **Themes** - Stone (default), Slate, Nord and Light, in the gear menu.
+
+![The dashboard in each theme](docs/img/penates-themes.gif)
 
 Discovery finds and ranks; the extension fills; you review and submit. Same contract as the
 rest of the tool: nothing leaves the machine, nothing auto-submits.
@@ -261,7 +278,7 @@ off its AI on the unique questions, and let Penates handle those.
 | `data/jobs.json` | Your application queue | `.example` only; real is git-ignored |
 | `application.yaml` | The current job's company blurb | `.example` only; real is git-ignored |
 | `stories.yaml` | Your story bank (interview-grade experiences the answer engine uses) | `.example` only; real is git-ignored |
-| `config/companies.yml` | ATS boards to scan (Greenhouse/Lever/Ashby slugs) | `.example` only; real is git-ignored |
+| `config/companies.yml` | ATS boards to scan (auto-grows from discovered jobs) | `.example` only; real is git-ignored |
 | `data/imported_answers.json` | Imported AI-chat answers (reference) | git-ignored (runtime) |
 | `fields.yaml` | Field-label to profile mapping rules | shipped |
 | `config.json` | Dashboard search terms + source toggles | `.example` only; runtime is git-ignored |

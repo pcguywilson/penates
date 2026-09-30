@@ -23,7 +23,7 @@ import argparse, re
 import jobs_store, skills
 
 # --- title band -------------------------------------------------------------
-CORE = re.compile(r"site reliability|\bsre\b|devops|devsecops|platform engineer|"
+CORE = re.compile(r"site reliability|\bsre\b|devops|devsecops|(?<!data )(?<!ml )(?<!ai )(?<!software )(?<!analytics )platform engineer|"
                   r"infrastructure engineer|cloud engineer|cloud infrastructure|"
                   r"systems engineer|reliability engineer|cloud architect|"
                   r"solutions architect|infrastructure architect", re.I)
@@ -70,73 +70,86 @@ def _fmt(s, n=4):
     s = sorted(s)
     return (",".join(s[:n]) + ("+%d" % (len(s) - n) if len(s) > n else "")) if s else "-"
 
+DATA_ML_TITLE = re.compile(r"\bdata\b|\bml\b|machine learning|\bai\b|analytics|databricks|\bllm", re.I)
+INFRA_CORE = {"AWS", "AWS GovCloud", "Azure", "Azure Government", "GCP", "Kubernetes", "EKS", "AKS",
+              "GKE", "Terraform", "Linux", "CI/CD", "Docker", "Ansible", "IaC"}
+TITLE_MULT = {"CORE": 1.0, "NEAR": 0.9, "neutral": 0.75, "off-target": 0.45}
+REQ_CLEAR = re.compile(r"\bts/sci\b|\bts\s*sci\b|top secret|polygraph|full[- ]scope", re.I)
+
+
 def score_row(r, HAVE, GAP, SUPP):
+    """Phase 1 (co-designed). Returns (score|None, reason).
+
+    score = 100 * cov * conf * title_mult + min(pcov*8, 8) - gap_pen
+      cov   = required credit / (known required units + unknown required tech, cap 8)
+      conf  = min(known_required, 4)/4 (sparse-required damping)
+      data/ML title with zero infra skills in required -> cov *= 0.5
+    Thin JD (no requirements header): 60 * pcov * title_mult.
+    No usable desc -> None ('unscored'), never a fake 30.
+    TS/SCI/poly is a FLAG (clearance_flag) from the required block only, not a score factor."""
     role = (r.get("role") or "")
     desc = r.get("desc") or ""
     band, tags = _title_band(role)
+    tkey = tags[0] if tags else "neutral"
+    tmult = TITLE_MULT.get(tkey, 0.75)
+    if tkey == "CORE" and "junior" in tags:
+        tmult = 0.8
+    reason = ["title=%s(x%.2f)" % ("/".join(tags), tmult)]
 
     required, preferred, found = skills.extract_jd_skills(desc)
+    if not (required or preferred) or (len(skills.clean_desc(desc)) < 120 and len(required | preferred) < 3):
+        reason.append("UNSCORED(no usable desc)")
+        return None, " ".join(reason)
+
+    unknown = skills.unknown_required(desc) if found else []
     rcov, rmatch, rsupp, rgap = skills.coverage(required, HAVE, SUPP)
     pcov, pmatch, psupp, pgap = skills.coverage(preferred, HAVE, SUPP)
 
-    prof_blob = " ".join(sorted(HAVE | SUPP)) + " " + skills.supported_blob()
-    jac = skills.jaccard(role + " " + skills.clean_desc(desc), prof_blob)
-
-    reason = ["band=%s(%d)" % ("/".join(tags), band)]
-
-    if found and required:
-        # near-linear: required-coverage carries the score, the title band is the floor.
-        # Sparse-required damping: a JD whose parsed "required" set is only 1-2 skills is weak
-        # evidence (thin or badly-parsed section) - 100% coverage of it must NOT score like a real
-        # 4+ skill match. Confidence scales with the required-set size (1->.25 .. 4+->1.0), so a
-        # lone [SQL] "requirement" can't reach 90 the way an 8-skill AWS/DevOps match does.
-        conf = min(len(required), 4) / 4.0
-        score = band + rcov * 60 * conf + pcov * 8 + jac * 8
-        reason.append("req cov=%.0f%%%s have[%s]" % (rcov * 100,
-                      "" if conf == 1.0 else " conf=%.2f" % conf, _fmt(rmatch | rsupp)))
-    elif preferred:
-        # thin/flat JD: no requirements section to trust -> soft preferred signal only
-        score = band + pcov * 34 + jac * 12
-        reason.append("thin-jd cov=%.0f%% have[%s]" % (pcov * 100, _fmt(pmatch | psupp)))
+    if found and (required or unknown):
+        known_units = skills.coverage_units(required)
+        credit = rcov * known_units
+        units = known_units + len(unknown)
+        cov = credit / units if units else 0.0
+        conf = min(max(known_units, len(unknown) and 1), 4) / 4.0
+        if DATA_ML_TITLE.search(role) and not (required & INFRA_CORE):
+            cov *= 0.5
+            reason.append("data/ml-title-no-infra x0.5")
+        score = 90 * cov * conf * tmult + min(pcov * 10, 10)
+        reason.append("req cov=%.0f%%%s have[%s]" % (cov * 100, "" if conf == 1.0 else " conf=%.2f" % conf,
+                                                      _fmt(rmatch | rsupp)))
+        if unknown:
+            reason.append("unknown[%s]" % _fmt(set(unknown)))
     else:
-        score = band + jac * 8
-        reason.append("title-only")
+        # Flat JD: every mentioned skill is 'preferred', alternatives included, so ~70% of the
+        # mentioned set is a full fit. Unknown tech in the whole text still drags it.
+        unk_all = skills.unknown_required("Requirements:\n" + skills.clean_desc(desc))
+        eff = pcov * len(preferred) / (len(preferred) + len(unk_all)) if preferred else 0.0
+        score = 85 * min(1.0, eff / 0.7) * tmult
+        if DATA_ML_TITLE.search(role) and not (preferred & INFRA_CORE):
+            score *= 0.5
+            reason.append("data/ml-title-no-infra x0.5")
+        reason.append("thin-jd cov=%.0f%% have[%s]" % (eff * 100, _fmt(pmatch | psupp)))
+        if unk_all:
+            reason.append("unknown[%s]" % _fmt(set(unk_all)))
 
-    # additive gap penalty: only skills the user is KNOWN to lack (GAP), already peer-collapsed
-    # so a competing cloud/CI tool that is one-of-many in the JD is NOT counted as a gap.
     named_gaps = rgap & GAP
     if found and named_gaps:
         pen = min(len(named_gaps) * 6, 20)
         score -= pen
         reason.append("GAP[%s]-%d" % (_fmt(named_gaps), pen))
 
-    # pure competitor-cloud shop: a GAP cloud is named and NONE of the user's clouds appear
     jd_all = required | preferred
     if (COMPETITOR_CLOUDS & jd_all) and not (MY_CLOUDS & jd_all):
         score -= 15
         reason.append("competitor-cloud-only-15")
 
-    # off-target title with zero skill signal stays low
-    if "off-target" in tags and not (rmatch or rsupp or pmatch or psupp):
-        score = min(score, 30)
-        reason.append("off-target<=30")
-
-    # transparency flags (NOT score factors) so the user can disagree with the number
     if r.get("desc_truncated"):
         reason.append("JD-TRUNCATED")
-    if not found and (required or preferred or desc):
-        reason.append("no-req-section")
-
-    score = max(0, min(100, score))
-
-    # --- remaining in-score signals (move to filter toggles in B) ------------
-    if TSSCI.search(desc):
-        score *= 0.2
-        reason.append("CAP[TS/SCI]")
-    if found and DEGREE.search(desc):
-        score = max(0, score - 5)
-        reason.append("degree-5")
-
+    if REQ_CLEAR.search(skills.required_block_text(desc) if found else ""):
+        # The profile holds Secret only. Until a clearance filter toggle exists, a REQUIRED TS/SCI/poly
+        # stays a hard cap; preferred/"nice to have" TS/SCI no longer touches the score.
+        score = min(score, 20)
+        reason.append("FLAG[TS/SCI-required]<=20")
     return int(round(max(0, min(100, score)))), " ".join(reason)
 
 def _score_all(rows):
@@ -197,7 +210,16 @@ def _smoke():
         lambda s: s >= 60),
       ("Thin aggregator snippet", {"role": "Senior SRE", "desc":
         "Requires 8+ years in SRE and infrastructure, container orchestration, cloud expertise and Bash."},
-        lambda s: 20 <= s <= 70),
+        lambda s: s is None or 20 <= s <= 70),
+      ("Databricks/Spark required, AWS only in duties", {"role": "Senior Data Platform Engineer", "desc":
+        "Requirements:\n- 5+ years with Databricks and Apache Spark\n- Python and SQL\n- Airflow orchestration\n"
+        "Responsibilities:\n- Run workloads on AWS with Terraform and Kubernetes\n- Partner with analytics teams"},
+        lambda s: s is not None and s < 40),
+      ("TS/SCI in preferred does not cap", {"role": "Senior Systems Engineer", "desc":
+        "Requirements:\n- AWS, Linux, Terraform, Ansible administration\n- Python and Bash scripting\n"
+        "Preferred:\n- TS/SCI clearance\n- Master's degree"},
+        lambda s: s is not None and s >= 60),
+      ("Empty desc is unscored", {"role": "DevOps Engineer", "desc": ""}, lambda s: s is None),
     ]
     print("SMOKE (score_row):")
     ok = True
@@ -205,7 +227,7 @@ def _smoke():
         s, rs = score_row(row, HAVE, GAP, SUPP)
         p = chk(s)
         ok = ok and p
-        print("  [%s] %-28s score=%3d  %s" % ("PASS" if p else "FAIL", name, s, rs))
+        print("  [%s] %-28s score=%4s  %s" % ("PASS" if p else "FAIL", name, s, rs))
     print("ALL PASS" if ok else "SOME FAILED")
     return 0 if ok else 1
 

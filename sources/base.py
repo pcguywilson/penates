@@ -28,3 +28,10 @@ def job(ats, board, jid, title, company, url, location=None, remote=None, posted
         "remote": bool(remote) if remote is not None else None,
         "posted": (posted or "")[:10], "desc": (desc or "")[:8000],
     }
+
+def http_post_json(url, body, timeout=25):
+    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"),
+                                 headers={"User-Agent": UA, "Accept": "application/json",
+                                          "Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))

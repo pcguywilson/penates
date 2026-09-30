@@ -76,7 +76,8 @@ class WhyFallback(unittest.TestCase):
         # Grok correction: sentence 1 must be the candidate/role, never the company's About line.
         out = essay._why_candidate_only(self.FACTS, {"max_chars": 700}, "Senior IT Engineer", "1Password")
         first = out.split(".")[0].lower()
-        self.assertIn("i'm applying", first, "sentence 1 must be candidate-first, got %r" % first)
+        self.assertNotIn("i'm applying", out.lower())   # v2 (board seq 98): no filler opener
+        self.assertRegex(out, r"\b(I|my)\b")
         # the marketing slogan must not appear anywhere when it's the only fact
         self.assertNotIn("safe, productive digital future", out.lower())
         self.assertNotIn("building the foundation", out.lower())
@@ -89,9 +90,9 @@ class WhyFallback(unittest.TestCase):
     def test_operational_fact_is_kept_and_cited(self):
         self.assertTrue(essay._fact_is_operational(essay._fact_phrase(self.OP_FACTS[0], "1Password")))
         out = essay._why_candidate_only(self.OP_FACTS, {"max_chars": 700}, "Senior IT Engineer", "1Password")
-        self.assertIn("posting", out.lower(), "an operational fact should be cited, got %r" % out)
-        # still candidate-first
-        self.assertIn("i'm applying", out.split(".")[0].lower())
+        # v2 (board seq 98): posting sentences are never pasted back verbatim
+        self.assertNotIn(essay._fact_phrase(self.OP_FACTS[0], "1Password").lower(), out.lower())
+        self.assertNotIn("i'm applying", out.lower())
 
     def test_template_is_clean(self):
         out = essay._why_candidate_only(self.FACTS, {"max_chars": 700}, "Senior IT Engineer", "1Password").lower()

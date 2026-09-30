@@ -12,7 +12,7 @@
 (() => {
   if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
   window.__penatesInit = true;
-  const PENATES_BUILD = "build 48";   // shown in the report header; if you don't see it after a reload, the extension didn't update
+  const PENATES_BUILD = "build 53";   // shown in the report header; if you don't see it after a reload, the extension didn't update
   const IS_TOP = window.top === window;
   // The content script is injected only on ATS hosts (manifest matches). When an ATS application
   // form is EMBEDDED as a cross-origin iframe inside a company careers page (e.g. a Greenhouse
@@ -599,6 +599,7 @@
     if (!el || el.tagName !== "INPUT") return false;
     if ((el.getAttribute("role") || "") === "combobox") return true;
     if ((el.getAttribute("aria-autocomplete") || "") === "list") return true;
+    if ((el.getAttribute("data-automation-id") || "") === "searchBox") return true;   // Workday multiselect search
     return /select__input|combobox|autocomplete/i.test(el.className || "");
   }
   function matchOption(want) {
@@ -610,6 +611,10 @@
         || (opts.length === 1 ? opts[0] : null);
   }
   function comboCommitted(el) {
+    try {   // Ant Design: the chosen value renders in .ant-select-selection-item on the .ant-select root
+      const ant = el.closest && el.closest(".ant-select");
+      if (ant) { const it = ant.querySelector(".ant-select-selection-item"); return !!(it && norm(it.getAttribute("title") || it.textContent)); }
+    } catch (_) {}
     const ctrl = (el.closest && el.closest('[class*="control"], [class*="select"], [class*="combobox"]')) || el.parentElement;
     const sv = ctrl && ctrl.querySelector && ctrl.querySelector('[class*="single-value"], [class*="singleValue"], [class*="multi-value"], [class*="multiValue"]');
     return !!(sv && norm(sv.textContent));
@@ -619,6 +624,9 @@
       try { node.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })); } catch (_) {}
     }
   }
+  const FIELD_Q = /field of study|area of study|course of study|\bmajor\b|discipline|concentration/i;
+  const FIELD_ALTS = ["Computer Information Systems", "Computer and Information Science", "Information Systems",
+                      "Computer Science", "Information Science", "Computer Information Technology"];
   async function fillCombobox(el, value) {
     // Ashby (and most react-select) comboboxes: open with ArrowDown, type to filter, then
     // click the option. Two things the old version missed and this handles: async typeahead
@@ -633,9 +641,15 @@
         .concat(nv.split(" ").filter((w) => w.length >= 2))
     )];
     el.focus();
+    try {   // Ant selects open on mouse-down of the selector (read-only, non-searchable ones ignore typing)
+      const antSel = el.closest && el.closest(".ant-select");
+      if (antSel && el.getAttribute("aria-expanded") !== "true") { const sel = antSel.querySelector(".ant-select-selector") || antSel; sel.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window })); }
+    } catch (_) {}
     try { el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); } catch (_) {}
     await sleep(120);
-    try { setter.call(el, query); el.dispatchEvent(new InputEvent("input", { bubbles: true, data: query, inputType: "insertText" })); } catch (_) {}
+    if (!el.readOnly) try { setter.call(el, query); el.dispatchEvent(new InputEvent("input", { bubbles: true, data: query, inputType: "insertText" })); } catch (_) {}
+    // Workday multiselect search boxes (Field of Study, Skills, Country) only search on Enter.
+    if (WD_HOST && !el.readOnly) { await sleep(150); try { for (const t of ["keydown", "keypress", "keyup"]) el.dispatchEvent(new KeyboardEvent(t, { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true })); } catch (_) {} }
     let opts = [];
     for (let i = 0; i < 16; i++) {
       await sleep(250);
@@ -657,6 +671,12 @@
       }
       if (!opts.length) return false;
     }
+    // Ant Design selects (Dayforce and others): the [role=option] list is a hidden a11y shadow
+    // (a few items, clicks do nothing). The real clickable rows are .ant-select-item-option.
+    try {
+      const ant = [...document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option')];
+      if (ant.length) opts = ant;
+    } catch (_) {}
     // pick the option sharing the most tokens with the wanted value (exact full match wins)
     let best = null, bestScore = 0;
     for (const o of opts) {
@@ -669,7 +689,10 @@
       let score = 0;
       for (const t of vtokens) { if (otokens.includes(t)) score += 2; else if (t.length >= 3 && ot.includes(t)) score += 1; }
       if (ot === nv) score += 100;
-      if (score > bestScore) { bestScore = score; best = o; }
+      // Tie-break on fewer extra words: "United States" -> "United States of America", not
+      // "United States Minor Outlying Islands" (same overlap, more unrelated words).
+      const extra = otokens.filter((t) => !vtokens.includes(t)).length;
+      if (score > bestScore || (score === bestScore && score > 0 && extra < (best ? best.__extra : 1e9))) { bestScore = score; best = o; o.__extra = extra; }
     }
     // Nothing overlapped the wanted value -> do NOT blind-click the first option. Leave it for you.
     // Also reject weak overlap: need about half the value's tokens (one loose "use" hit inside
@@ -734,7 +757,10 @@
       let score = 0;
       for (const t of vtokens) { if (otokens.includes(t)) score += 2; else if (t.length >= 3 && ot.includes(t)) score += 1; }
       if (ot === nv) score += 100;
-      if (score > bestScore) { bestScore = score; best = o; }
+      // Tie-break on fewer extra words: "United States" -> "United States of America", not
+      // "United States Minor Outlying Islands" (same overlap, more unrelated words).
+      const extra = otokens.filter((t) => !vtokens.includes(t)).length;
+      if (score > bestScore || (score === bestScore && score > 0 && extra < (best ? best.__extra : 1e9))) { bestScore = score; best = o; o.__extra = extra; }
     }
     if (!best || bestScore < Math.max(2, vtokens.length)) { try { el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); } catch (_) {} return false; }
     fireMouse(best);
@@ -881,6 +907,165 @@
     if (Array.isArray(d.work_history_json)) return d.work_history_json;   // preferred, if serve.py provides it
     return parseWorkHistoryYaml(d.work_history || "");
   }
+  // ---- References block (Dayforce reference_<n>_<field>, or any section headed "References") ----
+  // These fields ask about SOMEONE ELSE. They must never get the candidate's own name/email/phone,
+  // so every field in a reference block is claimed here (skipped by the generic scan) and filled
+  // only from profile.references[n]. No saved reference -> left blank for you.
+  function refIndex(el) {
+    const m = ((el.id || "") + " " + (el.name || "")).match(/references?[_\-\[\.]*(\d+)/i);
+    return m ? +m[1] : null;
+  }
+  function inReferenceBlock(el) {
+    if (refIndex(el) !== null) return true;
+    if (/(^|[_\-\.\[])references?([_\-\.\]]|$)/i.test((el.id || "") + " " + (el.name || ""))) return true;
+    let n = el;
+    for (let i = 0; i < 10 && n; i++) {
+      n = n.parentElement; if (!n) break;
+      const h = n.querySelector(":scope > h1, :scope > h2, :scope > h3, :scope > h4, :scope > legend, :scope > header h2, :scope > header h3");
+      if (h) return /^\s*(professional\s+|personal\s+)?references?\b/i.test(h.innerText || "") && !/referr/i.test(h.innerText || "");
+    }
+    return false;
+  }
+  function _refLabel(el) {
+    const lab = (el.id && document.querySelector('label[for="' + CSS.escape(el.id) + '"]')) || el.closest("label");
+    return norm((lab && lab.innerText) || el.getAttribute("aria-label") || el.placeholder || (el.id || "").replace(/.*_/, "")) + " " + norm((el.id || "").replace(/.*_/, "").replace(/([a-z])([A-Z])/g, "$1 $2"));
+  }
+  function _refValue(ref, label) {
+    const name = String(ref.name || "").trim(), parts = name.split(/\s+/);
+    if (/middle/.test(label)) return "";
+    if (/first\s*name|given/.test(label)) return parts[0] || "";
+    if (/last\s*name|surname|family/.test(label)) return parts.length > 1 ? parts.slice(1).join(" ") : "";
+    if (/full\s*name|\bname\b/.test(label)) return name;
+    if (/relationship/.test(label)) return ref.relationship || "";
+    if (/company|employer|organi[sz]ation/.test(label)) return ref.company || "";
+    if (/title|position/.test(label)) return ref.title || "";
+    if (/e\s*mail/.test(label)) return ref.email || "";
+    if (/phone|mobile|cell|telephone/.test(label)) return ref.phone || "";
+    if (/years|how long|known/.test(label)) return String(ref.years_known || "");
+    return "";
+  }
+  function _refFields() {
+    return deepFields().filter((el) => !inPenates(el) && shown(el) && /^(INPUT|TEXTAREA)$/.test(el.tagName)
+      && !/^(hidden|submit|button|file|checkbox|radio)$/i.test(el.type || "") && inReferenceBlock(el));
+  }
+  function _refBlocks(els) {
+    const blocks = new Map();
+    els.forEach((el) => { const i = refIndex(el) ?? 0; if (!blocks.has(i)) blocks.set(i, []); blocks.get(i).push(el); });
+    return blocks;
+  }
+  function _refAddButton(anyRefEl) {
+    // The "Add Reference" control lives in the same section as the reference fields.
+    let n = anyRefEl;
+    for (let i = 0; i < 12 && n; i++) {
+      n = n.parentElement; if (!n) break;
+      const b = [...n.querySelectorAll('button, a, [role="button"]')].find((x) => /^\s*\+?\s*add\s+(another\s+)?reference\b/i.test(x.innerText || x.textContent || ""));
+      if (b) return b;
+    }
+    return null;
+  }
+  async function fillReferences(rows, handled, late) {
+    let els = _refFields();
+    if (!els.length) return { filled: 0 };
+    els.forEach((el) => handled && handled.add(el));            // never let the generic scan touch them
+    let refs = [];
+    try { const r = await chrome.runtime.sendMessage({ type: "FETCH_PROFILE" }); refs = (r && r.ok && r.data && r.data.references) || []; } catch (_) {}
+    refs = refs.filter((x) => x && String(x.name || "").trim());
+    // Add blocks until there is one per saved reference (first pass only; max 5 clicks).
+    if (refs.length) {                                           // late pass too: redraws can drop added blocks
+      for (let tries = 0; tries < 5 && _refBlocks(els).size < refs.length; tries++) {
+        const btn = _refAddButton(els[0]);
+        if (!btn) break;
+        const before = els.length;
+        fireMouse(btn);
+        for (let w = 0; w < 15 && _refFields().length <= before; w++) await sleep(200);
+        els = _refFields();
+        els.forEach((el) => handled && handled.add(el));
+        if (els.length <= before) break;                            // the button did nothing: stop
+      }
+    }
+    const blocks = _refBlocks(els);
+    let filled = 0;
+    for (const [i, list] of [...blocks.entries()].sort((a, b) => a[0] - b[0])) {
+      const ref = refs[i];
+      if (!ref) { if (!late) rows.push(["Reference " + (i + 1), "skip", refs.length ? "only " + refs.length + " saved -> you" : "no references in your profile -> you"]); continue; }
+      let n = 0;
+      for (const el of list) {
+        if (clean(el.value)) continue;
+        const v = _refValue(ref, _refLabel(el));
+        if (v && _adSetText(el, v)) n++;
+      }
+      if (late) { if (n) rows.push(["Reference " + (i + 1), "filled", ref.name + " (re-filled " + n + " after page redraw)"]); }
+      else rows.push(["Reference " + (i + 1), n ? "filled" : "skip", n ? ref.name + " (" + n + " fields)" : "nothing to fill"]);
+      if (n) filled++;
+    }
+    return { filled };
+  }
+  // ===== Start-date fields ======================================================
+  // Rule: free text -> "2 weeks from offer" (profile, server side); an actual DATE field ->
+  // the second Monday from today. Covers Workday Month/Day/Year spinners, <input type=date> and
+  // MM/DD/YYYY text boxes whose label asks when you can start.
+  const START_Q = /when (could|can|would) you (start|begin)|start date|earliest (start|available|date)|available to start|availability date|date (you are )?available|begin work|able to start|join date/i;
+  function secondMonday() {
+    const d = new Date(); d.setHours(0, 0, 0, 0);
+    const add = ((8 - d.getDay()) % 7) || 7;          // days to the next Monday (today Monday -> +7)
+    d.setDate(d.getDate() + add + 7);
+    return d;
+  }
+  const _p2 = (n) => String(n).padStart(2, "0");
+  function _setVal(el, v) {
+    try {
+      el.focus();
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, v);
+      el.dispatchEvent(new InputEvent("input", { bubbles: true, data: v, inputType: "insertText" }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      el.dispatchEvent(new Event("blur", { bubbles: true }));
+      return true;
+    } catch (_) { return false; }
+  }
+  function _fieldLabel(el) {
+    const ff = el.closest && (el.closest('[data-automation-id^="formField"]') || el.closest("fieldset") || el.closest('[role="group"]'));
+    if (ff) {
+      const l = ff.querySelector("label, legend, [data-automation-id='richText']");
+      const t = clean((l && l.innerText) || (ff.innerText || "").split("\n")[0]);
+      if (t) return t;
+    }
+    try { return questionFor(el) || ""; } catch (_) { return ""; }
+  }
+  async function fillStartDates(rows, handled) {
+    const d = secondMonday();
+    const mm = _p2(d.getMonth() + 1), dd = _p2(d.getDate()), yyyy = String(d.getFullYear());
+    const shownDate = mm + "/" + dd + "/" + yyyy;
+    let n = 0;
+    // Workday spinners (skip the work-experience / education grids, filled elsewhere)
+    for (const mIn of document.querySelectorAll('input[id$="dateSectionMonth-input"]')) {
+      if (/^(workExperience|education)-/.test(mIn.id) || inPenates(mIn)) continue;
+      const q = _fieldLabel(mIn);
+      if (!START_Q.test(q)) continue;
+      const base = mIn.id.replace(/dateSectionMonth-input$/, "");
+      const dIn = document.getElementById(base + "dateSectionDay-input");
+      const yIn = document.getElementById(base + "dateSectionYear-input");
+      if (clean(mIn.value) && yIn && clean(yIn.value)) { [mIn, dIn, yIn].forEach((e) => e && handled && handled.add(e)); continue; }
+      _setVal(mIn, mm); await sleep(70);
+      if (dIn) { _setVal(dIn, dd); await sleep(70); }
+      if (yIn) { _setVal(yIn, yyyy); await sleep(70); }
+      [mIn, dIn, yIn].forEach((e) => e && handled && handled.add(e));
+      rows.push([q.slice(0, 80), "filled", shownDate + " (2nd Monday from today)"]); n++;
+    }
+    // Native date inputs and MM/DD/YYYY text boxes
+    for (const el of deepFields()) {
+      if (inPenates(el) || (handled && handled.has(el)) || el.tagName !== "INPUT" || clean(el.value)) continue;
+      const typ = (el.type || "").toLowerCase();
+      const ph = (el.getAttribute("placeholder") || "") + " " + (el.getAttribute("aria-label") || "");
+      const isDate = typ === "date" || /\b(mm|dd)\s*[\/\-.]\s*(dd|mm)\s*[\/\-.]\s*(yyyy|yy)\b/i.test(ph);
+      if (!isDate) continue;
+      let q = ""; try { q = questionFor(el) || ""; } catch (_) {}
+      if (!START_Q.test(q)) continue;
+      const v = typ === "date" ? yyyy + "-" + mm + "-" + dd : (/^\s*dd/i.test(ph) ? dd + "/" + mm + "/" + yyyy : shownDate);
+      if (_setVal(el, v)) { handled && handled.add(el); rows.push([q.slice(0, 80), "filled", v + " (2nd Monday from today)"]); n++; }
+    }
+    return n;
+  }
+
   async function fillWorkdayExperience(rows, handled) {
     if (!WD_HOST) return { filled: 0, review: 0 };
     let jobs = [];
@@ -928,6 +1113,30 @@
         rows.push(["Work Exp " + (i + 1), "skip", String(e).slice(0, 50)]); 
       }
     }
+    // Workday's "autofill with resume" pre-creates blocks from its own resume parse. Blocks past
+    // our saved history are duplicates: delete them (form edit only, nothing submitted); if no
+    // Delete control is found, fence their fields off so the generic scan doesn't grind on them.
+    const extra = wdExpIndices().slice(jobs.length).reverse();
+    let removed = 0, left = 0;
+    for (const idx of extra) {
+      const title = document.getElementById("workExperience-" + idx + "--jobTitle");
+      let box = title, del = null;
+      for (let k = 0; k < 14 && box && !del; k++) {
+        box = box.parentElement; if (!box) break;
+        const others = [...box.querySelectorAll('[id^="workExperience-"]')].some((x) => !x.id.startsWith("workExperience-" + idx + "--"));
+        if (others) break;
+        del = [...box.querySelectorAll('button, [role="button"]')].find((x) =>
+          /\bdelete\b|\bremove\b/i.test((x.getAttribute("aria-label") || "") + " " + (x.innerText || x.textContent || "")));
+      }
+      if (del) {
+        try { del.scrollIntoView({ block: "center" }); del.click(); await sleep(500); } catch (_) {}
+        if (!document.getElementById("workExperience-" + idx + "--jobTitle")) { removed++; continue; }
+      }
+      left++;
+      document.querySelectorAll('[id^="workExperience-' + idx + '--"]').forEach((el) => handled && handled.add(el));
+    }
+    if (removed) rows.push(["Extra Workday work-experience blocks", "filled", "removed " + removed + " duplicate(s) from Workday's resume parse"]);
+    if (left) rows.push(["Extra Workday work-experience blocks", "review", left + " left from Workday's resume parse -> delete them"]);
     return { filled, review };
   }
 
@@ -1106,7 +1315,7 @@
       if (el && (it.kind === "select" || it.kind === "combobox") && (comboCommitted(el) || (clean(el.value) && (it.options || []).some((o) => norm(o) === norm(el.value))))) continue;
       todo.push(it);
     }
-    setReport("Answering " + todo.length + " questions in one batch ... NOTHING submitted.", rows);
+    setReport("Answering " + todo.length + " questions in one batch...", rows);
     const batch = await askEngineBatch(todo.map((it) => ({ q: it.q, kind: it.kind, options: it.options, required: it.required,
       limit: it.el && it.el.maxLength > 0 ? it.el.maxLength : null })), 90000);
     const answers = (batch && !batch.__error && Array.isArray(batch.answers)) ? batch.answers : [];
@@ -1115,7 +1324,7 @@
     for (const it of todo) {
       const a = answers[i++] || {};
       const label = it.q.slice(0, 60);
-      setReport("Filling " + i + "/" + todo.length + " ... NOTHING submitted.", rows);
+      setReport("Filling " + i + "/" + todo.length + "...", rows);
       try {
         let text = (a && a.ok !== false) ? String(a.text || "").trim() : "";
         // Required long textarea that the fast batch deferred: draft it now (local model), review.
@@ -1186,6 +1395,8 @@
     let filled = 0, review = 0, skipped = 0;                     // any that an Ashby re-render race cleared
     const t0 = Date.now();
     const elapsed = () => ((Date.now() - t0) / 1000).toFixed(0);
+    const _tm = []; let _tLast = Date.now();
+    const mark = (k) => { const n = Date.now(); _tm.push(k + " " + ((n - _tLast) / 1000).toFixed(1) + "s"); _tLast = n; };
     let seen = 0;
 
     // Attach the resume FIRST. Setting a file makes Ashby re-render the WHOLE form (every input
@@ -1193,13 +1404,14 @@
     // just-set fields (phone especially); if we captured field refs first, they'd be detached.
     // So: attach resume, let the re-render settle, THEN capture fresh field refs and fill. No
     // mass re-render happens after that (per-field edits only re-render their own control).
-    setReport("Attaching resume ... NOTHING submitted.", rows);
+    setReport("Attaching resume...", rows);
     try {
       const before = rows.length;
       await attachResume(rows);
       if (rows.length > before && rows[rows.length - 1][1] === "filled") filled++;
     } catch (e) { rows.push(["Resume upload", "skip", String(e).slice(0, 50)]); }
     await sleep(700); // let the file-triggered re-render finish before we grab element refs
+    mark("resume");
 
     // Dedicated ATS adapter (Greenhouse / Workable): schema -> one batch -> fill by id. When it
     // runs, the generic heuristic passes below are skipped entirely (no double processing).
@@ -1220,18 +1432,25 @@
     try {
       const _wr = await fillWorkdayExperience(rows, wdHandled);
       filled += _wr.filled; review += _wr.review;
-      if (_wr.filled || _wr.review) setReport("Work experience filled ... NOTHING submitted.", rows);
+      if (_wr.filled || _wr.review) setReport("Work experience filled...", rows);
       // Materialize a Workday Education block if the section is collapsed, so the scan below fills it.
-      if (await wdEnsureEducation()) setReport("Education block added ... NOTHING submitted.", rows);
+      if (await wdEnsureEducation()) setReport("Education block added...", rows);
     } catch (e) { rows.push(["Work Experience", "skip", String(e).slice(0, 60)]); }
+    mark("work-exp+edu");
 
+    try { const _rr = await fillReferences(rows, wdHandled); filled += _rr.filled; } catch (e) { rows.push(["References", "skip", String(e).slice(0, 50)]); }
+    try { filled += await fillStartDates(rows, wdHandled); } catch (e) { rows.push(["Start date", "skip", String(e).slice(0, 50)]); }
+    mark("refs+dates");
     setReport("Scanning form...", rows);
     const fields = deepFields().filter((el) => {
       if (inPenates(el)) return false;
       if (wdHandled.has(el)) return false;
       const t = (el.type || el.tagName).toLowerCase();
       if (el.tagName === "INPUT" && SKIP_TYPES.test(el.type || "")) return false;
-      if (el.disabled || el.readOnly) return false;
+      if (el.disabled) return false;
+      // Read-only is skipped EXCEPT a dropdown's input: non-searchable Ant/react selects render a
+      // readOnly role=combobox input, and the dropdown filler opens + clicks them without typing.
+      if (el.readOnly && (el.getAttribute("role") || "") !== "combobox") return false;
       return shown(el);
     });
 
@@ -1269,20 +1488,22 @@
       }
       const questions = [...want];
       if (questions.length) {
-        setReport("Resolving " + questions.length + " fields in one batch ... NOTHING submitted.", rows);
+        setReport("Resolving " + questions.length + " fields in one batch...", rows);
         const batch = await askEngineBatch(questions, 60000);
         const answers = (batch && batch.answers) || [];
         for (let i = 0; i < questions.length; i++) {
           if (answers[i]) _answerCache.set(questions[i], answers[i]);   // answers[i] === questions[i]
         }
         if (batch && batch.__error) rows.push(["Batch resolve", "skip", batch.__error + " - falling back per-field"]);
+        if (batch && batch.ms != null) _tm.push("(server " + (batch.ms / 1000).toFixed(1) + "s/" + questions.length + "q)");
       }
     } catch (e) { rows.push(["Batch resolve", "skip", String(e).slice(0, 50)]); }
+    mark("batch");
 
     for (const el of fields) {
       const tag = el.tagName, typ = (el.type || "").toLowerCase();
       seen++;
-      setReport("Filling " + seen + "/" + fields.length + " ... " + elapsed() + "s elapsed. NOTHING submitted.", rows);
+      setReport("Filling " + seen + "/" + fields.length + " ... " + elapsed() + "s elapsed.", rows);
 
       // One field must NEVER abort the whole fill. A throw here (usually touching an element the
       // Ashby re-render just detached) would otherwise skip the rest of the loop AND the heal +
@@ -1414,8 +1635,17 @@
         }
         const gap = data.gaps && data.gaps.length;
         if (isCombo) {
-          const ok = await fillCombobox(el, data.text);
-          if (ok) { rows.push([q.slice(0, 60), "filled", data.text.slice(0, 60)]); filled++; }
+          let pickText = data.text;
+          let ok = false;
+          // Field of study rarely lists "Computer Information Technology" verbatim. Try the closest
+          // common catalog names in order ("Information Technology" first), then the exact value.
+          const alts = FIELD_Q.test(q) ? [...new Set(["Information Technology", data.text, ...FIELD_ALTS])] : [data.text];
+          for (const v of alts) {
+            ok = await fillCombobox(el, v);
+            if (ok) { pickText = v; break; }
+            await sleep(150);
+          }
+          if (ok) { rows.push([q.slice(0, 60), "filled", pickText.slice(0, 60)]); filled++; }
           else { rows.push([q.slice(0, 60), "skip", "combobox: '" + data.text.slice(0, 40) + "' not selectable -> you"]); skipped++; }
           continue;
         }
@@ -1489,7 +1719,7 @@
         // already answered (Ashby marks the picked option aria-pressed=true)?
         if (btns.some((b) => b.getAttribute("aria-pressed") === "true" || b.getAttribute("aria-checked") === "true")) continue;
         seen++;
-        setReport("Filling " + seen + " (choice) ... " + elapsed() + "s elapsed. NOTHING submitted.", rows);
+        setReport("Filling " + seen + " (choice) ... " + elapsed() + "s elapsed.", rows);
         const data = await askCached(q, 25, false, 40000, true);
         if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", data && data.__error ? data.__error : "no answer -> you"]); skipped++; continue; }
         const na = norm(data.text);
@@ -1532,7 +1762,7 @@
           const shownVal = clean(el.textContent || el.getAttribute("aria-label") || "");
           if (shownVal && !/^select\.{0,3}$/i.test(shownVal)) { groupsDone.add(q); continue; }   // already answered
           groupsDone.add(q); seen++;
-          setReport("Filling " + seen + " (choice) ... " + elapsed() + "s elapsed. NOTHING submitted.", rows);
+          setReport("Filling " + seen + " (choice) ... " + elapsed() + "s elapsed.", rows);
           const data = await askCached(q, 40, false, 40000, true);
           if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", data && data.__error ? data.__error : "no value -> you"]); skipped++; continue; }
           const ok = await fillAriaCombobox(el, data.text);
@@ -1551,7 +1781,7 @@
           if (skipQuestion(q)) { groupsDone.add(q); if (!JUNK_RE.test(q)) { rows.push([q.slice(0, 60), "skip", "conditional/optional -> you"]); skipped++; } continue; }
           if (radios.some((r) => r.getAttribute("aria-checked") === "true")) { groupsDone.add(q); continue; }
           groupsDone.add(q); seen++;
-          setReport("Filling " + seen + " (choice) ... " + elapsed() + "s elapsed. NOTHING submitted.", rows);
+          setReport("Filling " + seen + " (choice) ... " + elapsed() + "s elapsed.", rows);
           const labelOf = (r) => clean(r.getAttribute("data-value") || r.textContent || "");
           const opts = radios.map(labelOf).filter(Boolean);
           const data = await askEngine(q, 25, false, 40000, false, opts);   // options: serve constrains a choice to Yes/No
@@ -1576,7 +1806,7 @@
           const sv = clean(btn.textContent || "");
           if (sv && !/^select( one)?( required)?\.{0,3}$/i.test(sv)) { groupsDone.add(q); continue; }   // already chosen
           groupsDone.add(q); seen++;
-          setReport("Filling " + seen + " (choice) ... " + elapsed() + "s elapsed. NOTHING submitted.", rows);
+          setReport("Filling " + seen + " (choice) ... " + elapsed() + "s elapsed.", rows);
           const r = await wdSelectFill(btn, q);
           rows.push([q.slice(0, 60), r.ok ? "filled" : "skip", r.ok ? String(r.answer).slice(0, 40) : r.detail]);
           r.ok ? filled++ : skipped++;
@@ -1634,7 +1864,7 @@
       const fresh2 = deepFields().filter((el) => {
         if (inPenates(el)) return false;
         if (el.tagName === "INPUT" && SKIP_TYPES.test(el.type || "")) return false;
-        if (el.disabled || el.readOnly) return false;
+        if (el.disabled || (el.readOnly && (el.getAttribute("role") || "") !== "combobox")) return false;
         return shown(el);
       });
       const verifiedGroups = new Set();
@@ -1712,17 +1942,23 @@
       if (fixed) { filled += fixed; rows.push(["Verify pass recovered", "filled", fixed + " control(s)"]); }
     } catch (_) {}
 
+    // Late reference pass: some ATSs (Dayforce) parse the uploaded resume and redraw the form
+    // seconds later, wiping fields filled early. Refill any reference field that is empty again.
+    try { await sleep(400); await fillReferences(rows, null, true); } catch (_) {}
     } // end penGeneric
     try { if (_keepPort) _keepPort.disconnect(); } catch (_) {}   // release the service-worker keep-alive
     _answerCache = null;
     fillBusy = false;
-    const summary = "\u2713 DONE  \u2014  Filled " + filled + " . " + review + " to review . " + skipped + " left for you . " + elapsed() + "s total . NOTHING submitted.";
+    mark("fields+verify");
+    rows.push(["Timing", "info", _tm.join(" · ")]);
+    try { console.log("[penates] timing", _tm.join(" | ")); } catch (_) {}
+    const summary = "\u2713 DONE  \u2014  Filled " + filled + " . " + review + " to review . " + skipped + " left for you . " + elapsed() + "s total.";
     setReport(summary, rows);
     try {
       chrome.runtime.sendMessage({ type: "FETCH_FILLLOG", payload: {
         url: location.href, company: companyGuess(), role: roleGuess(),
         summary: summary, filled: filled, review: review, skipped: skipped,
-        rows: rows.slice(0, 40).map(function (r) { return { q: r[0], status: r[1], detail: r[2] }; })
+        rows: rows.slice(0, 300).map(function (r) { return { q: r[0], status: r[1], detail: r[2] }; })
       } }).catch(function () {});
     } catch (_) {}
   }

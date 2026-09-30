@@ -126,7 +126,7 @@ def parse_constraints(question, limit=None):
 
 # ---------------------------------------------------------------- genre
 _GENRE_RULES = [
-    ("why_company",  r"why (do you want|are you interested|us\b|here\b|this (company|organization|team))|what (excites|interests|draws|appeals to) you|what makes you (excited|want)|excited to (work|join|be part)|want to work (at|for|here)|why (would you like )?work(ing)? (here|with us|for us)|interested in (working|joining)|^\s*why \S+\s*\??\s*$"),
+    ("why_company",  r"why (do you want|are you interested|us\b|here\b|this (company|organization|team))|what (excites|interests|draws|appeals to) you|what makes you (excited|want)|excited to (work|join|be part)|want to work (at|for|here)|(like|want|love|wish) to (work|join) (with|at|for|us)\b|why (would you like )?work(ing)? (here|with us|for us)|interested in (working|joining)|^\s*why \S+\s*\??\s*$"),
     ("why_role",     r"why this (position|role|job)|why (are you interested in )?(this )?(devops|sre|cloud|platform|the) (role|position)|why do you want this (role|position|job)"),
     ("hypothetical", r"what would you build|if you (were|had|could|got)|imagine (you|that)|suppose you|given (a|the).{0,20}(month|week|opportunity|chance)|spend a (month|week|day)|how would you (design|build|approach|architect)|greenfield|from scratch, what|blue ?sky"),
     ("behavioral",   r"influenc\w+|disagree\w*|convince|persuad\w+|conflict|push(ed)? ?back|difficult (person|co-?worker|colleague|teammate|customer|client|manager|boss|conversation|stakeholder)|had to (get|win|bring|convince|persuade|talk)|build(ing)? consensus|align(ing|ed)? (a |the )?(team|group|stakeholders|people)|work(ed)? with (a )?(difficult|resistant)|handl\w+ (a )?(disagreement|conflict)|gave (someone )?(difficult|hard|critical) feedback"),
@@ -519,30 +519,128 @@ def _behavioral_gap(question, c):
            "about that than invent a conflict.")
     return _no_dash(_a.enforce_length(ans, {}, limit, False).strip())
 
+def _company_domain_ranked(blob):
+    """(phrase, n_distinct_themes): the theme with the MOST hits, and how many themes hit at all.
+    Grok seq 98: first-match let a single 'secret' beat the posting's real emphasis."""
+    counts = []
+    for rx, phrase in _WHY_DOMAINS:
+        n = len(rx.findall(blob or ""))
+        if n:
+            counts.append((n, phrase))
+    if not counts:
+        return None, 0
+    counts.sort(key=lambda x: -x[0])
+    return counts[0][1], len(counts)
+
+
+def _owned_lines():
+    """Candidate-owned sentences only: canonical_stories + signature_projects from profile.yaml."""
+    try:
+        p = _a.load("profile.yaml") or {}
+    except Exception:
+        p = {}
+    out = []
+    for v in (p.get("canonical_stories") or {}).values():
+        if v:
+            out.append(("story", str(v)))
+    for v in (p.get("signature_projects") or []):
+        if v:
+            out.append(("project", str(v)))
+    return out
+
+
+def _first_sentence(t):
+    t = re.sub(r"\s*\([^)]*\)", "", str(t or "")).strip()          # parentheticals are tool lists
+    sents = [x.strip().rstrip(".;:") for x in re.split(r"(?<=[.!?])\s+", t) if x.strip()]
+    if not sents:
+        return ""
+    out = sents[0]
+    if len(out) < 70 and len(sents) > 1:                  # 'Inherited a broken Wazuh SIEM.' needs its outcome
+        nxt = sents[1]
+        out += " and " + nxt[0].lower() + nxt[1:]
+    return re.sub(r"\s+", " ", out)
+
+
+def _owned_sentence(line_kind, text, lead=""):
+    """First person, from the candidate's own record, never invented scope. `lead` is the
+    'The posting asks for X and Y' clause (may be empty)."""
+    t = _first_sentence(text).replace("; ", " and ")
+    if not t:
+        return ""
+    w = t.split(" ", 1)
+    if line_kind == "story" and re.match(r"^[A-Z][a-z]+(ed|lt|nt)$", w[0]):   # Inherited / Built / Independently? no
+        body = "I " + w[0].lower() + (" " + w[1] if len(w) > 1 else "")
+        return (lead + ", which is work I have done hands-on: " + body) if lead else body
+    if line_kind == "story" and re.match(r"^[A-Z][a-z]+ly$", w[0]) and len(w) > 1:   # 'Independently built ...'
+        body = "I " + w[0].lower() + " " + w[1]
+        return (lead + ", which is work I have done hands-on: " + body) if lead else body
+    low = t[0].lower() + t[1:] if not t[:2].isupper() else t
+    return (lead + ", and my recent work covers that: " + low) if lead else ("Recent work of mine: " + low)
+
+
+def _why_matched_skills(job_text):
+    """Posting skills the user HAS (never SUPPORTED, never gaps), required first."""
+    try:
+        import skills as _sk
+        req, pref, found = _sk.extract_jd_skills(job_text or "")
+        H, S = _sk.have_set(), _sk.supported_set()
+        _, rm, _, _ = _sk.coverage(req, H, S)
+        _, pm, _, _ = _sk.coverage(pref, H, S)
+        return sorted(rm) + sorted(pm - rm)
+    except Exception:
+        return []
+
+
+_WHY_FRAMES = [
+    ("The posting centers on %s.", "That is the work I want to keep doing."),
+    ("Most of what this role asks for is %s.", "It is the kind of work I want more of."),
+    ("%s is where this role puts its weight.", "More of that work is what I am looking for."),
+]
+
+
 def _why_candidate_only(facts, c, target_role=None, company=None, job_text=""):
-    """Deterministic why-company floor (option B, Grok-approved): ENGAGE the company with a true
-    domain hook taken from the POSTING (never the mission slogan), tie it to the candidate's real
-    lane, then say why the role fits. No slogans, no unowned-work claims, no em dashes.
-    Falls back to a candidate-first line if the posting yields no usable domain."""
+    """Deterministic why-company floor, v2 (Claude+Grok board seq 98, 2026-09-30).
+    (1) optional company-focus sentence, only when >=2 domain themes hit; the top theme by count,
+        stated as the posting's focus, never 'same ground I cover';
+    (2) ONE owned sentence from canonical_stories/signature_projects with the most overlap with the
+        posting skills the user HAS (<=2 named), first person, no invented scope;
+    (3) a short close. Frame rotates by hash(company) so re-runs are stable.
+    No pasted posting text, no 'I'm applying for', no em dashes. Falls back to the identity line."""
     limit = c.get("max_chars") or 700
-    co = company or "this company"
-    role = target_role or "this role"
-    ident = _why_identity()
+    co = (company or "").strip()
+    frame = _WHY_FRAMES[int(hashlib.md5(co.lower().encode("utf-8")).hexdigest(), 16) % len(_WHY_FRAMES)]
     blob = (job_text or "") + " " + " ".join(facts or [])
-    domain = _company_domain(blob)
     parts = []
-    if target_role:
-        parts.append("I'm applying for the %s role." % role)
-    if domain:
-        parts.append("%s's work sits in %s, which is the same ground I cover day to day: %s." % (co, domain, ident))
-        parts.append("That overlap is what draws me to the role, and it is the kind of work I want to keep doing.")
-    else:
-        parts.append("The work I already do is %s, and it maps directly onto the %s role." % (ident, role))
-        parts.append("That is the kind of work I want to keep doing, which is what draws me to this role.")
-    op = _operational_facts(facts, company)
-    if op:
-        _ph = _fact_phrase(op[0], company).rstrip(".")
-        parts.append("It also lines up with what the posting describes: %s." % _ph)
+    domain, ndom = _company_domain_ranked(job_text or "")
+    if domain and ndom >= 2:
+        d = frame[0] % domain
+        parts.append(d[0].upper() + d[1:])
+    matched = _why_matched_skills(job_text)
+    owned = ""
+    if matched:
+        try:
+            import skills as _sk
+            best, best_n = None, 0
+            for kind, text in _owned_lines():
+                n = len(_sk.canon_skills_in(text) & set(matched))
+                if n > best_n:
+                    best, best_n = (kind, text), n
+            if best:
+                overlap = [m for m in matched if m in _sk.canon_skills_in(best[1])]
+                named = (overlap or matched)[:2]
+                lead = "The posting asks for %s" % " and ".join(named)
+                for ld in (lead, ""):                       # drop the named skills if it tips into a tech dump
+                    sent = _owned_sentence(best[0], best[1], ld).rstrip(".") + "."
+                    sent = sent[0].upper() + sent[1:]
+                    trial = _no_dash(" ".join(parts + [sent]))
+                    if not why_tech_dump(trial) and not why_claims_unowned(trial):
+                        parts.append(sent); owned = sent; break
+        except Exception:
+            owned = ""
+    if not owned:
+        role = ("the %s role" % target_role) if target_role else "this role"
+        parts.append("The work I already do is %s, and it maps directly onto %s." % (_why_identity(), role))
+    parts.append(frame[1])
     ans = _no_dash(" ".join(parts))
     return _a.enforce_length(ans, {}, limit, False).strip()
 
@@ -763,6 +861,244 @@ def validate(text, genre, c, gaps, facts=None, current_title=None, target_role=N
         fails.append("gap_not_disclosed")
     return fails
 
+# ---------------------------------------------------------------- why-company v3
+# Claude+Grok board seq 100-101 (2026-09-30). The MODEL reasons, code keeps it honest:
+#   SELECT (JSON, temp 0): pick by INDEX the posting sentence that describes the company/team/
+#          environment, two posting needs, and one evidence id per need. Code resolves the text.
+#   WRITE  (temp 0.3): 4 sentences from ONLY the selection. Gates + grounded-token check.
+#   FLOOR  : fixed template over SELECT's resolved sentences (still model-chosen).
+#   Identity line only when SELECT fails; Ollama down -> identity line immediately.
+_AGENCY_RE = re.compile(r"\b(HHS|DOJ|NIH|CMS|HRSA|DoD|DHS|VA|FBI|IRS)\b")
+_AGENCY_PAREN = re.compile(r"\s*\((?:[^)]*\b(?:HHS|DOJ|NIH|CMS|HRSA)\b[^)]*)\)")
+
+def posting_sentences(text, cap=45):
+    """Numbered-sentence view of the posting (bullets and prose), trimmed, deduped."""
+    try:
+        import skills as _sk
+        t = _sk.clean_desc(text or "")
+    except Exception:
+        t = text or ""
+    out, seen = [], set()
+    for line in re.split(r"\n+", t):
+        line = re.sub(r"^\s*[-*\u2022\u25cf\d.)]+\s*", "", line).strip()
+        for sent in re.split(r"(?<=[.!?])\s+(?=[A-Z])", line):
+            sent = sent.strip()
+            if len(sent) < 25 or len(sent.split()) < 5:
+                continue
+            k = sent.lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(sent[:260])
+            if len(out) >= cap:
+                return out
+    return out
+
+def why_evidence():
+    """Candidate-owned evidence with ids. Limited/gap items never reach the model."""
+    try:
+        p = _a.load("profile.yaml") or {}
+    except Exception:
+        p = {}
+    limited = [str(x).lower() for x in (p.get("limited_or_none") or [])]
+    limited += [str(k).lower() for k in (p.get("limited_experience") or {}).keys()]
+    items = []
+    for i, v in enumerate(p.get("current_scope") or [], 1):
+        items.append({"id": "S%d" % i, "kind": "scope", "text": str(v)})
+    for i, v in enumerate(p.get("signature_projects") or [], 1):
+        items.append({"id": "P%d" % i, "kind": "project", "text": str(v)})
+    for k, v in (p.get("canonical_stories") or {}).items():
+        items.append({"id": "K_%s" % k, "kind": "story", "text": str(v)})
+    out = []
+    for it in items:
+        low = it["text"].lower()
+        if any(re.search(r"(?<![a-z0-9])" + re.escape(g) + r"(?![a-z0-9])", low) for g in limited if g):
+            continue
+        it["write_text"] = _AGENCY_PAREN.sub("", it["text"]).strip()
+        out.append(it)
+    return out
+
+import urllib.request, urllib.error
+
+def _ollama_json(prompt, system, schema, model=None, temperature=0):
+    body = {"model": model or _a.ESSAY_MODEL, "stream": False, "format": schema,
+            "options": {"temperature": temperature},
+            "messages": ([{"role": "system", "content": system}] if system else []) +
+                        [{"role": "user", "content": prompt}]}
+    req = urllib.request.Request(_a.OLLAMA_ROOT + "/api/chat", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return json.loads(json.loads(r.read())["message"]["content"])
+
+def select_why(posting, evidence, company=None, model=None):
+    """Model picks by index; code resolves and validates. None on failure (after one retry)."""
+    sents = posting_sentences(posting)
+    if len(sents) < 3 or len(evidence) < 2:
+        return None
+    ids = [e["id"] for e in evidence]
+    schema = {"type": "object", "required": ["reason_idx", "need_idx", "evidence_ids"],
+              "properties": {"reason_idx": {"type": "integer"},
+                             "need_idx": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2},
+                             "evidence_ids": {"type": "array", "items": {"type": "string", "enum": ids}, "minItems": 2, "maxItems": 2}}}
+    co = company or "the company"
+    prompt = ("JOB POSTING SENTENCES:\n" + "\n".join("[%d] %s" % (i, x) for i, x in enumerate(sents)) +
+              "\n\nCANDIDATE EVIDENCE (the candidate's real work):\n" +
+              "\n".join("[%s] %s" % (e["id"], e["text"]) for e in evidence) +
+              "\n\nPick, for a 'Why do you want to work at %s?' answer:\n"
+              "reason_idx: the ONE posting sentence that best describes %s itself, its team, or its work "
+              "environment (why someone would want to work THERE). Not a duty or requirement bullet.\n"
+              "need_idx: TWO different posting sentences naming work this role does that the candidate's "
+              "evidence can honestly back up.\n"
+              "evidence_ids: for need_idx[0] then need_idx[1], the ONE evidence id that best proves it. Two different ids.\n"
+              "Return JSON only." % (co, co))
+    system = "You match a job posting to a candidate's real experience. You only choose indexes and ids."
+    global _WHY_LAST_ERR
+    _WHY_LAST_ERR = ""
+    fmt = schema
+    for attempt in range(3):
+        try:
+            try:
+                d = _ollama_json(prompt, system, fmt, model=model, temperature=0)
+            except urllib.error.HTTPError as he:           # older Ollama: no JSON-schema format
+                if fmt != "json":
+                    fmt = "json"
+                    d = _ollama_json(prompt + "\nReturn an object with keys reason_idx (int), need_idx (2 ints), evidence_ids (2 ids).",
+                                     system, fmt, model=model, temperature=0)
+                else:
+                    raise
+            r = int(d.get("reason_idx"))
+            n = [int(x) for x in d.get("need_idx") or []]
+            e = [str(x) for x in d.get("evidence_ids") or []]
+            if not (0 <= r < len(sents)) or len(n) != 2 or n[0] == n[1] or any(not (0 <= x < len(sents)) for x in n):
+                raise ValueError("bad idx %r" % d)
+            if len(e) != 2 or e[0] == e[1] or any(x not in ids for x in e):
+                raise ValueError("bad ids %r" % d)
+            ev = {x["id"]: x for x in evidence}
+            return {"reason": sents[r], "needs": [sents[n[0]], sents[n[1]]],
+                    "evidence": [ev[e[0]], ev[e[1]]], "raw": d}
+        except Exception as ex:
+            _WHY_LAST_ERR = str(ex)[:160]
+            print("[why-select] attempt %d: %s" % (attempt + 1, _WHY_LAST_ERR), flush=True)
+    return None
+
+_WHY_LAST_ERR = ""
+
+def why_grounded_fail(text, sel, posting):
+    """Stack products, digit runs and agency names in the answer must come from the selected
+    evidence or the posting. Returns the first offending token, else None."""
+    allowed = (" ".join(e["write_text"] for e in sel["evidence"]) + " " + (posting or "")).lower()
+    toks = set(_stack_tokens())
+    try:
+        import skills as _sk
+        toks |= set(_sk.CANON.values())
+    except Exception:
+        pass
+    low = (text or "").lower()
+    for tok in sorted(toks, key=len, reverse=True):
+        rx = r"(?<![a-z0-9])" + re.escape(tok.lower()) + r"(?![a-z0-9])"
+        if re.search(rx, low) and not re.search(rx, allowed):
+            return tok
+    for m in _AGENCY_RE.finditer(text or ""):
+        if not re.search(r"\b" + m.group(1) + r"\b", " ".join(e["write_text"] for e in sel["evidence"]) + " " + (posting or "")):
+            return m.group(1)
+    for m in re.finditer(r"\d[\d,.]*", text or ""):
+        if m.group(0).strip(".,") not in allowed:
+            return m.group(0)
+    return None
+
+def _lc_first(t):
+    """Lowercase the first letter unless the first word is a product/proper noun."""
+    w = (t.split(" ", 1)[0] if t else "").strip(",:;")
+    proper = {x.split()[0].lower() for x in _stack_tokens()}
+    try:
+        import skills as _sk
+        proper |= {v.split()[0].lower() for v in _sk.CANON.values()}
+    except Exception:
+        pass
+    if not t or w.lower() in proper or (len(w) > 1 and w[1:].lower() != w[1:]):
+        return t
+    return t[0].lower() + t[1:]
+
+def _ev_first_person(e):
+    t = e["write_text"].rstrip(". ")
+    if e["kind"] == "project":
+        t = re.sub(r"\s*\([^)]*\)", "", t)          # tool lists stay out of the floor
+    if e["kind"] == "story":
+        return _owned_sentence("story", t)
+    if re.match(r"(?i)^sole administrator\b", t):
+        return "Today I am the " + _lc_first(t)
+    if e["kind"] == "project":
+        x = _lc_first(t)
+        return "I also delivered " + ("an " if x[:1].lower() in "aeiou" else "a ") + x
+    return "My current work covers " + _lc_first(t)
+
+def why_floor(company, sel):
+    """Fixed template over the model's selection (no model paraphrase)."""
+    co = company or "this company"
+    reason = sel["reason"].rstrip(". ")
+    words = reason.split()
+    if len(words) > 30:
+        reason = " ".join(words[:30]).rstrip(",;:") + "..."
+    parts = ['What draws me to %s is how the posting describes the work: "%s."' % (co, reason)]
+    for e in sel["evidence"]:
+        parts.append(_ev_first_person(e).rstrip(".") + ".")
+    parts.append("That is the work I want to keep doing.")
+    return _no_dash(" ".join(parts))
+
+def write_why(company, sel, c, model=None, target_role=None):
+    co = company or "the company"
+    ev = "\n".join("- %s" % e["write_text"] for e in sel["evidence"])
+    system = ("You write short, plain, first-person job application answers for the candidate. "
+              "Never invent facts. No em dashes. No cliches (passion, perfect fit, excited to contribute, "
+              "aligns perfectly, leverage, thrive).")
+    prompt = ("Question: Why would you like to work with %s?\n\n"
+              "WHAT THE POSTING SAYS ABOUT %s:\n%s\n\n"
+              "WHAT THIS ROLE NEEDS:\n1. %s\n2. %s\n\n"
+              "CANDIDATE EVIDENCE (use ONLY these facts, in this order, one per need):\n%s\n\n"
+              "Write exactly 4 sentences, under %d characters total:\n"
+              "1) Paraphrase what the posting says about %s and its environment in your own words, attributed "
+              "to them (e.g. '%s describes ...'), and say why that kind of place suits you.\n"
+              "2) First evidence item, in first person, tied to need 1.\n"
+              "3) Second evidence item, in first person, tied to need 2.\n"
+              "4) A short, plain closing sentence about wanting to keep doing this work there.\n"
+              "Do not add any tool, product, agency, number, or certification that is not in the evidence. "
+              "Do not copy posting sentences word for word. Output only the answer."
+              % (co, co.upper(), sel["reason"], sel["needs"][0], sel["needs"][1], ev,
+                 c.get("max_chars") or 700, co, co))
+    out = _a.ollama(prompt, system, temperature=0.3, model=model).strip().strip('"')
+    return _no_dash(_a.enforce_length(out, {}, c.get("max_chars") or 700, False).strip())
+
+def why_v3_checks(text, sel, posting, company, c, current_title=None, target_role=None):
+    fails = [f for f in validate(text, "why_company", c, {"hard": [], "limited": []}, None,
+                                 current_title, target_role)
+             if f not in ("tech_dump",) and not f.startswith(("under_min", "over_max"))]
+    g = why_grounded_fail(text, sel, posting)
+    if g:
+        fails.append("ungrounded(%s)" % g)
+    if company and company.lower().split()[0] not in (text or "").lower():
+        fails.append("no_company_name")
+    return fails
+
+def why_v3(company, posting, c, model=None, current_title=None, target_role=None):
+    """Returns (text, method, checks) or None if SELECT failed (caller uses the identity line)."""
+    ev = why_evidence()
+    sel = select_why(posting, ev, company, model=model)
+    if not sel:
+        return None
+    checks = []
+    for attempt in range(2):
+        try:
+            txt = write_why(company, sel, c, model=model, target_role=target_role)
+        except Exception as ex:
+            checks = ["write_error(%s)" % str(ex)[:60]]
+            continue
+        checks = why_v3_checks(txt, sel, posting, company, c, current_title, target_role)
+        if not checks:
+            return txt, "essay:why_v3", [], sel
+    floor = why_floor(company, sel)
+    fchecks = why_v3_checks(floor, sel, posting, company, c, current_title, target_role)
+    return floor, "review:why_v3_floor", fchecks + ["model rejected: %s" % ", ".join(checks)], sel
+
 # ---------------------------------------------------------------- honest gap answer
 def _honest_gap(question, gaps, story, c):
     limit = c.get("max_chars") or 700
@@ -873,6 +1209,25 @@ def answer_essay(question, limit=None, company=None, url=None, model=None, want_
     # WHY_COMPANY_HYBRID=1, or on a per-field Regenerate (why_hybrid passed by serve.py for a
     # fresh, non-bulk request). When on but the model still fails the gate, the template ships
     # and 'checks' says so.
+    _v3_note = ""
+    if genre in ("why_company", "why_role") and not src_text:
+        _v3_note = "why_v3 skipped: no posting text"
+    elif genre in ("why_company", "why_role") and not (why_hybrid or os.environ.get("WHY_COMPANY_V3") == "1"):
+        _v3_note = "why_v3 off (not a Regenerate)"
+    if genre in ("why_company", "why_role") and src_text and (why_hybrid or os.environ.get("WHY_COMPANY_V3") == "1") and _a.ollama_up():
+        try:
+            r3 = why_v3(company, src_text, c, model=model, current_title=current_title, target_role=target_role)
+        except Exception as ex:
+            print("[why-v3] %s" % ex, flush=True); r3 = None
+        if not r3:
+            _v3_note = "why_v3 select failed: %s" % (_WHY_LAST_ERR or "unknown")
+        if r3:
+            text, meth, fails, sel = r3
+            return {"ok": True, "kind": "answer", "method": meth, "genre": genre, "grounding": "why_v3",
+                    "story": None, "chars": len(text), "words": _wordcount(text), "gaps": [],
+                    "review": bool(fails) or meth.startswith("review"), "checks": fails, "text": text,
+                    "why_selection": {"reason": sel["reason"], "needs": sel["needs"],
+                                      "evidence": [e["id"] for e in sel["evidence"]]}}
     if genre in ("why_company", "why_role"):
         _hybrid = why_hybrid or os.environ.get("WHY_COMPANY_HYBRID") == "1"
         if not (_hybrid and _a.ollama_up()):
@@ -881,7 +1236,7 @@ def answer_essay(question, limit=None, company=None, url=None, model=None, want_
             return {"ok": True, "kind": "answer", "method": ("review:" if fails else "essay:") + genre,
                     "genre": genre, "grounding": ("fact+template" if facts else "template"),
                     "story": None, "chars": len(text), "words": _wordcount(text), "gaps": [],
-                    "review": bool(fails), "checks": fails, "text": text}
+                    "review": bool(fails), "checks": fails + ([_v3_note] if _v3_note else []), "text": text}
         # else: hybrid is ON and Ollama is up -> fall through to the model + gate below.
 
     if not _a.ollama_up():
@@ -892,7 +1247,7 @@ def answer_essay(question, limit=None, company=None, url=None, model=None, want_
             return {"ok": True, "kind": "answer", "method": ("review:" if fails else "essay:") + genre,
                     "genre": genre, "grounding": ("fact+template" if facts else "template"),
                     "story": None, "chars": len(text), "words": _wordcount(text), "gaps": [],
-                    "review": bool(fails), "checks": fails, "text": text}
+                    "review": bool(fails), "checks": fails + ([_v3_note] if _v3_note else []), "text": text}
         if story:
             s = story.get("star", {})
             txt = _a.enforce_length("%s %s" % (s.get("action", ""), s.get("result", "")),
@@ -974,7 +1329,7 @@ def answer_essay(question, limit=None, company=None, url=None, model=None, want_
             "genre": genre, "grounding": grounding,
             "story": ((story or {}).get("id") if (story and genre in ("owned_project", "technical_experience", "behavioral")) else None),
             "chars": len(text), "words": _wordcount(text), "gaps": [],
-            "review": review, "checks": fails, "text": text}
+            "review": review, "checks": fails + ([_v3_note] if _v3_note else []), "text": text}
 
 # ---------------------------------------------------------------- CLI
 if __name__ == "__main__":
