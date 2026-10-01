@@ -120,6 +120,7 @@
   .fld{display:flex;flex-direction:column;gap:6px;min-width:0}
   .fld.wide{grid-column:1/-1}
   .fld>.lbl{font-size:12px;color:var(--text-2);font-weight:600}
+  .fld>.lbl .cap,.toggle .cap{font-weight:400}
   .fld textarea{min-height:64px}
   .packs{display:flex;gap:22px;flex-wrap:wrap}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -133,6 +134,12 @@
   .qrow{display:grid;grid-template-columns:190px minmax(0,1fr) auto;gap:12px;align-items:center;min-height:34px;border-bottom:1px solid var(--line)}
   .qrow .lbl{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .qrow .q{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2);font:12px var(--mono)}
+  .qrow2{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
+  .qmain{display:flex;flex-direction:column;min-width:0;color:var(--text);text-decoration:none}
+  .qmain:hover{text-decoration:none} .qmain:hover .lbl{color:var(--accent)}
+  .qmain .lbl{font-weight:600}
+  .qmain .cap{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .qrow2 .qfull{grid-column:1/-1;margin:4px 0 2px;font-size:11px;max-height:none}
   .chipbox{min-height:32px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2)}
   .chipbox input{border:0!important;background:none!important;height:22px!important;min-width:140px!important;padding:0 4px!important;outline:none;flex:1}
   .logline{font:12px/1.5 var(--mono);color:var(--text-2);border-bottom:1px solid var(--line);padding:4px 0}
@@ -269,43 +276,34 @@ tr.jobrow:hover .icon,.icon:focus-visible{opacity:1}
   </section>
   <section data-panel="search" hidden>
     <div class="card">
-      <div class="card-h"><h3>Find jobs on sites Penates can't scan</h3><span class="hint">Google searches you open in a new tab. Good links go in "Add job links" below. Saved to config.json.</span></div>
+      <div class="card-h"><h3>Google job search</h3><span class="hint">Builds Google searches aimed at the job sites you list, for boards Penates can't scan directly. Saved to config.json.</span></div>
       <div class="sgrid">
-        <div class="fld"><span class="lbl">Roles</span>
-          <div class="chips chipbox" data-for="gsRoles"></div><textarea id="gsRoles" hidden></textarea></div>
-        <div class="fld"><span class="lbl">Exclude</span>
-          <div class="chips chipbox" data-for="gsExclude"></div><textarea id="gsExclude" hidden></textarea></div>
+        <div class="fld wide"><span class="lbl">Roles</span>
+          <div class="chips chipbox" data-key="roles" data-ph="Add a role, Enter"></div></div>
+        <div class="fld"><span class="lbl">Include keywords <span class="cap">every result must contain each one</span></span>
+          <div class="chips chipbox" data-key="include" data-ph="e.g. remote, Enter"></div></div>
+        <div class="fld"><span class="lbl">Exclude keywords</span>
+          <div class="chips chipbox" data-key="exclude" data-ph="Add a word or phrase, Enter"></div></div>
+        <div class="fld wide"><span class="lbl">Sites <span class="cap">host names, e.g. boards.greenhouse.io</span></span>
+          <div class="chips chipbox" data-key="sites" data-ph="Add a site, Enter"></div></div>
         <div class="fld"><span class="lbl">Look back</span>
           <div class="row">
             <div class="seg" id="gsDaysSeg"><button type="button" data-d="1">24h</button><button type="button" data-d="3">3d</button><button type="button" data-d="7">1w</button><button type="button" data-d="14">2w</button><button type="button" data-d="30">1m</button><button type="button" data-d="custom">Custom</button></div>
-            <select id="gsDays" hidden><option value="1">24 hours</option><option value="3">3 days</option><option value="7">1 week</option><option value="14">2 weeks</option><option value="30">1 month</option><option value="custom">Custom...</option></select>
             <input id="gsDaysN" type="number" min="1" max="365" style="width:80px;min-width:0" hidden placeholder="days">
             <span class="cap mono" id="gsAfter"></span>
           </div></div>
-        <div class="fld"><span class="lbl">Filters</span>
-          <div class="row"><label class="toggle"><input type="checkbox" id="gsRemote"> Remote</label></div></div>
-        <div class="fld wide"><span class="lbl">Query packs</span>
-          <div class="packs">
-            <label class="toggle"><input type="checkbox" id="gsVwith"> Senior pack</label>
-            <label class="toggle"><input type="checkbox" id="gsVwithout"> Non-senior pack</label>
-            <label class="toggle"><input type="checkbox" id="gsVclear"> Clearance pack</label>
+        <div class="fld"><span class="lbl">Seniority <span class="cap">optional</span></span>
+          <div class="row">
+            <div class="seg" id="gsSenSeg"><button type="button" data-s="any">Any</button><button type="button" data-s="senior">Senior only</button><button type="button" data-s="no_senior">Exclude senior</button></div>
           </div>
-          <div class="hint">Each pack adds its own set of searches. Senior and non-senior together is fine.</div></div>
+          <div class="chips chipbox" data-key="senior_terms" data-ph="senior words, e.g. senior, Enter" id="gsSenTerms" hidden></div></div>
+        <div class="fld wide"><label class="toggle"><input type="checkbox" id="gsClrOn"> Clearance terms <span class="cap">optional; results must mention one</span></label>
+          <div class="chips chipbox" data-key="clearance_terms" data-ph="e.g. secret clearance, Enter" id="gsClrTerms" hidden></div></div>
       </div>
-      <div class="row" style="margin-top:14px"><button class="btn" id="gsSave">Save</button><button class="btn quiet" id="gsReset">Reset to defaults</button><span class="cap" id="gsMsg"></span></div>
-      <details class="adv"><summary>Advanced: sites, extra terms, clearance terms</summary>
-        <div class="sgrid">
-          <div class="fld"><span class="lbl">Site groups <span class="cap">one search per line, sites comma-separated</span></span><textarea id="gsSites" rows="3"></textarea></div>
-          <div class="fld"><span class="lbl">Clearance terms <span class="cap">Clearance pack only, one per line</span></span><textarea id="gsClear" rows="3"></textarea></div>
-          <div class="fld wide"><span class="lbl">Extra must-include <span class="cap">space-separated, quotes allowed; the Remote toggle adds "remote" here</span></span><input id="gsInclude" type="text"></div>
-        </div>
-      </details>
-      <div class="subh">Searches</div>
+      <div class="row" style="margin-top:14px"><button class="btn" id="gsSave">Save</button><button class="btn quiet" id="gsClear">Clear all</button><span class="cap" id="gsMsg"></span></div>
+      <div class="subh" id="gsOutH">Searches</div>
       <div id="gsOut"></div>
     </div>
-    <div class="card">
-      <div class="card-h"><h3>LinkedIn</h3><span class="hint">Refresh already pulls LinkedIn (JobSpy). These open LinkedIn's own search with the same roles and look-back, remote, United States.</span></div>
-      <div id="gsLi"></div></div>
     <div class="card">
       <div class="card-h"><h3>Add job links</h3><span class="hint">Paste job URLs from any search, one per line. They land in Jobs, and a Greenhouse, Lever, Ashby, Workday, SmartRecruiters or Workable board gets added for future scans.</span></div>
       <textarea id="gsUrls" rows="4" placeholder="https://..." style="min-height:90px"></textarea>
@@ -1141,78 +1139,125 @@ $('st-save').onclick=saveStory;$('st-clear').onclick=clearStory;
 $('stPaneMine').onclick=()=>showStoryPane('mine');
 $('stPaneImp').onclick=()=>showStoryPane('imp');
 loadJobs();
-// ---- Search tab: Google site: query editor + LinkedIn links + paste-to-add ----
-const GS_DEFAULT={sites:["recruiting.paylocity.com, recruit.hirebridge.com","boards.bamboohr.com"],
-  roles:["devops","system engineer","SRE","systems administrator"],include:'"remote"',
-  exclude:["principal"],clearance:["secret clearance","security clearance","active clearance","ability to obtain","clearable"],
-  days:7,variants:{with:true,without:true,clearance:true}};
+// ---- Search tab: Google job-site query generator (any user; nothing personal hardcoded) ----
+// Model saved to config.json google_search:
+//   {roles[], include[], exclude[], sites[], days, seniority:'any'|'senior'|'no_senior',
+//    senior_terms[], clearance:{on:bool, terms[]}}
+const GS_DEFAULT={roles:[],include:[],exclude:[],sites:["boards.greenhouse.io","jobs.lever.co","jobs.ashbyhq.com"],
+  days:7,seniority:'any',senior_terms:['senior'],clearance:{on:false,terms:[]}};
 let GS=null;
-const gsLines=v=>v.split('\n').map(s=>s.trim()).filter(Boolean);
-const gsQ=s=>/^".*"$/.test(s)?s:(/\s/.test(s)?'"'+s+'"':s);
-function gsDays(){ const v=$('gsDays').value; return v==='custom'?Math.max(1,parseInt($('gsDaysN').value||'7')):parseInt(v); }
-function gsRead(){ return {sites:gsLines($('gsSites').value),roles:gsLines($('gsRoles').value),include:$('gsInclude').value.trim(),
-  exclude:gsLines($('gsExclude').value),clearance:gsLines($('gsClear').value),days:gsDays(),
-  variants:{with:$('gsVwith').checked,without:$('gsVwithout').checked,clearance:$('gsVclear').checked}}; }
-function gsFill(c){ $('gsSites').value=c.sites.join('\n'); $('gsRoles').value=c.roles.join('\n'); $('gsInclude').value=c.include||'';
-  $('gsExclude').value=(c.exclude||[]).join('\n'); $('gsClear').value=(c.clearance||[]).join('\n');
-  const preset=['1','3','7','14','30'].includes(String(c.days)); $('gsDays').value=preset?String(c.days):'custom';
-  $('gsDaysN').hidden=preset; $('gsDaysN').value=c.days; const v=c.variants||{};
-  $('gsVwith').checked=v.with!==false; $('gsVwithout').checked=v.without!==false; $('gsVclear').checked=v.clearance!==false;
-  chipAll(); gsSegSync(); $('gsRemote').checked=/"remote"/i.test($('gsInclude').value); }
-// chip inputs backed by the hidden one-per-line textareas (same data the builder always read)
-function chipRender(box){
-  const ta=$(box.dataset.for), items=gsLines(ta.value);
-  box.innerHTML=items.map((t,i)=>`<span class="chip">${esc(t)}<button type="button" data-i="${i}" title="Remove" aria-label="Remove ${esc(t)}">\u00d7</button></span>`).join('')
-    +`<input type="text" placeholder="${box.dataset.for==='gsRoles'?'Add a role, Enter':'Add a word or phrase, Enter'}">`;
-  const inp=box.querySelector('input');
-  const commit=()=>{ const v=inp.value.replace(/,$/,'').trim(); if(!v) return; ta.value=[...items,v].join('\n'); ta.dispatchEvent(new Event('input')); chipRender(box); box.querySelector('input').focus(); };
-  inp.onkeydown=e=>{ if(e.key==='Enter'||e.key===','){ e.preventDefault(); commit(); }
-    else if(e.key==='Backspace'&&!inp.value&&items.length){ ta.value=items.slice(0,-1).join('\n'); ta.dispatchEvent(new Event('input')); chipRender(box); box.querySelector('input').focus(); } };
-  inp.onblur=commit;
-  box.querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>{ const k=+b.dataset.i; ta.value=items.filter((_,x)=>x!==k).join('\n'); ta.dispatchEvent(new Event('input')); chipRender(box); });
+const gsLines=v=>String(v||'').split('\n').map(s=>s.trim()).filter(Boolean);
+const gsTok=s=>{ s=String(s).trim().replace(/^"(.*)"$/,'$1').replace(/"/g,''); return /\s|[-/]/.test(s)?'"'+s+'"':s; };
+const gsQuoted=s=>'"'+String(s).trim().replace(/^"(.*)"$/,'$1').replace(/"/g,'')+'"';
+function gsSplitInclude(v){ if(Array.isArray(v)) return v; const out=[]; String(v||'').replace(/"([^"]+)"|(\S+)/g,(m,a,b)=>{out.push(a||b);return m;}); return out; }
+// Read an old saved shape (sites as comma groups, include as one string, variants) without losing it.
+function gsNormalize(c){
+  c=Object.assign({},GS_DEFAULT,c||{});
+  const sites=[]; (c.sites||[]).forEach(g=>String(g).split(',').forEach(s=>{ s=s.trim().replace(/^https?:\/\//,'').replace(/\/.*$/,''); if(s&&!sites.includes(s)) sites.push(s); }));
+  const v=c.variants;
+  const seniority=c.seniority||(v?(v.with&&!v.without?'senior':(!v.with&&v.without?'no_senior':'any')):'any');
+  const clr=c.clearance&&!Array.isArray(c.clearance)?c.clearance:{on:!!(v&&v.clearance&&Array.isArray(c.clearance)&&c.clearance.length),terms:Array.isArray(c.clearance)?c.clearance:[]};
+  return {roles:[...(c.roles||[])],include:gsSplitInclude(c.include),exclude:[...(c.exclude||[])],sites,
+    days:+c.days||7,seniority,senior_terms:(c.senior_terms&&c.senior_terms.length)?[...c.senior_terms]:['senior'],
+    clearance:{on:!!clr.on,terms:[...(clr.terms||[])]}};
 }
-function chipAll(){ document.querySelectorAll('.chipbox[data-for]').forEach(chipRender); }
-function gsSegSync(){ const v=$('gsDays').value; document.querySelectorAll('#gsDaysSeg button').forEach(b=>b.classList.toggle('on',b.dataset.d===v)); $('gsDaysN').hidden=v!=='custom'; }
+const SITE_NAMES={'greenhouse':'Greenhouse','lever':'Lever','ashbyhq':'Ashby','myworkdayjobs':'Workday','smartrecruiters':'SmartRecruiters',
+  'workable':'Workable','paylocity':'Paylocity','hirebridge':'Hirebridge','bamboohr':'BambooHR','icims':'iCIMS','jobvite':'Jobvite',
+  'recruitee':'Recruitee','breezy':'Breezy','jazzhr':'JazzHR','applytojob':'JazzHR','rippling':'Rippling','dayforcehcm':'Dayforce',
+  'ultipro':'UKG','ukg':'UKG','oraclecloud':'Oracle','taleo':'Taleo','successfactors':'SuccessFactors','adp':'ADP','teamtailor':'Teamtailor',
+  'personio':'Personio','pinpointhq':'Pinpoint','wellfound':'Wellfound','builtin':'Built In'};
+function gsSiteName(h){ const parts=String(h).toLowerCase().split('.'); for(const p of parts){ if(SITE_NAMES[p]) return SITE_NAMES[p]; }
+  const core=parts.filter(p=>!/^(www|jobs|boards|job-boards|careers|apply|recruiting|recruit|com|io|co|net|org|app)$/.test(p))[0]||parts[0];
+  return core.charAt(0).toUpperCase()+core.slice(1); }
 function gsAfter(days){ const d=new Date(); d.setDate(d.getDate()-days); return d.toISOString().split('T')[0]; }
-function gsQuery(sites,c,variant,after){
-  const siteStr=sites.split(',').map(s=>s.trim()).filter(Boolean).map(s=>'site:'+s).join(' OR ');
-  const roles=c.roles.length?'('+c.roles.map(r=>'"'+r.replace(/"/g,'')+'"').join(' OR ')+')':'';
-  const clear=variant==='clearance'&&c.clearance.length?' ('+c.clearance.map(r=>'"'+r.replace(/"/g,'')+'"').join(' OR ')+')':'';
-  const excl=c.exclude.map(e=>' -'+gsQ(e)).join('')+(variant==='without'?' -"senior"':'');
-  return ('('+siteStr+') '+roles+clear+(c.include?' '+c.include:'')+' after:'+after+excl).replace(/\s+/g,' ').trim(); }
-function gsRow(label, q, href){
-  return `<div class="qrow"><span class="lbl" title="${esc(label)}">${esc(label)}</span><span class="q" title="${esc(q)}">${esc(q)}</span>`
-    +`<span class="row"><button type="button" class="btn ghost sm gs-copy" data-q="${esc(q)}">Copy</button><a class="btn ghost sm" target="_blank" rel="noopener" href="${href}">Open</a></span></div>`;
+function gsBody(c, after){
+  const parts=[];
+  if(c.roles.length) parts.push('('+c.roles.map(gsQuoted).join(' OR ')+')');
+  if(c.seniority==='senior' && c.senior_terms.length) parts.push('('+c.senior_terms.map(gsQuoted).join(' OR ')+')');
+  if(c.clearance.on && c.clearance.terms.length) parts.push('('+c.clearance.terms.map(gsQuoted).join(' OR ')+')');
+  c.include.forEach(k=>parts.push(gsTok(k)));
+  parts.push('after:'+after);
+  c.exclude.forEach(k=>parts.push('-'+gsTok(k)));
+  if(c.seniority==='no_senior') (c.senior_terms.length?c.senior_terms:['senior']).forEach(k=>parts.push('-'+gsTok(k)));
+  return parts.join(' ');
 }
-function gsRender(){ const c=gsRead(), after=gsAfter(c.days); $('gsAfter').textContent='after '+after;
-  const V=[['with','Senior'],['without','Non-senior'],['clearance','Clearance']].filter(([k])=>c.variants[k]);
-  let h='';
-  for(const [k,lbl] of V){
-    c.sites.forEach(s=>{ const q=gsQuery(s,c,k,after);
-      const site=(s.split(',')[0]||'').trim().replace(/^(www|recruiting|recruit|boards|jobs)\./,'').split('.')[0];
-      h+=gsRow(lbl+' \u00b7 '+site+(s.includes(',')?' +'+(s.split(',').length-1):''), q, 'https://www.google.com/search?q='+encodeURIComponent(q)); }); }
-  $('gsOut').innerHTML=h||'<div class="hint">Turn on at least one pack and add a site group under Advanced.</div>';
-  const kw=c.roles.map(r=>'"'+r.replace(/"/g,'')+'"').join(' OR ');
-  const li=(extra,lbl)=>{ const q='('+kw+')'+extra; return gsRow(lbl, q+' \u00b7 remote \u00b7 United States \u00b7 last '+c.days+'d',
-    'https://www.linkedin.com/jobs/search/?keywords='+encodeURIComponent(q)+'&f_WT=2&geoId=103644278&f_TPR=r'+(c.days*86400)); };
-  $('gsLi').innerHTML=(c.variants.with?li('','Senior'):'')+(c.variants.without?li(' NOT senior','Non-senior'):'')+(c.variants.clearance?li(' AND clearance','Clearance'):'')
-    ||'<div class="hint">Turn on a pack above.</div>';
+// One query per site group; a group only splits when the query would get too long for Google.
+function gsGroups(c, body){
+  const MAX=1500, MAXSITES=6, groups=[]; let cur=[];
+  const q=g=>'('+g.map(s=>'site:'+s).join(' OR ')+') '+body;
+  c.sites.forEach(s=>{ const next=[...cur,s];
+    if(cur.length && (next.length>MAXSITES || q(next).length>MAX)){ groups.push(cur); cur=[s]; } else cur=next; });
+  if(cur.length) groups.push(cur);
+  return groups.map(g=>({sites:g, q:q(g)}));
+}
+function gsDays(){ const on=document.querySelector('#gsDaysSeg button.on'); const v=on?on.dataset.d:'7';
+  return v==='custom'?Math.max(1,parseInt($('gsDaysN').value||'7')):parseInt(v); }
+function gsReadUI(){ GS.days=gsDays(); GS.clearance.on=$('gsClrOn').checked; return GS; }
+function gsSync(){
+  document.querySelectorAll('#gsDaysSeg button').forEach(b=>b.classList.toggle('on',b.dataset.d===(['1','3','7','14','30'].includes(String(GS.days))?String(GS.days):'custom')));
+  $('gsDaysN').hidden=['1','3','7','14','30'].includes(String(GS.days)); $('gsDaysN').value=GS.days;
+  document.querySelectorAll('#gsSenSeg button').forEach(b=>b.classList.toggle('on',b.dataset.s===GS.seniority));
+  $('gsSenTerms').hidden=GS.seniority==='any';
+  $('gsClrOn').checked=GS.clearance.on; $('gsClrTerms').hidden=!GS.clearance.on;
+  chipAll();
+}
+function gsGet(key){ return key==='clearance_terms'?GS.clearance.terms:GS[key]; }
+function gsSet(key,arr){ if(key==='clearance_terms') GS.clearance.terms=arr; else GS[key]=arr; }
+function chipRender(box){
+  const key=box.dataset.key, items=gsGet(key)||[];
+  const old=box.querySelector('input'); if(old) old.onblur=null;   // re-render removes the input; its blur must not re-enter
+  box.innerHTML=items.map((t,i)=>`<span class="chip">${esc(t)}<button type="button" data-i="${i}" title="Remove" aria-label="Remove ${esc(t)}">×</button></span>`).join('')
+    +`<input type="text" placeholder="${esc(box.dataset.ph||'Add, Enter')}">`;
+  const inp=box.querySelector('input');
+  const commit=()=>{ let v=inp.value.replace(/,$/,'').trim(); if(!v) return;
+    if(key==='sites') v=v.replace(/^https?:\/\//,'').replace(/^site:/,'').replace(/\/.*$/,'').toLowerCase();
+    if(!items.includes(v)) gsSet(key,[...items,v]); chipRender(box); box.querySelector('input').focus(); gsRender(); };
+  inp.onkeydown=e=>{ if(e.key==='Enter'||e.key===','){ e.preventDefault(); commit(); }
+    else if(e.key==='Backspace'&&!inp.value&&items.length){ gsSet(key,items.slice(0,-1)); chipRender(box); box.querySelector('input').focus(); gsRender(); } };
+  inp.onblur=commit;
+  box.querySelectorAll('button[data-i]').forEach(b=>b.onclick=()=>{ const k=+b.dataset.i; gsSet(key,items.filter((_,x)=>x!==k)); chipRender(box); gsRender(); });
+}
+function chipAll(){ document.querySelectorAll('[data-panel="search"] .chipbox[data-key]').forEach(chipRender); }
+function gsSummary(c){ const bits=[];
+  bits.push(c.roles.length+' role'+(c.roles.length===1?'':'s'));
+  const d=gsDays(); bits.push(d===1?'last 24h':d===7?'last week':d===14?'last 2 weeks':d===30?'last month':'last '+d+' days');
+  if(c.include.length) bits.push('includes '+c.include.join(', '));
+  if(c.exclude.length) bits.push(c.exclude.length+' excluded');
+  if(c.seniority==='senior') bits.push('senior only'); if(c.seniority==='no_senior') bits.push('no senior');
+  if(c.clearance.on&&c.clearance.terms.length) bits.push('clearance');
+  return bits.join(' · '); }
+function gsRender(){
+  if(!GS) return;
+  const c=gsReadUI(), after=gsAfter(c.days); $('gsAfter').textContent='after:'+after;
+  if(!c.roles.length && !c.include.length){ $('gsOut').innerHTML='<div class="hint">Add a role or a keyword to build a search.</div>'; return; }
+  if(!c.sites.length){ $('gsOut').innerHTML='<div class="hint">Add at least one site, for example boards.greenhouse.io.</div>'; return; }
+  const sum=esc(gsSummary(c)), body=gsBody(c,after);
+  const rows=gsGroups(c,body).map((g,i)=>{ const href='https://www.google.com/search?q='+encodeURIComponent(g.q);
+    const names=[...new Set(g.sites.map(gsSiteName))].join(', ');
+    return `<div class="qrow2"><a class="qmain" target="_blank" rel="noopener" href="${href}"><span class="lbl">${esc(names)}</span><span class="cap">${sum}</span></a>`
+      +`<span class="row"><button type="button" class="btn quiet sm gs-exp" data-i="${i}" aria-expanded="false">Query</button><button type="button" class="btn ghost sm gs-copy" data-q="${esc(g.q)}">Copy</button><a class="btn ghost sm" target="_blank" rel="noopener" href="${href}">Open</a></span>`
+      +`<pre class="qfull" id="gsq${i}" hidden>${esc(g.q)}</pre></div>`; });
+  const kw=c.roles.map(gsQuoted).join(' OR ')+(c.include.length?' '+c.include.map(gsTok).join(' '):'');
+  const li='https://www.linkedin.com/jobs/search/?keywords='+encodeURIComponent(kw)+'&f_TPR=r'+(c.days*86400)+(c.include.some(k=>/^remote$/i.test(k))?'&f_WT=2':'');
+  rows.push(`<div class="qrow2"><a class="qmain" target="_blank" rel="noopener" href="${li}"><span class="lbl">Also on LinkedIn</span><span class="cap">same roles and look back</span></a><span class="row"><a class="btn ghost sm" target="_blank" rel="noopener" href="${li}">Open</a></span></div>`);
+  $('gsOut').innerHTML=rows.join('');
   document.querySelectorAll('.gs-copy').forEach(b=>b.onclick=async()=>{ try{ await navigator.clipboard.writeText(b.dataset.q); b.textContent='Copied'; setTimeout(()=>b.textContent='Copy',1200);}catch(_){ b.textContent='Copy failed'; } });
+  document.querySelectorAll('.gs-exp').forEach(b=>b.onclick=()=>{ const p=$('gsq'+b.dataset.i); p.hidden=!p.hidden; b.setAttribute('aria-expanded',String(!p.hidden)); b.textContent=p.hidden?'Query':'Hide query'; });
 }
-async function loadSearch(){ if(!GS){ const c=await fetch('/config').then(r=>r.json()).catch(()=>({}));
-    GS=Object.assign({},GS_DEFAULT,c.google_search||{}); gsFill(GS);
-    ['gsSites','gsRoles','gsInclude','gsExclude','gsClear','gsDaysN'].forEach(id=>$(id).addEventListener('input',gsRender));
-    ['gsVwith','gsVwithout','gsVclear'].forEach(id=>$(id).addEventListener('change',gsRender));
-    $('gsDays').addEventListener('change',()=>{ gsSegSync(); gsRender(); });
-    document.querySelectorAll('#gsDaysSeg button').forEach(b=>b.onclick=()=>{ $('gsDays').value=b.dataset.d; $('gsDays').dispatchEvent(new Event('change')); if(b.dataset.d==='custom') $('gsDaysN').focus(); });
-    $('gsRemote').addEventListener('change',()=>{ let v=$('gsInclude').value.replace(/\s*"remote"\s*/ig,' ').trim();
-      if($('gsRemote').checked) v=('"remote" '+v).trim(); $('gsInclude').value=v; gsRender(); });
-    $('gsInclude').addEventListener('input',()=>{ $('gsRemote').checked=/"remote"/i.test($('gsInclude').value); }); }
+async function loadSearch(){
+  if(!GS){ const c=await fetch('/config').then(r=>r.json()).catch(()=>({}));
+    GS=gsNormalize(c.google_search);
+    document.querySelectorAll('#gsDaysSeg button').forEach(b=>b.onclick=()=>{ document.querySelectorAll('#gsDaysSeg button').forEach(x=>x.classList.toggle('on',x===b));
+      $('gsDaysN').hidden=b.dataset.d!=='custom'; if(b.dataset.d==='custom') $('gsDaysN').focus(); gsRender(); });
+    $('gsDaysN').addEventListener('input',gsRender);
+    document.querySelectorAll('#gsSenSeg button').forEach(b=>b.onclick=()=>{ GS.seniority=b.dataset.s; gsSync(); gsRender(); });
+    $('gsClrOn').addEventListener('change',()=>{ GS.clearance.on=$('gsClrOn').checked; $('gsClrTerms').hidden=!GS.clearance.on; gsRender(); });
+    gsSync(); }
   gsRender(); }
-$('gsSave').onclick=async()=>{ document.querySelectorAll('.chipbox input').forEach(i=>i.blur()); GS=gsRead();
+$('gsSave').onclick=async()=>{ document.querySelectorAll('[data-panel="search"] .chipbox input').forEach(i=>i.blur()); gsReadUI();
   const r=await fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({google_search:GS})}).then(r=>r.json()).catch(()=>({}));
   $('gsMsg').textContent=r.ok?'saved':'save failed'; setTimeout(()=>$('gsMsg').textContent='',2500); };
-$('gsReset').onclick=()=>{ gsFill(GS_DEFAULT); gsRender(); $('gsMsg').textContent='defaults loaded (not saved yet)'; };
+$('gsClear').onclick=()=>{ GS=gsNormalize({roles:[],include:[],exclude:[],sites:[],days:7}); gsSync(); gsRender(); $('gsMsg').textContent='cleared (not saved yet)'; };
 $('gsAdd').onclick=async()=>{ const urls=gsLines($('gsUrls').value).filter(u=>/^https?:\/\//i.test(u));
   if(!urls.length){ $('gsAddMsg').textContent='no http(s) links found'; return; }
   const r=await fetch('/api/jobs/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls})}).then(r=>r.json()).catch(e=>({ok:false,error:String(e)}));
