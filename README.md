@@ -110,7 +110,7 @@ real apply page:
 |---|---|---|
 | **Company ATS boards** | **direct public APIs (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable)** | **the reliable spine: clean titles, locations, posted dates, real apply URLs; from `config/companies.yml`, which grows by itself: any board seen in a discovered job is added** |
 | LinkedIn / Indeed / Google | JobSpy (MIT) | Easy Apply on LinkedIn is skipped (no employer link to fill) |
-| Sites with no API (any job board host you add) | dashboard **Search** tab | a Google query generator: your roles, keywords, sites and look-back become one search per site group, with optional seniority and clearance terms; paste good links back and Penates adds them |
+| Sites with no API (any job board host you add) | dashboard **Search** tab | a Google query generator: your roles, keywords, sites and look-back become one search per site group, with optional level words and clearance terms; paste good links back and Penates adds them |
 | hiring.cafe | public `_next/data` JSON | direct employer apply URLs, salary, posted date |
 | Built In | server-rendered HTML | Easy Apply cards skipped; resolves to the employer ATS |
 | RemoteOK | public JSON API | remote-only, no key |
@@ -142,7 +142,8 @@ in the background and respects the source toggles in **Settings**.
 The **Search** tab is a Google query generator for job sites Penates can't scan. Add roles,
 include and exclude keywords, and the sites to search (host names like `boards.greenhouse.io`),
 pick a look-back window, and it builds one Google search per site group with Open and Copy.
-Seniority and clearance terms are optional modifiers, off by default. Paste good links into
+A live query preview updates as you edit. Level words (match or exclude words like senior, staff
+or junior) and clearance terms are optional modifiers, off by default. Paste good links into
 **Add job links** and Penates adds them, plus the company's whole board when it is a
 Greenhouse, Lever, Ashby, Workday, SmartRecruiters or Workable board.
 

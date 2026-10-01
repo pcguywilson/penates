@@ -33,12 +33,12 @@
       "jobs.ashbyhq.com"
     ],
     "days": 7,
-    "seniority": "any",
-    "senior_terms": [
-      "senior"
-    ],
     "clearance": {
       "on": false,
+      "terms": []
+    },
+    "level": {
+      "mode": "any",
       "terms": []
     }
   }

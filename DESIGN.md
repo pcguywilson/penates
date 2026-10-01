@@ -141,12 +141,13 @@ The chip row is the privacy story; there is no banner. It reports facts: engine 
 Search builds Google searches aimed at job sites Penates cannot scan. Nothing personal is shipped as a default.
 
 - Inputs (all chips, all removable): **Roles**, **Include keywords**, **Exclude keywords**, **Sites** (host names). Look back is a segmented control (24h, 3d, 1w, 2w, 1m, custom).
-- Optional modifiers, off by default: **Seniority** (Any / Senior only / Exclude senior, with user-editable senior words) and **Clearance terms** (a toggle; the user types the terms).
+- Optional modifiers, off by default: **Level words** (mode Any / Must match one / Exclude these, plus chips the user types; nothing prefilled, the placeholder only suggests senior, staff, principal, lead, junior; Any applies nothing even if chips remain) and **Clearance terms** (a toggle; the user types the terms). No level taxonomy.
+- **Query preview** sits above the result rows and updates on every chip, look-back, site and level change, no Save needed. One mono block per site group (labeled with site names only when there is more than one group). Missing roles/keywords or sites replace the preview with a one-line hint; no stale query is shown.
 - Output: one Google query per site group. Sites are grouped only when a single query would get too long (more than 6 sites or about 1500 characters). The row title is the human site names ("Greenhouse, Lever, Ashby"), the caption is a plain summary (roles, window, includes, excludes). The Boolean is never the row body: Open launches Google, Copy copies the query, "Query" expands the string.
 - Empty states: no roles and no keywords, or no sites, show a one-line hint instead of a query.
 - One "Also on LinkedIn" row with the same roles and look back. LinkedIn is not a second builder.
 - "Add job links" is a separate card below the generator (Penates ingesting URLs, not query generation).
-- Saved to `config.json` `google_search` = `{roles[], include[], exclude[], sites[], days, seniority, senior_terms[], clearance:{on, terms[]}}`. An older saved shape (comma site groups, include string, variants) is read and converted on load.
+- Saved to `config.json` `google_search` = `{roles[], include[], exclude[], sites[], days, level:{mode, terms[]}, clearance:{on, terms[]}}`. Older saved shapes (comma site groups, include string, variants, seniority) are read and converted on load.
 
 ## 14. Extension overlay mapping (phase 2)
 
