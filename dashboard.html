@@ -120,7 +120,7 @@
   .fld{display:flex;flex-direction:column;gap:6px;min-width:0}
   .fld.wide{grid-column:1/-1}
   .fld>.lbl{font-size:12px;color:var(--text-2);font-weight:600}
-  .fld>.lbl .cap,.toggle .cap{font-weight:400}
+  .fld>.lbl .cap,.toggle .cap,.subh .cap{font-weight:400}
   .fld textarea{min-height:64px}
   .packs{display:flex;gap:22px;flex-wrap:wrap}
   .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -140,6 +140,8 @@
   .qmain .lbl{font-weight:600}
   .qmain .cap{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .qrow2 .qfull{grid-column:1/-1;margin:4px 0 2px;font-size:11px;max-height:none}
+  .qprev{margin:0 0 6px;font-size:12px;max-height:none;white-space:pre-wrap;word-break:break-word;border-color:var(--line-strong)}
+  .chipbox.inactive{opacity:.55}
   .chipbox{min-height:32px;padding:4px 6px;border:1px solid var(--line-strong);border-radius:6px;background:var(--surface-2)}
   .chipbox input{border:0!important;background:none!important;height:22px!important;min-width:140px!important;padding:0 4px!important;outline:none;flex:1}
   .logline{font:12px/1.5 var(--mono);color:var(--text-2);border-bottom:1px solid var(--line);padding:4px 0}
@@ -292,15 +294,15 @@ tr.jobrow:hover .icon,.icon:focus-visible{opacity:1}
             <input id="gsDaysN" type="number" min="1" max="365" style="width:80px;min-width:0" hidden placeholder="days">
             <span class="cap mono" id="gsAfter"></span>
           </div></div>
-        <div class="fld"><span class="lbl">Seniority <span class="cap">optional</span></span>
-          <div class="row">
-            <div class="seg" id="gsSenSeg"><button type="button" data-s="any">Any</button><button type="button" data-s="senior">Senior only</button><button type="button" data-s="no_senior">Exclude senior</button></div>
-          </div>
-          <div class="chips chipbox" data-key="senior_terms" data-ph="senior words, e.g. senior, Enter" id="gsSenTerms" hidden></div></div>
+        <div class="fld"><span class="lbl">Level words <span class="cap">optional; type the words your field uses</span></span>
+          <div class="seg" id="gsLvlSeg"><button type="button" data-m="any">Any</button><button type="button" data-m="match">Must match one</button><button type="button" data-m="exclude">Exclude these</button></div>
+          <div class="chips chipbox" data-key="level_terms" data-ph="e.g. senior, staff, principal, lead, junior" id="gsLvlTerms"></div></div>
         <div class="fld wide"><label class="toggle"><input type="checkbox" id="gsClrOn"> Clearance terms <span class="cap">optional; results must mention one</span></label>
           <div class="chips chipbox" data-key="clearance_terms" data-ph="e.g. secret clearance, Enter" id="gsClrTerms" hidden></div></div>
       </div>
       <div class="row" style="margin-top:14px"><button class="btn" id="gsSave">Save</button><button class="btn quiet" id="gsClear">Clear all</button><span class="cap" id="gsMsg"></span></div>
+      <div class="subh">Query preview <span class="cap">updates as you edit</span></div>
+      <div id="gsPrev"></div>
       <div class="subh" id="gsOutH">Searches</div>
       <div id="gsOut"></div>
     </div>
@@ -1141,10 +1143,10 @@ $('stPaneImp').onclick=()=>showStoryPane('imp');
 loadJobs();
 // ---- Search tab: Google job-site query generator (any user; nothing personal hardcoded) ----
 // Model saved to config.json google_search:
-//   {roles[], include[], exclude[], sites[], days, seniority:'any'|'senior'|'no_senior',
-//    senior_terms[], clearance:{on:bool, terms[]}}
+//   {roles[], include[], exclude[], sites[], days, level:{mode:'any'|'match'|'exclude', terms[]},
+//    clearance:{on:bool, terms[]}}
 const GS_DEFAULT={roles:[],include:[],exclude:[],sites:["boards.greenhouse.io","jobs.lever.co","jobs.ashbyhq.com"],
-  days:7,seniority:'any',senior_terms:['senior'],clearance:{on:false,terms:[]}};
+  days:7,level:{mode:'any',terms:[]},clearance:{on:false,terms:[]}};
 let GS=null;
 const gsLines=v=>String(v||'').split('\n').map(s=>s.trim()).filter(Boolean);
 const gsTok=s=>{ s=String(s).trim().replace(/^"(.*)"$/,'$1').replace(/"/g,''); return /\s|[-/]/.test(s)?'"'+s+'"':s; };
@@ -1152,13 +1154,19 @@ const gsQuoted=s=>'"'+String(s).trim().replace(/^"(.*)"$/,'$1').replace(/"/g,'')
 function gsSplitInclude(v){ if(Array.isArray(v)) return v; const out=[]; String(v||'').replace(/"([^"]+)"|(\S+)/g,(m,a,b)=>{out.push(a||b);return m;}); return out; }
 // Read an old saved shape (sites as comma groups, include as one string, variants) without losing it.
 function gsNormalize(c){
-  c=Object.assign({},GS_DEFAULT,c||{});
+  const raw=c||{};
+  c=Object.assign({},GS_DEFAULT,raw);
   const sites=[]; (c.sites||[]).forEach(g=>String(g).split(',').forEach(s=>{ s=s.trim().replace(/^https?:\/\//,'').replace(/\/.*$/,''); if(s&&!sites.includes(s)) sites.push(s); }));
   const v=c.variants;
-  const seniority=c.seniority||(v?(v.with&&!v.without?'senior':(!v.with&&v.without?'no_senior':'any')):'any');
+  // older shapes: seniority any/senior/no_senior (+senior_terms), or variants {with,without}
+  let level=raw.level&&raw.level.mode?{mode:raw.level.mode,terms:[...(raw.level.terms||[])]}:null;
+  if(!level){ const sen=c.seniority||(v?(v.with&&!v.without?'senior':(!v.with&&v.without?'no_senior':'any')):'any');
+    const st=(c.senior_terms&&c.senior_terms.length)?[...c.senior_terms]:['senior'];
+    level=sen==='senior'?{mode:'match',terms:st}:sen==='no_senior'?{mode:'exclude',terms:st}:{mode:'any',terms:[]}; }
+  if(!['any','match','exclude'].includes(level.mode)) level.mode='any';
   const clr=c.clearance&&!Array.isArray(c.clearance)?c.clearance:{on:!!(v&&v.clearance&&Array.isArray(c.clearance)&&c.clearance.length),terms:Array.isArray(c.clearance)?c.clearance:[]};
   return {roles:[...(c.roles||[])],include:gsSplitInclude(c.include),exclude:[...(c.exclude||[])],sites,
-    days:+c.days||7,seniority,senior_terms:(c.senior_terms&&c.senior_terms.length)?[...c.senior_terms]:['senior'],
+    days:+c.days||7,level,
     clearance:{on:!!clr.on,terms:[...(clr.terms||[])]}};
 }
 const SITE_NAMES={'greenhouse':'Greenhouse','lever':'Lever','ashbyhq':'Ashby','myworkdayjobs':'Workday','smartrecruiters':'SmartRecruiters',
@@ -1173,12 +1181,12 @@ function gsAfter(days){ const d=new Date(); d.setDate(d.getDate()-days); return 
 function gsBody(c, after){
   const parts=[];
   if(c.roles.length) parts.push('('+c.roles.map(gsQuoted).join(' OR ')+')');
-  if(c.seniority==='senior' && c.senior_terms.length) parts.push('('+c.senior_terms.map(gsQuoted).join(' OR ')+')');
+  if(c.level.mode==='match' && c.level.terms.length) parts.push('('+c.level.terms.map(gsQuoted).join(' OR ')+')');
   if(c.clearance.on && c.clearance.terms.length) parts.push('('+c.clearance.terms.map(gsQuoted).join(' OR ')+')');
   c.include.forEach(k=>parts.push(gsTok(k)));
   parts.push('after:'+after);
   c.exclude.forEach(k=>parts.push('-'+gsTok(k)));
-  if(c.seniority==='no_senior') (c.senior_terms.length?c.senior_terms:['senior']).forEach(k=>parts.push('-'+gsTok(k)));
+  if(c.level.mode==='exclude') c.level.terms.forEach(k=>parts.push('-'+gsQuoted(k)));
   return parts.join(' ');
 }
 // One query per site group; a group only splits when the query would get too long for Google.
@@ -1196,13 +1204,13 @@ function gsReadUI(){ GS.days=gsDays(); GS.clearance.on=$('gsClrOn').checked; ret
 function gsSync(){
   document.querySelectorAll('#gsDaysSeg button').forEach(b=>b.classList.toggle('on',b.dataset.d===(['1','3','7','14','30'].includes(String(GS.days))?String(GS.days):'custom')));
   $('gsDaysN').hidden=['1','3','7','14','30'].includes(String(GS.days)); $('gsDaysN').value=GS.days;
-  document.querySelectorAll('#gsSenSeg button').forEach(b=>b.classList.toggle('on',b.dataset.s===GS.seniority));
-  $('gsSenTerms').hidden=GS.seniority==='any';
+  document.querySelectorAll('#gsLvlSeg button').forEach(b=>b.classList.toggle('on',b.dataset.m===GS.level.mode));
+  $('gsLvlTerms').classList.toggle('inactive',GS.level.mode==='any');
   $('gsClrOn').checked=GS.clearance.on; $('gsClrTerms').hidden=!GS.clearance.on;
   chipAll();
 }
-function gsGet(key){ return key==='clearance_terms'?GS.clearance.terms:GS[key]; }
-function gsSet(key,arr){ if(key==='clearance_terms') GS.clearance.terms=arr; else GS[key]=arr; }
+function gsGet(key){ return key==='clearance_terms'?GS.clearance.terms:key==='level_terms'?GS.level.terms:GS[key]; }
+function gsSet(key,arr){ if(key==='clearance_terms') GS.clearance.terms=arr; else if(key==='level_terms') GS.level.terms=arr; else GS[key]=arr; }
 function chipRender(box){
   const key=box.dataset.key, items=gsGet(key)||[];
   const old=box.querySelector('input'); if(old) old.onblur=null;   // re-render removes the input; its blur must not re-enter
@@ -1223,16 +1231,21 @@ function gsSummary(c){ const bits=[];
   const d=gsDays(); bits.push(d===1?'last 24h':d===7?'last week':d===14?'last 2 weeks':d===30?'last month':'last '+d+' days');
   if(c.include.length) bits.push('includes '+c.include.join(', '));
   if(c.exclude.length) bits.push(c.exclude.length+' excluded');
-  if(c.seniority==='senior') bits.push('senior only'); if(c.seniority==='no_senior') bits.push('no senior');
+  if(c.level.mode==='match'&&c.level.terms.length) bits.push('level: '+c.level.terms.join(' or '));
+  if(c.level.mode==='exclude'&&c.level.terms.length) bits.push('not '+c.level.terms.join(', '));
   if(c.clearance.on&&c.clearance.terms.length) bits.push('clearance');
   return bits.join(' · '); }
 function gsRender(){
   if(!GS) return;
   const c=gsReadUI(), after=gsAfter(c.days); $('gsAfter').textContent='after:'+after;
-  if(!c.roles.length && !c.include.length){ $('gsOut').innerHTML='<div class="hint">Add a role or a keyword to build a search.</div>'; return; }
-  if(!c.sites.length){ $('gsOut').innerHTML='<div class="hint">Add at least one site, for example boards.greenhouse.io.</div>'; return; }
-  const sum=esc(gsSummary(c)), body=gsBody(c,after);
-  const rows=gsGroups(c,body).map((g,i)=>{ const href='https://www.google.com/search?q='+encodeURIComponent(g.q);
+  const missing=[!c.roles.length&&!c.include.length?'a role or an include keyword':'', !c.sites.length?'at least one site (for example boards.greenhouse.io)':''].filter(Boolean);
+  if(missing.length){ const msg='<div class="hint">Add '+missing.join(' and ')+' to build a search.</div>';
+    $('gsPrev').innerHTML=msg; $('gsOut').innerHTML=''; $('gsOutH').hidden=true; return; }
+  $('gsOutH').hidden=false;
+  const sum=esc(gsSummary(c)), body=gsBody(c,after), groups=gsGroups(c,body);
+  $('gsPrev').innerHTML=groups.map(g=>(groups.length>1?`<div class="cap" style="margin:6px 0 2px">${esc([...new Set(g.sites.map(gsSiteName))].join(', '))}</div>`:'')
+    +`<pre class="qprev">${esc(g.q)}</pre>`).join('');
+  const rows=groups.map((g,i)=>{ const href='https://www.google.com/search?q='+encodeURIComponent(g.q);
     const names=[...new Set(g.sites.map(gsSiteName))].join(', ');
     return `<div class="qrow2"><a class="qmain" target="_blank" rel="noopener" href="${href}"><span class="lbl">${esc(names)}</span><span class="cap">${sum}</span></a>`
       +`<span class="row"><button type="button" class="btn quiet sm gs-exp" data-i="${i}" aria-expanded="false">Query</button><button type="button" class="btn ghost sm gs-copy" data-q="${esc(g.q)}">Copy</button><a class="btn ghost sm" target="_blank" rel="noopener" href="${href}">Open</a></span>`
@@ -1250,7 +1263,7 @@ async function loadSearch(){
     document.querySelectorAll('#gsDaysSeg button').forEach(b=>b.onclick=()=>{ document.querySelectorAll('#gsDaysSeg button').forEach(x=>x.classList.toggle('on',x===b));
       $('gsDaysN').hidden=b.dataset.d!=='custom'; if(b.dataset.d==='custom') $('gsDaysN').focus(); gsRender(); });
     $('gsDaysN').addEventListener('input',gsRender);
-    document.querySelectorAll('#gsSenSeg button').forEach(b=>b.onclick=()=>{ GS.seniority=b.dataset.s; gsSync(); gsRender(); });
+    document.querySelectorAll('#gsLvlSeg button').forEach(b=>b.onclick=()=>{ GS.level.mode=b.dataset.m; gsSync(); gsRender(); });
     $('gsClrOn').addEventListener('change',()=>{ GS.clearance.on=$('gsClrOn').checked; $('gsClrTerms').hidden=!GS.clearance.on; gsRender(); });
     gsSync(); }
   gsRender(); }
