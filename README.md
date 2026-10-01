@@ -110,7 +110,7 @@ real apply page:
 |---|---|---|
 | **Company ATS boards** | **direct public APIs (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable)** | **the reliable spine: clean titles, locations, posted dates, real apply URLs; from `config/companies.yml`, which grows by itself: any board seen in a discovered job is added** |
 | LinkedIn / Indeed / Google | JobSpy (MIT) | Easy Apply on LinkedIn is skipped (no employer link to fill) |
-| Sites with no API (Paylocity, Hirebridge, BambooHR, ...) | dashboard **Search** tab | an editable Google `site:` query builder (sites, role names, look-back, senior/clearance variants) plus LinkedIn search links; paste good links back and Penates adds them |
+| Sites with no API (any job board host you add) | dashboard **Search** tab | a Google query generator: your roles, keywords, sites and look-back become one search per site group, with optional seniority and clearance terms; paste good links back and Penates adds them |
 | hiring.cafe | public `_next/data` JSON | direct employer apply URLs, salary, posted date |
 | Built In | server-rendered HTML | Easy Apply cards skipped; resolves to the employer ATS |
 | RemoteOK | public JSON API | remote-only, no key |
@@ -139,13 +139,14 @@ python rank.py           # score against your lane
 Or skip the CLI: open the dashboard and hit **Refresh jobs**, which runs the whole pipeline
 in the background and respects the source toggles in **Settings**.
 
-For job sites with no public API (Paylocity, Hirebridge, BambooHR and similar), the **Search**
-tab builds the Google `site:` searches for you from roles, excludes, a look-back window and
-query packs (senior, non-senior, clearance). Each search is one row with Copy and Open; paste
-good links back in and Penates adds them, plus the company's whole board when it is a
+The **Search** tab is a Google query generator for job sites Penates can't scan. Add roles,
+include and exclude keywords, and the sites to search (host names like `boards.greenhouse.io`),
+pick a look-back window, and it builds one Google search per site group with Open and Copy.
+Seniority and clearance terms are optional modifiers, off by default. Paste good links into
+**Add job links** and Penates adds them, plus the company's whole board when it is a
 Greenhouse, Lever, Ashby, Workday, SmartRecruiters or Workable board.
 
-![Search: roles, excludes, look back, query packs, and generated searches](docs/img/search.png)
+![Search: roles, keywords, sites, look back, and the generated Google searches](docs/img/search.png)
 
 ![Settings: Ollama connection and model picker, local test pages, job sources, search terms](docs/img/settings.png)
 
@@ -160,8 +161,8 @@ python serve.py                       # http://127.0.0.1:8765/dashboard
   by score or newest; hide an employer you never want to see (reversible, from the row's hover
   icon or the preview pane); each row opens a preview pane with an Apply + autofill button that
   hands off to the extension.
-- **Search** - Google `site:` searches for sites Penates can't scan, LinkedIn links with the same
-  roles, and a paste box that adds job links (and their company boards) to the queue.
+- **Search** - a Google query generator for any job site you list (roles, keywords, sites, look
+  back), plus a paste box that adds job links (and their company boards) to the queue.
 - **Knowledge** - Profile, Stories and Resume, everything Penates knows about you (below).
 - **Settings** (gear menu) - edit your search terms and turn sources on or off (saved to `config.json`),
   set job retention (delete jobs older than 1 week / 2 weeks / 1 month / custom days, or never;

@@ -15,5 +15,31 @@
     "builtin": true,
     "remotive": true,
     "remoteok": true
+  },
+  "google_search": {
+    "roles": [
+      "software engineer",
+      "site reliability engineer"
+    ],
+    "include": [
+      "remote"
+    ],
+    "exclude": [
+      "intern"
+    ],
+    "sites": [
+      "boards.greenhouse.io",
+      "jobs.lever.co",
+      "jobs.ashbyhq.com"
+    ],
+    "days": 7,
+    "seniority": "any",
+    "senior_terms": [
+      "senior"
+    ],
+    "clearance": {
+      "on": false,
+      "terms": []
+    }
   }
 }
