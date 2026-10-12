@@ -16,9 +16,10 @@ greenhouse/lever/ashby/workday rows (so rank.py's required-coverage/gap logic ca
   python resolve.py --top 40      # just the highest-scored
   python resolve.py --all         # any status
   python resolve.py --enrich-only # skip builtin resolve; only fetch thin JDs
+  python resolve.py --hop-limit 300  # follow more aggregator links to employer boards (default 150)
 """
 import argparse, time
-import jobs_store, job_context
+import jobs_store, job_context, board_resolve
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
@@ -130,6 +131,8 @@ def main():
     ap.add_argument("--all", action="store_true", help="any status, not just discovered")
     ap.add_argument("--enrich-only", action="store_true",
                     help="skip builtin apply-link resolve; only fetch thin JDs")
+    ap.add_argument("--hop-limit", type=int, default=150,
+                    help="max new aggregator links to follow to the employer board (cached; 0 = off)")
     ap.add_argument("--min", type=int, default=THIN_DESC,
                     help="enrich rows whose desc is shorter than this (default 800)")
     a = ap.parse_args()
@@ -142,6 +145,10 @@ def main():
 
     if not a.enrich_only:
         _resolve_builtin(d, rows)
+        # Follow aggregator links (builtin, grnh.se, indeed redirects, paylocity details) to the
+        # employer's own board; scan_ats.harvest then adds that board. Cached in board_resolve.json.
+        if a.hop_limit > 0:
+            board_resolve.run(d, rows, limit=a.hop_limit, save_rows=jobs_store.save)
         # re-read queue membership after resolve so builtin rows with a new ATS apply_url
         # are eligible for enrichment in the same run
         rows = [r for r in q if (a.all or r.get("status") == "discovered")]

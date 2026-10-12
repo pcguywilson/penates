@@ -1,5 +1,8 @@
 # Example ATS scan targets. Copy to config/companies.yml and edit for your search.
 # These are public board slugs (no login). Adjust filters and companies to your lane.
+# ats: greenhouse | lever | ashby | workday | smartrecruiters | workable | recruitee | teamtailor |
+#      breezy | bamboohr | jazzhr (applytojob) | paylocity (slug = company GUID from Jobs/All/<guid>)
+# scan_ats.py also adds boards it sees in discovered jobs (and in data/board_resolve.json) on its own.
 title_filter:
   positive: [DevOps, SRE, Site Reliability, Platform, Cloud, Infrastructure, Systems Engineer, Linux, DevSecOps, Reliability]
   negative: [Intern, Junior, Associate, Director, VP, Sales, Account Executive, Recruiter, Pre-Sales]

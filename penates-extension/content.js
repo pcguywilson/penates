@@ -12,7 +12,7 @@
 (() => {
   if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
   window.__penatesInit = true;
-  const PENATES_BUILD = "build 53";   // shown in the report header; if you don't see it after a reload, the extension didn't update
+  const PENATES_BUILD = "build 54";   // shown in the report header; if you don't see it after a reload, the extension didn't update
   const IS_TOP = window.top === window;
   // The content script is injected only on ATS hosts (manifest matches). When an ATS application
   // form is EMBEDDED as a cross-origin iframe inside a company careers page (e.g. a Greenhouse
@@ -149,6 +149,62 @@
     el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste", data: text }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
     el.dispatchEvent(new Event("blur", { bubbles: true }));
+  }
+
+  // ---- employment-history blocks (Paylocity / iCIMS style repeating "Work History N") ----
+  // The generic scan fills by label, so every block's Address/City/Start Date got the HOME address
+  // and the "when can you start" answer (2026-10-06 Paylocity). Fields inside a block that has ONE
+  // "Company Name" label and a position/title label belong to an employer, not the candidate:
+  // leave them for the user. The candidate's own section never has a company-name label beside
+  // first name / email, so it is not caught.
+  const _empCache = new WeakMap();
+  function inEmploymentBlock(el) {
+    let n = el, hops = 0;
+    while (n && hops < 12) {
+      n = n.parentElement || (n.getRootNode && n.getRootNode().host) || null; hops++;
+      if (!n) break;
+      if (_empCache.has(n)) return _empCache.get(n);
+      const t = n.textContent || "";
+      const c = (t.match(/company name|employer name|name of employer/gi) || []).length;
+      if (c >= 1) {
+        // Grok seq 206: on a flat page the deciding ancestor is the whole form. A real employer card
+        // is small, and never holds the candidate's own name/email/personal-phone labels.
+        let nIn = 0; try { nIn = n.querySelectorAll("input, select, textarea").length; } catch (_) {}
+        const r = c === 1 && nIn <= 24 &&
+          /position|title|occupation|role/i.test(t) &&     // textContent glues labels: no leading \b
+          !/(first|given|legal|last|family|full) name|e-?mail|(mobile|cell|home|personal) (phone|number)|resume|cover letter|linkedin/i.test(t);
+        _empCache.set(n, r);
+        return r;
+      }
+    }
+    return false;
+  }
+
+  // ---- address autocomplete (Paylocity geocoder swapped the home address for a Pittsburgh match) ----
+  const ADDR_Q = /address line ?1|street address|^street$|^address$|\bcity\b|\bzip\b|postal|^state\b|state\s*\/|\bprovince\b/i;
+  // Street value is set WITHOUT blur (a geocoder may commit its highlighted row on blur), the list
+  // gets a moment to open, Escape closes it, THEN blur. Escape only for this field's own list
+  // (aria-expanded / aria-controls) or a Google Places .pac-container (Grok seq 206).
+  function setNativeNoBlur(el, text) {
+    el.focus();
+    const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(proto, "value").set.call(el, text);
+    el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertFromPaste", data: text }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  async function closeAutocomplete(el) {
+    await sleep(450);
+    try {
+      let open = el.getAttribute("aria-expanded") === "true";
+      const ctl = el.getAttribute("aria-controls") || el.getAttribute("aria-owns");
+      if (!open && ctl) { const b = document.getElementById(ctl); open = !!(b && shown(b)); }
+      if (!open) open = [...document.querySelectorAll(".pac-container")].some((b) => shown(b));
+      if (open) {
+        el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
+        el.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
+      }
+    } catch (_) {}
+    try { el.dispatchEvent(new Event("blur", { bubbles: true })); } catch (_) {}
   }
 
   // ---- question / label text for ANY field (light DOM + shadow climb for SLDS) ----
@@ -353,8 +409,10 @@
   }
 
   // ---- server call (via background: dodges CORS / mixed-content / private-network) ----
-  async function askEngine(question, limit, fresh, timeoutMs, bulk, options) {
+  async function askEngine(question, limit, fresh, timeoutMs, bulk, options, prev) {
     const payload = { question, company: companyGuess(), role: roleGuess(), url: location.href, page_context: pageContext(), limit: limit || null, fresh: !!fresh, bulk: !!bulk, options: (options && options.length) ? options : null };
+    // per-field Regenerate only: the draft being rejected, so the server writes a different one
+    if (fresh && !bulk && prev) payload.prev = String(prev).slice(0, 600);
     const call = (async () => {
       try {
         const resp = await chrome.runtime.sendMessage({ type: "FETCH_ANSWER", payload });
@@ -610,6 +668,37 @@
         || opts.find((o) => want && norm(o.textContent).includes(want))
         || (opts.length === 1 ? opts[0] : null);
   }
+  // Paylocity (verified live 2026-10-06): address suggestions are plain <li> in #<id>-autocomplete-list
+  // (no role=option); the State select renders rows #<id>-select-row-N inside #<id>-dropdown-list-container,
+  // opens on mousedown of its control, and shows the chosen value in the control, not in input.value.
+  function comboMenu(el) {
+    for (const id of [el.getAttribute("aria-controls"), el.id && el.id + "-dropdown-list-container", el.id && el.id + "-autocomplete-list"]) {
+      if (!id) continue;
+      const m = document.getElementById(id);
+      if (m) return { m, own: true };
+    }
+    const m = document.querySelector('[role="listbox"]');
+    return m ? { m, own: false } : null;
+  }
+  function comboOptions(el) {
+    const r = comboMenu(el);
+    if (!r) return [];
+    let o = [...r.m.querySelectorAll('[role="option"]')];
+    if (!o.length && r.own) o = [...r.m.querySelectorAll('li, [id*="-select-row-"]')];
+    return o;
+  }
+  function comboShown(el) {   // value as displayed: input value, else the control's own short text
+    const v = (el.value || "").trim();
+    if (v) return v;
+    let n = el;
+    for (let i = 0; i < 4 && n; i++) {
+      n = n.parentElement;
+      const t = (n && n.textContent || "").trim();
+      if (t && t.length <= 60) return t;
+      if (t.length > 60) break;
+    }
+    return "";
+  }
   function comboCommitted(el) {
     try {   // Ant Design: the chosen value renders in .ant-select-selection-item on the .ant-select root
       const ant = el.closest && el.closest(".ant-select");
@@ -653,8 +742,7 @@
     let opts = [];
     for (let i = 0; i < 16; i++) {
       await sleep(250);
-      const menu = document.getElementById(el.getAttribute("aria-controls") || "__none__") || document.querySelector('[role="listbox"]');
-      opts = menu ? [...menu.querySelectorAll('[role="option"]')] : [];
+      opts = comboOptions(el);
       if (!opts.length) { try { opts = [...document.querySelectorAll('[role="option"]')].filter((o) => o.offsetParent); } catch (_) {} }
       if (opts.length) break;
     }
@@ -663,10 +751,19 @@
       // text) -> reopen without a query and scan the full option list, then token-match.
       try { setter.call(el, ""); el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" })); } catch (_) {}
       try { el.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); } catch (_) {}
+      if (!comboOptions(el).length) {   // selects that open only on mousedown of their control
+        let n = el;
+        for (let i = 0; i < 4 && n; i++) {
+          n = n.parentElement; if (!n) break;
+          try { n.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); } catch (_) {}
+          await sleep(200);
+          if (comboOptions(el).length) break;
+        }
+      }
       for (let i = 0; i < 12; i++) {
         await sleep(200);
-        const menu2 = document.getElementById(el.getAttribute("aria-controls") || "__none__") || document.querySelector('[role="listbox"]');
-        opts = menu2 ? [...menu2.querySelectorAll('[role="option"]')] : [...document.querySelectorAll('[role="option"]')].filter((o) => o.offsetParent);
+        opts = comboOptions(el);
+        if (!opts.length) opts = [...document.querySelectorAll('[role="option"]')].filter((o) => o.offsetParent);
         if (opts.length) break;
       }
       if (!opts.length) return false;
@@ -706,6 +803,8 @@
     // click on the chosen option element commits it, and the token-scored pick above avoids the
     // default-active foreign match (e.g. a same-named city abroad) - both verified live on the fixture. Click
     // first; fall back to keyboard nav for true react-select v5 widgets that ignore synthetic clicks.
+    const _scope = (el.closest && el.closest("form")) || document;
+    const _before = new Map([...(_scope.querySelectorAll ? _scope.querySelectorAll("input") : [])].filter((x) => x !== el).map((x) => [x, x.value]));
     const clickTarget = best;
     fireMouse(clickTarget);
     await sleep(260);
@@ -713,6 +812,10 @@
     // committed chip, the input now showing the option (Workable/Ashby), or closed + input not
     // holding our typed query.
     const _v = norm(el.value || "");
+    let _others = false;
+    try { for (const [x, v0] of _before) if (x.isConnected && x.value !== v0) { _others = true; break; } } catch (_) {}
+    if (_others && (!_v || targetText.startsWith(_v))) return true;   // picking it filled city/zip/etc.
+    if (!_v && norm(comboShown(el)) === targetText) return true;      // value shows in the control
     if (comboCommitted(el) || _v === targetText || (el.getAttribute("aria-expanded") === "false" && (!_v || targetText.startsWith(_v)) && _v !== norm(query))) return true;
     // fallback: keyboard nav until the intended option is the active descendant, then Enter. Only
     // commit if we actually reached it - never blind-Enter onto whatever happens to be highlighted.
@@ -887,6 +990,31 @@
     if (x === "false") return false;
     return x;
   }
+  // ---- home address from profile.yaml (identity.street/city_only/state/zip) ----
+  const US_STATE = { alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR", california: "CA", colorado: "CO",
+    connecticut: "CT", delaware: "DE", "district of columbia": "DC", florida: "FL", georgia: "GA", hawaii: "HI",
+    idaho: "ID", illinois: "IL", indiana: "IN", iowa: "IA", kansas: "KS", kentucky: "KY", louisiana: "LA",
+    maine: "ME", maryland: "MD", massachusetts: "MA", michigan: "MI", minnesota: "MN", mississippi: "MS",
+    missouri: "MO", montana: "MT", nebraska: "NE", nevada: "NV", "new hampshire": "NH", "new jersey": "NJ",
+    "new mexico": "NM", "new york": "NY", "north carolina": "NC", "north dakota": "ND", ohio: "OH", oklahoma: "OK",
+    oregon: "OR", pennsylvania: "PA", "rhode island": "RI", "south carolina": "SC", "south dakota": "SD",
+    tennessee: "TN", texas: "TX", utah: "UT", vermont: "VT", virginia: "VA", washington: "WA",
+    "west virginia": "WV", wisconsin: "WI", wyoming: "WY" };
+  const stateAbbr = (v) => US_STATE[norm(v || "")] || "";
+  let _homeAddr = null;
+  async function homeAddress() {
+    if (_homeAddr) return _homeAddr;
+    let y = "";
+    try { const r = await chrome.runtime.sendMessage({ type: "FETCH_PROFILE" }); y = (r && r.ok && r.data && r.data.profile) || ""; } catch (_) {}
+    const g = (k) => { const m = y.match(new RegExp("^\\s+" + k + ":\\s*(.+)$", "m")); return m ? m[1].replace(/\s+#.*$/, "").replace(/^['"]|['"]$/g, "").trim() : ""; };
+    _homeAddr = { street: g("street"), city: g("city_only"), state: g("state"), zip: g("zip") };
+    _homeAddr.abbr = stateAbbr(_homeAddr.state);
+    return _homeAddr;
+  }
+  // "Saint Louis" (geocoder) == "St. Louis" (profile); same for Mount/Fort.
+  const _addrNorm = (v) => norm(v).replace(/\bsaint\b/g, "st").replace(/\bmount\b/g, "mt").replace(/\bfort\b/g, "ft");
+  const sameAddr = (a, b) => { a = _addrNorm(a); b = _addrNorm(b); return !!a && !!b && (a === b || a.startsWith(b) || b.startsWith(a)); };
+
   function parseWorkHistoryYaml(text) {
     const jobs = []; let cur = null;
     for (const raw of String(text || "").split(/\r?\n/)) {
@@ -1001,7 +1129,7 @@
     return { filled };
   }
   // ===== Start-date fields ======================================================
-  // Rule: free text -> "2 weeks from offer" (profile, server side); an actual DATE field ->
+  // Rule (user): free text -> "2 weeks from offer" (profile, server side); an actual DATE field ->
   // the second Monday from today. Covers Workday Month/Day/Year spinners, <input type=date> and
   // MM/DD/YYYY text boxes whose label asks when you can start.
   const START_Q = /when (could|can|would) you (start|begin)|start date|earliest (start|available|date)|available to start|availability date|date (you are )?available|begin work|able to start|join date/i;
@@ -1053,7 +1181,7 @@
     }
     // Native date inputs and MM/DD/YYYY text boxes
     for (const el of deepFields()) {
-      if (inPenates(el) || (handled && handled.has(el)) || el.tagName !== "INPUT" || clean(el.value)) continue;
+      if (inPenates(el) || (handled && handled.has(el)) || el.tagName !== "INPUT" || clean(el.value) || inEmploymentBlock(el)) continue;
       const typ = (el.type || "").toLowerCase();
       const ph = (el.getAttribute("placeholder") || "") + " " + (el.getAttribute("aria-label") || "");
       const isDate = typ === "date" || /\b(mm|dd)\s*[\/\-.]\s*(dd|mm)\s*[\/\-.]\s*(yyyy|yy)\b/i.test(ph);
@@ -1224,7 +1352,9 @@
       if (!Array.isArray(s)) return null;
       const items = [];
       for (const sec of s) for (const f of (sec.fields || [])) {
-        let kind = { text: "text", email: "text", phone: "text", paragraph: "textarea", boolean: "radio", dropdown: "select", multiple: "checkbox" }[f.type];
+        let kind = { text: "text", email: "text", phone: "text", paragraph: "textarea", boolean: "radio", dropdown: "select", multiple: "checkbox",
+                     location: "location", address: "location" }[f.type];
+        if (!kind && /\b(address|location|city)\b/i.test(f.label || "")) kind = "location";   // Places typeahead
         if (!kind) continue;
         if (f.type === "multiple" && f.singleOption) kind = "radio";
         const options = f.type === "boolean" ? ["Yes", "No"] : (f.options || []).map((o) => clean(String(o.value || ""))).filter(Boolean);
@@ -1303,6 +1433,54 @@
     const wanted = String(text || "").split(/\s*\|\s*/).map(norm).filter(Boolean);
     return (it.options || []).filter((o) => wanted.includes(norm(o)));
   }
+  // ---- Location / Places typeahead (Workable "Address", others) ---------------------------------
+  // The profile value is "City, State, Country". ATS place pickers (Google Places-style) list
+  // "Saint Louis, MO, USA" or "St Louis, Missouri, United States": match on the city core
+  // AND the state (full name or USPS code), never on "United States" alone. A resume-parse guess
+  // already in the box (e.g. a nearby town) is replaced when it does not contain the city.
+  const US_STATES = {alabama:"al",alaska:"ak",arizona:"az",arkansas:"ar",california:"ca",colorado:"co",connecticut:"ct",delaware:"de",
+    florida:"fl",georgia:"ga",hawaii:"hi",idaho:"id",illinois:"il",indiana:"in",iowa:"ia",kansas:"ks",kentucky:"ky",louisiana:"la",maine:"me",
+    maryland:"md",massachusetts:"ma",michigan:"mi",minnesota:"mn",mississippi:"ms",missouri:"mo",montana:"mt",nebraska:"ne",nevada:"nv",
+    "new hampshire":"nh","new jersey":"nj","new mexico":"nm","new york":"ny","north carolina":"nc","north dakota":"nd",ohio:"oh",oklahoma:"ok",
+    oregon:"or",pennsylvania:"pa","rhode island":"ri","south carolina":"sc","south dakota":"sd",tennessee:"tn",texas:"tx",utah:"ut",
+    vermont:"vt",virginia:"va",washington:"wa","west virginia":"wv",wisconsin:"wi",wyoming:"wy","district of columbia":"dc"};
+  const _cityCore = (c) => norm(c).replace(/^(st|saint|ste|sainte|ft|fort|mt|mount)\.?\s+/, "").trim();
+  function _placeMatches(optText, city, state) {
+    const t = " " + norm(optText).replace(/[.,]/g, " ") + " ";
+    const core = _cityCore(city);
+    if (!core || !t.includes(" " + core.split(" ")[0])) return false;
+    if (!state) return true;
+    const st = norm(state), code = US_STATES[st] || (st.length === 2 ? st : "");
+    return t.includes(" " + st + " ") || (code && t.includes(" " + code + " "));
+  }
+  async function fillLocation(el, value) {
+    const parts = String(value || "").split(",").map((x) => x.trim()).filter(Boolean);
+    const city = parts[0] || "", state = parts[1] || "";
+    if (!el || !city) return { ok: false };
+    if (clean(el.value) && _placeMatches(el.value, city, state)) return { ok: true, already: true };
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    const query = city + (state ? ", " + state : "");
+    el.focus();
+    try { setter.call(el, ""); el.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContentBackward" })); } catch (_) {}
+    await sleep(120);
+    try { setter.call(el, query); el.dispatchEvent(new InputEvent("input", { bubbles: true, data: query, inputType: "insertText" })); } catch (_) {}
+    let opts = [];
+    for (let i = 0; i < 16; i++) {
+      await sleep(250);
+      opts = [...document.querySelectorAll('[role="option"], .pac-item, [data-ui="option"], li[id*="option"]')].filter((o) => { try { return o.offsetParent && clean(o.textContent); } catch (_) { return false; } });
+      if (opts.length) break;
+    }
+    const hit = opts.find((o) => _placeMatches(o.textContent, city, state));
+    if (hit) {
+      try { hit.scrollIntoView({ block: "nearest" }); } catch (_) {}
+      fireMouse(hit); await sleep(300);
+      const shown = clean(el.value) || clean(hit.textContent);
+      return { ok: true, shown, loose: !_placeMatches(shown, city, state) };
+    }
+    try { el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); } catch (_) {}
+    // No matching place in the list: leave our typed value so the field isn't the wrong town, flag it.
+    return { ok: !!clean(el.value), shown: clean(el.value), loose: true };
+  }
   async function adapterFill(items, rows) {
     const out = { filled: 0, review: 0, skipped: 0 };
     const todo = [];
@@ -1312,11 +1490,13 @@
       if (/cover.?letter/i.test(it.id + " " + it.q)) { if (it.required) { rows.push([it.q.slice(0, 60), "skip", "cover letter required -> dashboard Cover"]); out.skipped++; } continue; }
       if (!el && it.kind !== "radio" && it.kind !== "checkbox") continue;          // not rendered on this page
       if (el && (it.kind === "text" || it.kind === "textarea") && clean(el.value)) continue;  // prefilled
+      if (it.kind === "location" && !el) continue;
       if (el && (it.kind === "select" || it.kind === "combobox") && (comboCommitted(el) || (clean(el.value) && (it.options || []).some((o) => norm(o) === norm(el.value))))) continue;
       todo.push(it);
     }
     setReport("Answering " + todo.length + " questions in one batch...", rows);
-    const batch = await askEngineBatch(todo.map((it) => ({ q: it.q, kind: it.kind, options: it.options, required: it.required,
+    const batch = await askEngineBatch(todo.map((it) => ({ q: it.kind === "location" ? "Current location" : it.q,
+      kind: it.kind === "location" ? "text" : it.kind, options: it.options, required: it.required,
       limit: it.el && it.el.maxLength > 0 ? it.el.maxLength : null })), 90000);
     const answers = (batch && !batch.__error && Array.isArray(batch.answers)) ? batch.answers : [];
     if (!answers.length) { rows.push(["Answer engine", "skip", (batch && batch.__error) || "no batch answers"]); }
@@ -1335,7 +1515,12 @@
         if (!text) { rows.push([label, "skip", (it.required ? "required, " : "") + "no answer -> you"]); out.skipped++; continue; }
         const isReview = !!(a.review || (a.method && !/^(field|learned|options|literal|choice|profile|guard)/i.test(a.method)));
         let ok = false, shownVal = text;
-        if (it.kind === "text" || it.kind === "textarea") {
+        if (it.kind === "location") {
+          const r = await fillLocation(it.el, text);
+          if (r.already) { rows.push([label, "filled", clean(it.el.value).slice(0, 60) + " (already set)"]); out.filled++; continue; }
+          ok = r.ok; shownVal = r.shown || text;
+          if (ok && r.loose) { rows.push([label, "review", shownVal.slice(0, 60) + " (check the place)"]); out.review++; continue; }
+        } else if (it.kind === "text" || it.kind === "textarea") {
           if (it.kind === "text" && text.length > 200) { rows.push([label, "skip", "long answer for a one-line field -> you"]); out.skipped++; continue; }
           ok = _adSetText(it.el, text);
         } else if (it.kind === "select" || it.kind === "combobox") {
@@ -1442,9 +1627,11 @@
     try { filled += await fillStartDates(rows, wdHandled); } catch (e) { rows.push(["Start date", "skip", String(e).slice(0, 50)]); }
     mark("refs+dates");
     setReport("Scanning form...", rows);
+    let empSkipped = 0;
     const fields = deepFields().filter((el) => {
       if (inPenates(el)) return false;
       if (wdHandled.has(el)) return false;
+      if (inEmploymentBlock(el)) { if (!clean(el.value || "")) empSkipped++; return false; }
       const t = (el.type || el.tagName).toLowerCase();
       if (el.tagName === "INPUT" && SKIP_TYPES.test(el.type || "")) return false;
       if (el.disabled) return false;
@@ -1453,6 +1640,8 @@
       if (el.readOnly && (el.getAttribute("role") || "") !== "combobox") return false;
       return shown(el);
     });
+
+    if (empSkipped) rows.push(["Work history blocks", "skip", empSkipped + " empty employer fields (address/dates/reason) -> you"]);
 
     // ---- resolve EVERY question in ONE batch (kills the per-field SW round-trip stalls) --------
     // Walk the fields, collect the questions the apply loop below will ask (same resolvers, same
@@ -1639,13 +1828,34 @@
           let ok = false;
           // Field of study rarely lists "Computer Information Technology" verbatim. Try the closest
           // common catalog names in order ("Information Technology" first), then the exact value.
-          const alts = FIELD_Q.test(q) ? [...new Set(["Information Technology", data.text, ...FIELD_ALTS])] : [data.text];
+          let alts = FIELD_Q.test(q) ? [...new Set(["Information Technology", data.text, ...FIELD_ALTS])] : [data.text];
+          const _ab = stateAbbr(data.text);
+          const _cur = comboShown(el);
+          // Already showing the wanted value (Country defaulted to United States): leave it, count it filled.
+          if (_cur.length >= 2 && (sameAddr(_cur, data.text) || (_ab && norm(_cur) === _ab.toLowerCase()))) {
+            rows.push([q.slice(0, 60), "filled", _cur.slice(0, 60) + " (already set)"]); filled++;
+            continue;
+          }
+          if (_ab && /\bstate\b|province/i.test(q)) alts = [...new Set([data.text, _ab])];   // lists of codes (WV)
+          const _street = /address line ?1|street|^address$/i.test(q);
+          if (_street) {
+            // Address autocomplete: score suggestions on the FULL home address so a same-street match in
+            // another city (123 Main St, Pittsburgh) loses; the query typed is still the street.
+            const h = await homeAddress();
+            if (h.city) alts = [[h.street || data.text, h.city, ((h.abbr || h.state) + " " + h.zip).trim()].join(", ")];
+          }
           for (const v of alts) {
             ok = await fillCombobox(el, v);
             if (ok) { pickText = v; break; }
             await sleep(150);
           }
-          if (ok) { rows.push([q.slice(0, 60), "filled", pickText.slice(0, 60)]); filled++; }
+          if (!ok && _street) {
+            // No suggestion for the real address: type the street as plain text and close the list.
+            try { setNativeNoBlur(el, data.text); await closeAutocomplete(el); } catch (_) {}
+            rows.push([q.slice(0, 60), "filled", data.text.slice(0, 50) + " (typed, no matching suggestion)"]); filled++;
+            continue;
+          }
+          if (ok) { rows.push([q.slice(0, 60), "filled", pickText.slice(0, 60)]); filled++; if (ADDR_Q.test(q)) healMap.push({ q, value: pickText, kind: "combo" }); }
           else { rows.push([q.slice(0, 60), "skip", "combobox: '" + data.text.slice(0, 40) + "' not selectable -> you"]); skipped++; }
           continue;
         }
@@ -1663,8 +1873,10 @@
           }
           healMap.push({ q, value: data.text, kind: "text" });
         } else {
-          setNative(el, data.text);
-          if ((singleLine || tag === "TEXTAREA" || el.isContentEditable) && !gap && !isEssay) healMap.push({ q, value: data.text, kind: "text" });
+          const _addr = singleLine && ADDR_Q.test(q);
+          if (_addr && /address line ?1|street|^address$/i.test(q)) { setNativeNoBlur(el, data.text); await closeAutocomplete(el); }
+          else setNative(el, data.text);
+          if ((singleLine || tag === "TEXTAREA" || el.isContentEditable) && !gap && !isEssay) healMap.push({ q, value: data.text, kind: "text", addr: _addr });
         }
         if (gap) { rows.push([q.slice(0, 60), "review", "gap: " + data.gaps.join(", ") + " | " + data.text.slice(0, 40)]); review++; }
         else if (isEssay) { rows.push([q.slice(0, 60), "review", "essay (" + (data.method || "") + ") - read it | " + data.text.slice(0, 40)]); review++; }
@@ -1823,13 +2035,21 @@
       try {
         await sleep(500);
         const fresh = deepFields();
-        let healed = 0;
+        let healed = 0, addrFixed = 0;
         for (const item of healMap) {
           try {
             if (item.kind === "text") {
               const el = fresh.find((o) => (o.tagName === "TEXTAREA" || o.tagName === "INPUT") &&
                 !inPenates(o) && !o.disabled && questionFor(o) === item.q);
-              if (el && !((el.value || "").trim())) { setNative(el, item.value); healed++; }
+              const cur = el ? (el.value || "").trim() : "";
+              if (el && !cur) { setNative(el, item.value); healed++; }
+              else if (el && item.addr && cur !== item.value.trim()) { setNative(el, item.value); healed++; addrFixed++; }
+            } else if (item.kind === "combo") {
+              const el = fresh.find((o) => !inPenates(o) && !o.disabled && questionFor(o) === item.q);
+              const cur = el ? norm(el.value || el.textContent || "") : "";
+              if (el && cur && cur !== norm(item.value) && !cur.startsWith(norm(item.value)) && !norm(item.value).startsWith(cur)) {
+                if (await fillCombobox(el, item.value)) { healed++; addrFixed++; }
+              }
             } else if (item.kind === "radio") {
               const opts = fresh.filter((o) => o.tagName === "INPUT" && (o.type || "").toLowerCase() === "radio" && groupQuestion(o) === item.q);
               if (opts.length && !opts.some((o) => o.checked)) {
@@ -1848,6 +2068,7 @@
           } catch (_) {}
         }
         if (healed) rows.push(["Re-filled after re-render", "filled", healed + " field(s)"]);
+        if (addrFixed) rows.push(["Address autocomplete", "review", "site overwrote " + addrFixed + " address field(s); restored. Check County."]);
       } catch (_) {}
     }
 
@@ -1863,6 +2084,7 @@
       await sleep((CAN_SURFACE && !IS_TOP) ? 1200 : 600);   // embeds render/settle slower
       const fresh2 = deepFields().filter((el) => {
         if (inPenates(el)) return false;
+        if (inEmploymentBlock(el)) return false;   // employer cards are the user's (Grok seq 206)
         if (el.tagName === "INPUT" && SKIP_TYPES.test(el.type || "")) return false;
         if (el.disabled || (el.readOnly && (el.getAttribute("role") || "") !== "combobox")) return false;
         return shown(el);
@@ -1945,6 +2167,53 @@
     // Late reference pass: some ATSs (Dayforce) parse the uploaded resume and redraw the form
     // seconds later, wiping fields filled early. Refill any reference field that is empty again.
     try { await sleep(400); await fillReferences(rows, null, true); } catch (_) {}
+
+    // Last address guard (2026-10-06 Paylocity): the site's address autocomplete can answer AFTER
+    // the heal pass and swap city/state/zip/county for a different street match. Check the candidate's
+    // own address fields (never employer blocks) against profile.yaml directly, up to 3 rounds. If
+    // anything had to be put back, clear a County the wrong match filled and flag it.
+    try {
+      const h = await homeAddress();
+      const want = [
+        { re: /address line ?1|street address|^street$/i, v: h.street, street: true },
+        { re: /\bcity\b/i, v: h.city },
+        { re: /^\s*state\b|\bstate\s*\/|^\s*province\b/i, v: h.state, abbr: h.abbr },
+        { re: /\bzip\b|postal/i, v: h.zip },
+      ].filter((w) => w.v);
+      let restored = 0;
+      for (let round = 0; want.length && round < 3; round++) {
+        await sleep(round ? 900 : 600);
+        const live = deepFields().filter((o) => !inPenates(o) && !o.disabled && !inEmploymentBlock(o) &&
+          (o.tagName === "INPUT" || o.tagName === "SELECT") && shown(o));
+        let bad = 0;
+        for (const w of want) {
+          const el = live.find((o) => w.re.test(questionFor(o) || ""));
+          if (!el) continue;
+          const cur = el.tagName === "SELECT" ? ((el.selectedOptions[0] || {}).textContent || "") : (isCombobox(el) ? comboShown(el) : (el.value || ""));
+          if (sameAddr(cur, w.v) || (w.abbr && norm(cur) === w.abbr.toLowerCase())) continue;
+          if (el.tagName === "SELECT") {
+            const opt = [...el.options].find((o) => sameAddr(o.textContent, w.v) || (w.abbr && norm(o.textContent) === w.abbr.toLowerCase()));
+            if (opt) { el.value = opt.value; el.dispatchEvent(new Event("change", { bubbles: true })); bad++; }
+          } else if (isCombobox(el) && !w.street) {
+            let ok = await fillCombobox(el, w.v);
+            if (!ok && w.abbr) ok = await fillCombobox(el, w.abbr);
+            if (ok) bad++;
+          } else if (w.street) {
+            setNativeNoBlur(el, w.v); await closeAutocomplete(el); bad++;
+          } else { setNative(el, w.v); bad++; }
+        }
+        restored += bad;
+        if (!bad) break;
+      }
+      if (restored) {
+        const live = deepFields().filter((o) => !inPenates(o) && !o.disabled && !inEmploymentBlock(o));
+        const county = live.find((o) => o.tagName === "INPUT" && /\bcounty\b/i.test(questionFor(o) || ""));
+        if (county && (county.value || "").trim()) setNative(county, "");
+        rows.push(["Address guard", "review", "site autocomplete changed " + restored + " address field(s); put back" +
+                   (county ? ", County cleared -> enter it" : "")]);
+        review++;
+      }
+    } catch (_) {}
     } // end penGeneric
     try { if (_keepPort) _keepPort.disconnect(); } catch (_) {}   // release the service-worker keep-alive
     _answerCache = null;
@@ -2111,14 +2380,21 @@
     el = el || lastEditable || (isEditable(document.activeElement) ? document.activeElement : null);
     if (!isEditable(el)) return toast("No answer field focused", true);
     const q = questionFor(el);
-    if (!q) return toast("Could not read the question. Highlight it, then Alt+A.", true);
-    currentEl = el; currentQuestion = q;
-    openCard(); fetchAndFill(false);
+    currentEl = el; currentQuestion = q || "";
+    openCard();
+    if (!q) { startPick(); return; }
+    fetchAndFill(false);
   }
   async function fetchAndFill(fresh) {
+    const typed = clean(els.q && els.q.value);
+    let qChanged = false;
+    if (typed && typed !== currentQuestion) { currentQuestion = typed; fresh = true; qChanged = true; }
+    if (!currentQuestion) { setMeta("Click the question on the page, or type it in the box above.", true); return; }
+    stopPick();
     setCardBusy(true, fresh ? "Regenerating..." : "Drafting a local answer...");
     const limit = currentEl && currentEl.maxLength && currentEl.maxLength > 0 ? currentEl.maxLength : null;
-    const data = await askEngine(currentQuestion, limit, fresh);
+    const prevDraft = fresh && !qChanged && els.text ? (els.text.value || "").trim() : "";
+    const data = await askEngine(currentQuestion, limit, fresh, undefined, false, null, prevDraft);
     setCardBusy(false);
     if (!data || data.__error) { setMeta(data && data.__error ? data.__error : "serve.py not reachable on :8765", true); return; }
     els.text.value = data.text || "";
@@ -2150,7 +2426,7 @@
   }
   let card, els = {};
   function openCard() {
-    if (card) { card.style.display = "block"; if (els && els.q) els.q.textContent = currentQuestion; return; }
+    if (card) { card.style.display = "block"; if (els && els.q) els.q.value = currentQuestion; return; }
     card = document.createElement("div");
     card.setAttribute("data-penates", "card");
     card.style.cssText =
@@ -2160,7 +2436,8 @@
     card.innerHTML =
       '<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:#111827;border-bottom:1px solid #334155">' +
         '<span style="font-weight:600">Penates</span>' +
-        '<span data-r="q" style="flex:1;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>' +
+        '<input data-r="q" placeholder="Question (click it on the page, or type it here)" title="The question Penates answers. Edit it, then Regenerate." ' +
+          'style="flex:1;min-width:0;background:transparent;color:#cbd5e1;border:1px solid #1f2937;border-radius:4px;padding:2px 4px;font:12px system-ui,sans-serif">' +
         '<span data-r="x" title="Close" style="cursor:pointer;color:#94a3b8;padding:0 4px">✕</span></div>' +
       '<div style="padding:10px 12px">' +
         '<div data-r="meta" style="font-size:11px;color:#94a3b8;margin-bottom:6px;min-height:14px"></div>' +
@@ -2184,13 +2461,68 @@
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") { e.preventDefault(); doInsert(); }
       else if (e.key === "Escape") { e.preventDefault(); closeCard(); }
     });
-    els.q.textContent = currentQuestion;
+    els.q.value = currentQuestion;
+    els.q.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); fetchAndFill(true); }
+      else if (e.key === "Escape") { e.preventDefault(); closeCard(); }
+    });
   }
   function btnCss(bg) { return "background:" + bg + ";color:#fff;border:1px solid #334155;border-radius:6px;padding:6px 12px;cursor:pointer;font:13px system-ui,sans-serif"; }
   function setMeta(msg, warn) { if (els.meta) { els.meta.textContent = msg; els.meta.style.color = warn ? "#fbbf24" : "#94a3b8"; } }
   function setCardBusy(b, msg) { if (!els.insert) return; els.insert.disabled = b; els.regen.disabled = b; els.insert.style.opacity = b ? ".5" : "1"; els.regen.style.opacity = b ? ".5" : "1"; if (b && msg) setMeta(msg); }
   function autosize() { const t = els.text; if (!t) return; t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight + 2, Math.round(window.innerHeight * 0.46)) + "px"; }
-  function closeCard() { if (card) card.style.display = "none"; currentEl = null; }
+  function closeCard() { stopPick(); if (card) card.style.display = "none"; currentEl = null; }
+
+  // ---- pick mode: label unreadable -> click the question text on the page (no shortcut) ----
+  let picking = false, pickHover = null, pickHoverOutline = "";
+  function pickTarget(e) {
+    const t = (e.composedPath ? e.composedPath()[0] : e.target);
+    return t && t.nodeType === 1 ? t : (t && t.parentElement) || null;
+  }
+  function pickUnhover() { if (pickHover) { pickHover.style.outline = pickHoverOutline; pickHover = null; } }
+  function onPickOver(e) {
+    const t = pickTarget(e);
+    if (!t || inPenates(t) || t === pickHover) return;
+    pickUnhover(); pickHover = t; pickHoverOutline = t.style.outline; t.style.outline = "2px dashed #f59e0b";
+  }
+  function onPickBlock(e) {
+    const t = pickTarget(e);
+    if (!t || inPenates(t)) return;
+    e.preventDefault(); e.stopPropagation();   // no focus change, link nav, or selection
+  }
+  function onPickClick(e) {
+    const t = pickTarget(e);
+    if (!t || inPenates(t)) return;
+    e.preventDefault(); e.stopPropagation();
+    const txt = clean(t.innerText || t.textContent || "");
+    if (txt.length < 8) { setMeta("Too little text there. Click the question itself.", true); return; }
+    if (txt.length > 500) { setMeta("That block is too big. Click closer to the question.", true); return; }
+    pickUnhover();
+    const old = t.style.outline; t.style.outline = "2px solid #22c55e";
+    setTimeout(() => { t.style.outline = old; }, 900);
+    currentQuestion = txt; if (els.q) els.q.value = txt;
+    fetchAndFill(false);
+  }
+  function onPickKey(e) { if (e.key === "Escape") { e.preventDefault(); closeCard(); } }
+  function startPick() {
+    if (picking) return;
+    picking = true;
+    setMeta("Click the question text on the page (or type it above).", true);
+    document.addEventListener("mouseover", onPickOver, true);
+    document.addEventListener("pointerdown", onPickBlock, true);
+    document.addEventListener("mousedown", onPickBlock, true);
+    document.addEventListener("click", onPickClick, true);
+    document.addEventListener("keydown", onPickKey, true);
+  }
+  function stopPick() {
+    if (!picking) return;
+    picking = false; pickUnhover();
+    document.removeEventListener("mouseover", onPickOver, true);
+    document.removeEventListener("pointerdown", onPickBlock, true);
+    document.removeEventListener("mousedown", onPickBlock, true);
+    document.removeEventListener("click", onPickClick, true);
+    document.removeEventListener("keydown", onPickKey, true);
+  }
 
   // ---- focus chip ----
   function showChip(el) {

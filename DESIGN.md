@@ -260,7 +260,7 @@ Copied from `dashboard.html` so a later pass restyles against this, not against 
   .seg{display:inline-flex;align-self:flex-start;border:1px solid var(--line-strong);border-radius:6px;overflow:hidden;background:var(--surface-2)}
   .seg button{height:26px;padding:0 10px;border:0;background:none;color:var(--text-2);cursor:pointer;font-weight:600;font-size:12px}
   .seg button+button{border-left:1px solid var(--line)}
-  .seg button.on{background:var(--surface-3);color:var(--text)}
+  .seg button.on{background:var(--accent);color:var(--on-accent)}
   label.src{display:inline-flex;align-items:center;gap:7px;margin-right:18px}
   .muted{color:var(--text-2)} .hint{color:var(--text-3);font-size:12px;margin:4px 0}
   .cap{color:var(--text-3);font-size:11px}

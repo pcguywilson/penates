@@ -4,7 +4,7 @@ Backed by data/jobs.json ({"queue":[...]}) (the dashboard and ranker read it).
 Every feature reads/writes rows here so they share one shape:
 
   id, company, role, url, status, note,        (existing)
-  ats, source, score, discovered_at, applied_at, answers[]   (added, all optional)
+  ats, source, score, discovered_at, applied_at, seen_at, answers[]   (added, all optional)
 
 status vocabulary: discovered, verify, go, applied, closed, skip, expired
 This module is import-safe with no third-party deps (stdlib only).
@@ -36,6 +36,10 @@ _ATS = [
     (r"paycomonline\.net", "paycom"),
     (r"adp\.com", "adp"),
     (r"teksystems\.com", "teksystems"),
+    (r"recruitee\.com", "recruitee"),
+    (r"teamtailor\.com", "teamtailor"),
+    (r"breezy\.hr", "breezy"),
+    (r"applytojob\.com", "jazzhr"),
     (r"builtin\.com", "builtin"),
     (r"hrmdirect\.com", "hrmdirect"),
 ]
@@ -95,6 +99,32 @@ def find_by_url(queue, url):
         if _norm_url(r.get("url")) == n:
             return r
     return None
+
+def _row_for_seen(queue, url):
+    """First row whose url or apply_url matches. Same normalization as find_by_url."""
+    n = _norm_url(url)
+    if not n:
+        return None
+    for r in queue:
+        if _norm_url(r.get("url")) == n or _norm_url(r.get("apply_url")) == n:
+            return r
+    return None
+
+def mark_seen(url):
+    """Stamp seen_at the first time this posting is opened. Matches url or apply_url.
+    Returns the row, or None when nothing matches. Does not insert a row and does
+    not change status, score, or discovered_at. A later call keeps the first stamp."""
+    if not isinstance(url, str) or not _norm_url(url):
+        return None
+    with _LOCK:
+        d = load(); q = d["queue"]
+        r = _row_for_seen(q, url)
+        if r is None:
+            return None
+        if not r.get("seen_at"):
+            r["seen_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+            save(d)
+        return r
 
 def role_for(url):
     """Return the stored role/title for this URL, or "". Same matching as desc_for. Used to

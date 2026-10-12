@@ -10,9 +10,12 @@ zero tokens. This is the reliable discovery spine; the aggregator sources stay s
 import argparse, concurrent.futures as cf, json, os, re, sys, time, urllib.parse, yaml
 import jobs_store
 from sources import greenhouse, lever, ashby, workday, smartrecruiters, workable
+from sources import recruitee, teamtailor, breezy, bamboohr, jazzhr, paylocity
 
 ADAPTERS = {"greenhouse": greenhouse, "lever": lever, "ashby": ashby, "workday": workday,
-            "smartrecruiters": smartrecruiters, "workable": workable}
+            "smartrecruiters": smartrecruiters, "workable": workable,
+            "recruitee": recruitee, "teamtailor": teamtailor, "breezy": breezy,
+            "bamboohr": bamboohr, "jazzhr": jazzhr, "paylocity": paylocity}
 
 # Board slugs recognized in job URLs from ANY source (LinkedIn, Built In, Google, ...).
 # harvest() adds each new board to companies.yml so every later scan reads its whole board.
@@ -23,8 +26,14 @@ _BOARD_RES = [
     ("workday", re.compile(r"https?://([a-z0-9-]+\.wd\d+)\.myworkdayjobs\.com/(?:[a-z]{2}-[A-Z]{2}/)?([A-Za-z0-9_-]+)/", re.I)),
     ("smartrecruiters", re.compile(r"jobs\.smartrecruiters\.com/([A-Za-z0-9_-]+)/", re.I)),
     ("workable", re.compile(r"apply\.workable\.com/([A-Za-z0-9_-]+)/", re.I)),
+    ("recruitee", re.compile(r"https?://([a-z0-9-]+)\.recruitee\.com", re.I)),
+    ("teamtailor", re.compile(r"https?://([a-z0-9-]+(?:\.(?:na|eu))?)\.teamtailor\.com", re.I)),
+    ("breezy", re.compile(r"https?://([a-z0-9-]+)\.breezy\.hr", re.I)),
+    ("bamboohr", re.compile(r"https?://([a-z0-9-]+)\.bamboohr\.com/(?:careers|jobs)", re.I)),
+    ("jazzhr", re.compile(r"https?://([a-z0-9-]+)\.applytojob\.com", re.I)),
+    ("paylocity", re.compile(r"recruiting\.paylocity\.com/Recruiting/Jobs/All/([0-9a-fA-F-]{36})", re.I)),
 ]
-_SKIP_SLUGS = {"j", "embed", "api", "v1", "jobs", "careers"}
+_SKIP_SLUGS = {"j", "embed", "api", "v1", "jobs", "careers", "www", "app", "apply", "help", "support"}
 
 
 _SLUG_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_. -]{0,80}$")
@@ -66,24 +75,36 @@ def _locked_append(path, text):
         except OSError: pass
 
 
+def _board_key(c):
+    """One key per board: "par%20technology" and "par technology" are the same Ashby board."""
+    return (c.get("ats"), urllib.parse.unquote(str(c.get("slug") or "")).strip().lower())
+
+
 def harvest(cfg, path):
     """Append boards seen in data/jobs.json that companies.yml doesn't list yet."""
     try:
         q = jobs_store.load()["queue"]
     except Exception:
         return 0
-    have = {(c.get("ats"), str(c.get("slug") or "").lower()) for c in cfg.get("companies", [])}
+    have = {_board_key(c) for c in cfg.get("companies", [])}
     new = []
-    for r in q:
-        for u in (r.get("url") or "", r.get("apply_url") or ""):
+    seen = [(r.get("company"), (r.get("url") or "", r.get("apply_url") or "")) for r in q]
+    try:   # employer boards found by following aggregator links (board_resolve.py)
+        import board_resolve
+        seen += [(co, (u,)) for co, u in board_resolve.boards()]
+    except Exception:
+        pass
+    for company, links in seen:
+        r = {"company": company}
+        for u in links:
             for ats, rx in _BOARD_RES:
                 m = rx.search(u)
                 if not m:
                     continue
                 slug = _clean_slug(ats, m)
-                if not slug or (ats, slug.lower()) in have:
+                if not slug or _board_key({"ats": ats, "slug": slug}) in have:
                     continue
-                have.add((ats, slug.lower()))
+                have.add(_board_key({"ats": ats, "slug": slug}))
                 name = (r.get("company") or slug).replace('"', "'").replace("\\", "").strip()
                 new.append((name, ats, slug))
     if new:
@@ -229,7 +250,11 @@ def main():
             cfg = load_cfg()
     tf = None if args.no_filter else cfg.get("title_filter")
     lf = None if args.no_filter else cfg.get("location_filter")
-    comps = [c for c in cfg.get("companies", []) if c.get("enabled", True)]
+    comps, _seen = [], set()
+    for c in cfg.get("companies", []):   # enabled, and each board once (companies.yml may list a slug twice)
+        k = _board_key(c)
+        if c.get("enabled", True) and k not in _seen:
+            _seen.add(k); comps.append(c)
     if args.ats:
         comps = [c for c in comps if c.get("ats") == args.ats]
     if args.company:

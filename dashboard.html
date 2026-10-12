@@ -82,7 +82,7 @@
   .seg{display:inline-flex;align-self:flex-start;border:1px solid var(--line-strong);border-radius:6px;overflow:hidden;background:var(--surface-2)}
   .seg button{height:26px;padding:0 10px;border:0;background:none;color:var(--text-2);cursor:pointer;font-weight:600;font-size:12px}
   .seg button+button{border-left:1px solid var(--line)}
-  .seg button.on{background:var(--surface-3);color:var(--text)}
+  .seg button.on{background:var(--accent);color:var(--on-accent)}
   label.src{display:inline-flex;align-items:center;gap:7px;margin-right:18px}
   .muted{color:var(--text-2)} .hint{color:var(--text-3);font-size:12px;margin:4px 0}
   .cap{color:var(--text-3);font-size:11px}
@@ -110,6 +110,9 @@
   .mini.mk:hover{background:var(--surface-2);color:var(--text)}
   .mini.danger{background:none;color:var(--s-error);border-color:var(--s-error)}
   tr.applied td{color:var(--text-3)}
+  .chip-new{display:inline-block;margin-left:6px;padding:0 5px;border-radius:4px;font-size:10px;font-weight:700;line-height:16px;background:var(--s-match);color:#fff;vertical-align:middle}
+  tr.viewed td.role a{color:var(--text-3)}
+  .viewed-tag{margin-left:6px;font-size:11px;color:var(--text-3)}
   /* cards / search */
   .card{background:var(--surface-1);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:14px}
   .card h3{margin:0 0 8px;font-size:15px;font-weight:600;color:var(--text)}
@@ -259,6 +262,7 @@ tr.jobrow:hover .icon,.icon:focus-visible{opacity:1}
       <label class="toggle"><input type="checkbox" id="fUS" checked> US only</label>
       <label class="ftchk">Min $ <input type="number" id="fSalary" min="0" step="5000" placeholder="0"></label>
       <label class="toggle"><input type="checkbox" id="fClosed"> Closed</label>
+      <label class="toggle" title="Hide roles you already opened from the Role link"><input type="checkbox" id="fHideSeen"> Hide viewed</label>
       <span class="muted" id="pruneLine"></span>
       <span class="muted" id="count"></span>
       <span class="grow"></span>
@@ -553,6 +557,27 @@ function postedFmt(p){ if(!p) return ''; let s=String(p).replace(' ','T');
   const days=Math.round((mn-md)/86400000);
   const dt=d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
   const rel=days<=0?'today':days===1?'1 day ago':days+'d ago'; return rel+' · '+dt; }
+// NEW = found in the latest sync: full timestamp within 30 min of stats.last_added (Grok seq 227).
+// Date-only legacy rows never chip. Viewed = Role link / Open posting clicked (POST /seen).
+let LAST_ADDED='';
+function isNew(j){
+  const s=String(j.discovered_at||''); if(!s.includes('T')||!LAST_ADDED) return false;
+  const t=new Date(s).getTime(), la=new Date(LAST_ADDED).getTime();
+  return !isNaN(t)&&!isNaN(la)&&t>=la-30*60000;
+}
+function discFmt(p){
+  const base=postedFmt(p); const s=String(p||'');
+  if(!s.includes('T')) return base;
+  const d=new Date(s); if(isNaN(d.getTime())) return base;
+  const now=new Date(); if(d.toDateString()!==now.toDateString()) return base;
+  return base+' \u00b7 '+d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+}
+function markSeen(url){
+  if(!url) return;
+  JOBS.forEach(x=>{ if(x.apply===url && !x.seen_at) x.seen_at=new Date().toISOString(); });
+  try{ fetch('/seen',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json'},body:JSON.stringify({url})}).catch(()=>{}); }catch(e){}
+  setTimeout(render,50);
+}
 function rankedUrl(){
   const p=new URLSearchParams();
   if($('fRemote')&&$('fRemote').checked) p.set('remote_only','1');
@@ -576,6 +601,7 @@ async function loadJobs(){
   const lp=st.last_prune;
   $('pruneLine').textContent = lp && lp.at ? ((lp.closed||0)+' closed this refresh (hidden)') : '';
   $('lastAdded').textContent='Jobs added: '+ago(st.last_added); $('lastAdded').title=st.last_added||'';
+  LAST_ADDED=st.last_added||'';
   render();
 }
 function scoreNum(j){
@@ -624,11 +650,12 @@ function jobRowHtml(j, opt){
     co+=` <button class="grp exp" data-key="${esc(opt.key)}" title="${opt.open?'Collapse':'Show'} ${opt.extra} more role${opt.extra>1?'s':''}">${opt.open?'\u2212 less':'+'+opt.extra+' more'}</button>`;
   }
   const hideBtn=(opt.head&&opt.key)?`<button class="icon hide-emp" data-key="${esc(opt.key)}" title="Hide this employer" aria-label="Hide this employer"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="2"/><path d="M2.5 13.5 13.5 2.5"/></svg></button>`:'<span class="icon" aria-hidden="true" style="visibility:hidden"></span>';
-  return `<tr class="jobrow ${ap?'applied':''} ${opt.head?'':'sib'}" data-url="${esc(j.apply)}" data-key="${esc(opt.key)}">
+  const nw=isNew(j)||!!opt.anyNew, seen=!!j.seen_at;
+  return `<tr class="jobrow ${ap?'applied':''} ${seen?'viewed':''} ${opt.head?'':'sib'}" data-url="${esc(j.apply)}" data-key="${esc(opt.key)}">
       ${sc}
       <td class="co">${co}</td>
-      <td><a href="${esc(j.apply)}" target="_blank" rel="noopener">${esc(j.role)}</a></td>
-      <td class="muted" style="white-space:nowrap;font-size:12px">${esc(postedFmt(j.discovered_at))}</td>
+      <td class="role"><a class="role-link" href="${esc(j.apply)}" data-url="${esc(j.apply)}" target="_blank" rel="noopener">${esc(j.role)}</a>${nw?'<span class="chip-new" title="Found in the latest sync">NEW</span>':''}${seen?'<span class="viewed-tag" title="Opened '+esc(j.seen_at)+'">viewed</span>':''}</td>
+      <td class="muted" style="white-space:nowrap;font-size:12px">${esc(discFmt(j.discovered_at))}</td>
       <td class="muted" style="white-space:nowrap;font-size:12px">${esc(postedFmt(j.posted))}</td>
       <td class="muted" style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.location||'')}</td>
       <td class="muted" style="font-size:12px;white-space:nowrap">${esc(j.salary||'')}</td>
@@ -639,7 +666,8 @@ function jobRowHtml(j, opt){
 }
 function render(){
   const q=($('q').value||'').toLowerCase();
-  const matched=JOBS.filter(j=>!q||(j.company+' '+j.role+' '+j.ats+' '+(j.employer_key||'')).toLowerCase().includes(q));
+  const hideSeen=$('fHideSeen')&&$('fHideSeen').checked;
+  const matched=JOBS.filter(j=>(!q||(j.company+' '+j.role+' '+j.ats+' '+(j.employer_key||'')).toLowerCase().includes(q)) && !(hideSeen&&j.seen_at));
   const groups=new Map();
   matched.forEach(j=>{
     const k=j.employer_key||((j.company||'').toLowerCase())||j.apply||'';
@@ -653,9 +681,10 @@ function render(){
   $('empty').hidden=list.length>0;
   const html=[];
   list.forEach(g=>{
-    const open=!!q || EXPANDED.has(g.k);
     const sibs=g.members.filter(j=>j!==g.head).sort(cmpJobs);
-    html.push(jobRowHtml(g.head, {head:true, key:g.k, extra:sibs.length, open}));
+    const sibNew=sibs.some(isNew);
+    const open=!!q || EXPANDED.has(g.k) || sibNew;
+    html.push(jobRowHtml(g.head, {head:true, key:g.k, extra:sibs.length, open, anyNew:sibNew}));
     if(open) sibs.forEach(j=>html.push(jobRowHtml(j, {head:false, key:g.k})));
   });
   $('rows').innerHTML=html.join('');
@@ -663,6 +692,10 @@ function render(){
   document.querySelectorAll('.mini.mk').forEach(b=>{
     if(b.classList.contains('hide-emp')) return;
     b.onclick=e=>{e.stopPropagation();mark(e.currentTarget);};
+  });
+  document.querySelectorAll('a.role-link').forEach(a=>{
+    a.addEventListener('click',()=>markSeen(a.dataset.url));                       // left / ctrl / shift click
+    a.addEventListener('auxclick',e=>{ if(e.button===1) markSeen(a.dataset.url); });  // middle-click new tab
   });
   document.querySelectorAll('.exp').forEach(b=>b.onclick=e=>{
     e.stopPropagation();
@@ -709,7 +742,7 @@ function openDrawer(j){
   const d=$('dr-desc');
   if(j.desc){d.className='dsc';d.textContent=j.desc;}
   else{d.className='dsc empty';d.textContent='No description captured for this source. Use "Open posting" to view the full listing.';}
-  $('dr-open').href=j.url||j.apply||'#';
+  $('dr-open').href=j.url||j.apply||'#'; $('dr-open').dataset.seen=j.apply||'';
   $('dr-mark').style.display=j.status==='applied'?'none':'';
   $('dr-apply').style.display=j.status==='applied'?'none':'';
   $('drawer').classList.add('open'); $('drov').classList.add('open');
@@ -734,6 +767,11 @@ async function mark(b){ b.disabled=true;b.textContent='...';
 }
 $('q').oninput=render;
 ['fRemote','fUS','fClosed'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',loadJobs);});
+(function(){const el=$('fHideSeen'); if(!el) return;
+  try{ el.checked=localStorage.getItem('penates.hideSeen')==='1'; }catch(e){}
+  el.addEventListener('change',()=>{ try{ localStorage.setItem('penates.hideSeen',el.checked?'1':'0'); }catch(e){} render(); });
+  const dro=$('dr-open'); if(dro){ dro.addEventListener('click',()=>markSeen(dro.dataset.seen)); dro.addEventListener('auxclick',e=>{ if(e.button===1) markSeen(dro.dataset.seen); }); }
+})();
 {const sal=$('fSalary'); if(sal) sal.addEventListener('change',loadJobs);}
 document.querySelectorAll('th[data-sort]').forEach(th=>th.onclick=()=>{const k=th.dataset.sort;
   sortDir=(sortKey===k)?-sortDir:((k==='score'||k==='discovered_at'||k==='posted')?-1:1); sortKey=k; render();});

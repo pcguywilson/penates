@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Discover new jobs and add them to the local store (data/jobs.json).
 
-Local + free. Uses JobSpy (MIT) to scrape LinkedIn, Indeed, ZipRecruiter and Google
-Jobs, filters to your lane (remote, US, DevOps/SRE/Cloud/Infra titles), and writes the
-NEW ones (deduped by URL against everything already in the store) as status
+Local + free. Uses JobSpy (MIT) to search LinkedIn, Indeed, ZipRecruiter and Google Jobs for
+your search terms (config.json "terms", or --terms), keeps remote US postings, and writes
+the NEW ones (deduped by URL against everything already in the store) as status
 'discovered'. Run it as a batch; then `python report.py` or GET /stats show the pipeline.
 
   pip install python-jobspy          # one-time
-  python discover.py                 # default lane, last 7 days
-  python discover.py --terms "site reliability engineer,platform engineer" --results 30 --hours 72
+  python discover.py                 # your configured terms, last 7 days
+  python discover.py --terms "registered nurse,charge nurse" --results 30 --hours 72
 """
 import argparse, sys, re, math
 import jobs_store
@@ -99,7 +99,7 @@ def discover(terms, results, hours, sites, include_easy=False):
 
 def main():
     ap = argparse.ArgumentParser(description="Add newly-discovered jobs to the local store")
-    ap.add_argument("--terms", default=",".join(DEFAULT_TERMS), help="comma-separated search terms")
+    ap.add_argument("--terms", default="", help="comma-separated search terms (default: config.json terms)")
     ap.add_argument("--results", type=int, default=25, help="results wanted per term per site")
     ap.add_argument("--hours", type=int, default=168, help="max posting age in hours (default 7 days)")
     ap.add_argument("--sites", default="linkedin,indeed,google",
