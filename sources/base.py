@@ -35,3 +35,9 @@ def http_post_json(url, body, timeout=25):
                                           "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8", "replace"))
+
+def http_text(url, timeout=25):
+    """Raw body for adapters whose public board is HTML or RSS (JazzHR, Teamtailor, Paylocity)."""
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "text/html,application/xml,*/*"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read().decode("utf-8", "replace")

@@ -218,10 +218,11 @@ class InventoryGenre(unittest.TestCase):
             self.assertEqual(g, want, "genre for %r" % q[:45])
 
     def test_years_and_experience_stay_technical(self):
-        for q in ("How many years of hands-on DevOps or cloud engineering experience do you have?",
-                  "What is your experience with AWS?"):
-            g = essay.classify_genre(q, essay.parse_constraints(q, None))
-            self.assertEqual(g, "technical_experience", "genre for %r" % q[:45])
+        # A "how many years" question wants a number, not a STAR story (Grok seq 103).
+        q = "How many years of hands-on DevOps or cloud engineering experience do you have?"
+        self.assertNotIn(essay.classify_genre(q, essay.parse_constraints(q, None)), essay._STORY_GENRES)
+        q = "What is your experience with AWS?"
+        self.assertEqual(essay.classify_genre(q, essay.parse_constraints(q, None)), "technical_experience")
 
     def test_aws_list_enumerates_no_story(self):
         a = essay._enumerate_experience("Which AWS services and monitoring tools have you used in production?")

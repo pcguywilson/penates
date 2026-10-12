@@ -14,6 +14,9 @@ class Sponsor(unittest.TestCase):
     def test_authorized_without_sponsorship_is_yes(self):
         self.assertEqual(ans("Are you currently authorized to work in the United States without visa sponsorship?"), "Yes")
         self.assertEqual(ans("Are you legally eligible to work in the US without requiring sponsorship?"), "Yes")
+        # 2026-10-05: 17 chars between "without" and "sponsor" slipped the old {0,15} guard -> "No"
+        self.assertEqual(ans("Are you currently authorized to work in the United States or the United Kingdom, "
+                             "without needing employer sponsorship now or in the future?"), "Yes")
 
     def test_need_sponsorship_is_no(self):
         self.assertEqual(ans("Will you now or in the future require visa sponsorship?"), "No")

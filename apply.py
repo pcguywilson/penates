@@ -61,11 +61,14 @@ def dotted(obj, path):
     return cur
 
 # ---- Ollama (OpenAI-compatible /v1/chat/completions) -----------------------
-def ollama(prompt, system="", temperature=0.2, model=None):
+def ollama(prompt, system="", temperature=0.2, model=None, seed=None):
     msgs = []
     if system: msgs.append({"role": "system", "content": system})
     msgs.append({"role": "user", "content": prompt})
     body = {"model": model or MODEL, "messages": msgs, "temperature": temperature, "stream": False}
+    if seed is not None:
+        body["seed"] = int(seed)
+        body["options"] = {"seed": int(seed)}
     req = urllib.request.Request(OLLAMA_BASE,
         data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=120) as r:
@@ -141,13 +144,17 @@ def classify(question, intents, use_llm=True):
         if scored and conf >= CONF_THRESHOLD:
             return scored[0][1], conf, "keyword-weak"
         return "pause", conf, "pause"
-    shortlist = [i for _, i in scored[:6]] or list(intents.keys())
+    # No keyword hit -> pause. Asking the model to pick from the WHOLE bank put the
+    # role_alignment / why_company templates on toil and "5 9's" questions (2026-10-12, Grok seq 213).
+    if not scored:
+        return "pause", conf, "pause"
+    shortlist = [i for _, i in scored[:6]]
     sys_p = ("Map the job-application question to exactly one intent id from the list. "
              "Reply with ONLY the id. If none fit, reply: pause")
     pick = ollama(f"Question: {question}\n\nAllowed ids:\n" + "\n".join(shortlist) + "\npause",
                   sys_p, temperature=0).split()[0].strip().strip(".,")
-    if pick == "pause" or pick not in intents:
-        return ("pause", conf, "llm") if pick == "pause" else (shortlist[0], 0.5, "llm")
+    if pick == "pause" or pick not in shortlist:
+        return "pause", conf, "llm"   # an invalid pick is a pause, never shortlist[0]
     return pick, 0.7, "llm"
 
 # ---- 3. fill ---------------------------------------------------------------

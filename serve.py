@@ -46,6 +46,12 @@ Routes:
                       token in location, workplace, or title (role). Country-only
                       values (United States, USA, Multiple Locations) stay.
                       Missing salary is KEPT.
+                      Each row includes seen_at (null until marked) and
+                      discovered_at as stored.
+  /seen    (POST)   -> JSON {url}. 200 {ok:true, seen_at} when url or
+                      apply_url matches. seen_at stays the first timestamp.
+                      404 {ok:false} when nothing matches. Does not change
+                      status, score, or discovered_at, and does not insert a row.
   /api/employers/hide (POST) -> JSON {key, hidden:bool}. Writes
                       employers_hidden. Reversible. Does not change job status.
 
@@ -480,7 +486,7 @@ def _is_conditional_followup(q):
     # a complete question (its own '?') before the conditional marker => primary, not follow-up
     return "?" not in (q or "")[:m.start()]
 _SKIP_LEAVEBLANK = re.compile(
-    r"accommodat|other than your|is there anything|anything (else|you.?d like|we should know)|"
+    r"reasonable accommodat|accommodations? (you |for |needed|required|request)|(need|require|request)\w* (any )?accommodat|^\s*accommodations?\b|other than your|is there anything|anything (else|you.?d like|we should know)|"
     r"additional (information|comments|details)|feel free to (add|share|include)", re.I)
 # Match the COI question robustly. The client truncates the question to ~160 chars and it
 # contains "e.g." periods, so a distance match on [^.?] breaks and "conflict of interest" can be
@@ -490,6 +496,32 @@ _COI_NO = re.compile(
     r"conflict of interest|close personal relationship|"
     r"(family member|domestic partner|friend)[\s\S]{0,140}(working|employed|currently (at|with|working))",
     re.I)
+# A STAR about resolving a conflict of interest is not the COI disclosure Yes/No.
+_COI_NARRATIVE = re.compile(
+    r"how (have|did|do|would) you|resolved a conflict|handled a conflict|a time (when|you)|"
+    r"describe (a|an|one)\b|tell (us|me) about (a|an|one)\b|give (us|me) an example", re.I)
+# Textarea experience prose must not be stolen by a tier-1 identity/EEO/geo/Yes rule
+# ("Terraform state" -> state, "race conditions" -> race, "GitHub Actions" -> github URL).
+# Logistics (salary, start date, how did you hear...) and count questions keep tier 1.
+_PROSE_EXP_RE = re.compile(
+    r"\bexperience\b|how (have|did|do|would) you\b|\bhave you (ever |personally )?"
+    r"(used|worked with|built|set up|designed|implemented|debugged|planned|automated|deployed|migrated|managed|maintained|configured)\b"
+    r"|\bdescribe\b|\btell (us|me) about\b|\bwalk (us|me) through\b|\bexplain\b|\ba time (when|you)\b|\bexample of\b", re.I)
+
+
+def _prose_experience_q(q):
+    q = q or ""
+    if not _PROSE_EXP_RE.search(q) or re.search(r"\bhow many\b|\bnumber of years\b|\byears of\b", q, re.I):
+        return False
+    try:
+        import essay as _essay
+        if _essay._LOGISTICS_RE.search(q) and not _essay._NARRATIVE_OVERRIDE_RE.search(q):
+            return False
+    except Exception:
+        pass
+    return True
+
+
 # Prior-employment Yes/No. Auth-to-work questions must not match (no "authorized"/"eligible").
 # Bare "have you worked with <tool>" is experience, not a former-employer check.
 _FORMER_EMPLOYER_Q = re.compile(
@@ -649,6 +681,9 @@ _NAMED_YEARS_RE = re.compile(
 _SELECT_ALL_RE = re.compile(r"select all that apply", re.I)
 _AT_LEAST_YEARS_RE = re.compile(
     r"at least\s+(\d+)\s*\+?\s*years|(\d+)\s*\+\s*years of", re.I)
+# "7 years", "10+ years". First number is the threshold the question asks about.
+_YEARS_NAMED_N_RE = re.compile(r"\b(\d+)\s*\+?\s*years\b", re.I)
+_YEARS_FIELD_KEY_RE = re.compile(r"^candidate\.years_[a-z0-9_]+$")
 
 
 def _options_clean(options):
@@ -842,7 +877,7 @@ def _tier0_result(payload):
     if _is_conditional_followup(q) or _SKIP_LEAVEBLANK.search(q):
         return {"ok": False, "kind": "pause", "method": "leave-blank",
                 "chars": 0, "gaps": [], "text": ""}
-    if _COI_NO.search(q):
+    if _COI_NO.search(q) and not _COI_NARRATIVE.search(q):
         return {"ok": True, "kind": "field", "method": "field",
                 "chars": 2, "gaps": [], "text": "No"}
     prior = _former_employer_answer(q, payload.get("company"))
@@ -1032,7 +1067,12 @@ def _options_are_yesno(opts):
 
 
 def _at_least_years_option(q, opts, prof):
-    """Yes/No for 'at least N years' of general experience, from years_it."""
+    """Yes/No for 'at least N years' of general experience, from years_it.
+
+    Named-tech questions have no locked count here. They stay unanswered
+    (see _NAMED_YEARS_RE) unless a candidate.years_* field actually matched,
+    which _years_field_yesno handles from that field value.
+    """
     if not _options_are_yesno(opts):
         return None
     m = _AT_LEAST_YEARS_RE.search(q or "")
@@ -1044,6 +1084,27 @@ def _at_least_years_option(q, opts, prof):
     have = _parse_years_token(((prof or {}).get("candidate") or {}).get("years_it"))
     if have is None:
         return None
+    return _pick_yes_no_option("Yes" if have >= need else "No", opts)
+
+
+def _years_field_yesno(q, opts, key, val):
+    """Yes/No from a candidate.years_* value when the question names N years.
+
+    Yes if the parsed field value is >= N. A bare "10" does not fit a Yes/No
+    option, so this runs before the model. Named-tech questions with no years
+    field never reach here.
+    """
+    if not _options_are_yesno(opts):
+        return None
+    if not key or not _YEARS_FIELD_KEY_RE.match(str(key)):
+        return None
+    m = _YEARS_NAMED_N_RE.search(q or "")
+    if not m:
+        return None
+    have = _parse_years_token(val)
+    if have is None:
+        return None
+    need = int(m.group(1))
     return _pick_yes_no_option("Yes" if have >= need else "No", opts)
 
 
@@ -1243,6 +1304,10 @@ def _choice_deterministic(payload):
         fitted = _fit_value_to_options(val, opts)
         if fitted:
             out = {"ok": True, "method": "field", "text": fitted, "gaps": [], "field": key}
+            return _choice_out(out, tier="1", review=False, kind=kind)
+        yn_years = _years_field_yesno(q, opts, key, val)
+        if yn_years:
+            out = {"ok": True, "method": "field", "text": yn_years, "gaps": [], "field": key}
             return _choice_out(out, tier="1", review=False, kind=kind)
     bucket = _years_bucket_option(q, opts, prof)
     if bucket:
@@ -1557,6 +1622,8 @@ def _do_answer_unconstrained(payload):
 
     # tier 1: deterministic structured field (salary, country, links, yes/no...)
     try:
+        if _prose_experience_q(q):
+            raise LookupError("prose experience question, tier 1 skipped")
         prof = _load_profile_doc(); fields = _apply.load("fields.yaml")
         val, how = _apply.match_field(q, prof, fields, required=True)
         if how == "field" and val not in (None, ""):
@@ -1640,7 +1707,9 @@ def _do_answer_unconstrained(payload):
             out = _essay.answer_essay(q, limit=limit, company=payload.get("company"),
                                       url=payload.get("url"), page_context=payload.get("page_context"),
                                       role=payload.get("role"),
-                                      why_hybrid=(bool(payload.get("fresh")) and not payload.get("bulk")))
+                                      why_hybrid=(bool(payload.get("fresh")) and not payload.get("bulk")),
+                                      regen_prev=((str(payload.get("prev") or "")[:600] or None)
+                                                  if payload.get("fresh") and not payload.get("bulk") else None))
             out.setdefault("ok", out.get("kind") in ("answer", "field"))
             return out
     except Exception as e:
@@ -1671,7 +1740,9 @@ def _do_answer_unconstrained(payload):
         out = _essay.answer_essay(q, limit=limit, company=payload.get("company"),
                                   url=payload.get("url"), page_context=payload.get("page_context"),
                                   role=payload.get("role"),
-                                  why_hybrid=(bool(payload.get("fresh")) and not payload.get("bulk")))
+                                  why_hybrid=(bool(payload.get("fresh")) and not payload.get("bulk")),
+                                  regen_prev=((str(payload.get("prev") or "")[:600] or None)
+                                              if payload.get("fresh") and not payload.get("bulk") else None))
         out.setdefault("ok", out.get("kind") in ("answer", "field"))
         return out
     except Exception as e:
@@ -1848,6 +1919,8 @@ def do_answer_batch(payload):
                     det = guard
                 else:
                     try:
+                        if _prose_experience_q(q):
+                            raise LookupError("prose experience question, tier 1 skipped")
                         _prof, val, how, key = _field_match(q, _required_flag(one))
                     except Exception as e:
                         print("[tier1 skip] " + str(e), flush=True)
@@ -2289,7 +2362,7 @@ _REF_KEYS = ("name", "relationship", "company", "title", "email", "phone", "year
 
 
 # Tests assign these to temp copies. None means the repo file. .bak is written
-# beside whichever path is live, so a test crash cannot touch the real profile.
+# beside whichever path is live, so a test crash cannot touch the user's profile.
 PROFILE_PATH = None
 WORK_HISTORY_PATH = None
 ANSWER_CACHE_PATH = None
@@ -2931,6 +3004,7 @@ class H(BaseHTTPRequestHandler):
                         "status": r.get("status"), "source": r.get("source", ""),
                         "posted": r.get("posted", ""),
                         "discovered_at": r.get("discovered_at"),
+                        "seen_at": r.get("seen_at"),
                         "location": r.get("location") or r.get("workplace", ""),
                         "workplace": r.get("workplace", ""),
                         "salary": r.get("salary", ""), "desc": r.get("desc", ""),
@@ -3003,6 +3077,19 @@ class H(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         n = int(self.headers.get("Content-Length", 0) or 0)
         raw = self.rfile.read(n) if n else b""
+        if parsed.path == "/seen":
+            try:
+                payload = json.loads(raw or b"{}")
+            except Exception:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            url = payload.get("url")
+            import jobs_store
+            row = jobs_store.mark_seen(url if isinstance(url, str) else "")
+            if row is None:
+                return self._json(404, {"ok": False})
+            return self._json(200, {"ok": True, "seen_at": row.get("seen_at")})
         if parsed.path == "/api/employers/hide":
             try:
                 payload = json.loads(raw or b"{}")

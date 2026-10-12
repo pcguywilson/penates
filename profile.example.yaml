@@ -58,6 +58,7 @@ eeo:
   disability_short: ""
   sexual_orientation: ""
   transgender: ""
+  tribal_affiliation: ""      # e.g. "No"; answers tribe / Alaska Native / Native Hawaiian questions
 
 compensation:
   band_usd: [120000, 140000]

@@ -6,6 +6,8 @@
 # "States" in "authorized to work in the United States" can't be stolen by the
 # geography rules. Geography rules use \b word boundaries for the same reason.
 fields:
+  # Tribal affiliation (EEO). Must precede the State rule ("state-recognized Tribe").
+  - {pattern: "(identify|member|enrolled|affiliat|citizen).{0,60}(\\btribe\\b|tribal|alaska native|native hawaiian|american indian)", value: "eeo.tribal_affiliation"}
   # --- Workable screening (exact option text; values live in profile.screening) ---
   - {pattern: "located in latin america|latin america or the caribbean", value: "screening.latin_america"}
   - {pattern: "spanish or portuguese.{0,40}(c2|near.native)", value: "screening.spanish_portuguese"}
@@ -42,25 +44,28 @@ fields:
   # --- yes/no + salary (specific intent) ---
   # Conflict-of-interest / relationship screeners: the honest default is No. Follow-up
   # "list name(s) and nature of relationship" boxes only appear after a Yes -> skip.
-  - {pattern: "(relative|family member|close friend|related to|relationship with).{0,60}(employee|customer|client|vendor|subcontractor|supplier|board|officer|government official)", value: "literal:No"}
+  # "How did you hear about us?" radio groups carry their option text (Friend or Family Member,
+  # Current Employee), which the relative/employee rule below read as a conflict question -> "No".
+  - {pattern: "^how did you (hear|learn|find out)\\b.{0,60}online job board", value: "literal:Online Job Board"}
+  - {pattern: "^(?!how did you (hear|learn|find out))(?=.*(relative|family member|close friend|related to|relationship with)).*?(relative|family member|close friend|related to|relationship with).{0,60}(employee|customer|client|vendor|subcontractor|supplier|board|officer|government official)", value: "literal:No"}
   - {pattern: "(owner|employee|officer|director).{0,40}(outside|other) (company|business|organization).{0,80}(business with|doing business|contract)|(financial|ownership) interest in .{0,60}(vendor|supplier|competitor|customer)", value: "literal:No"}
   - {pattern: "list (the )?name\\(?s?\\)? and (the )?nature of (the )?relationship|nature of (the )?relationship|divest (your|the)? ?interest", value: "pause:optional"}
   - {pattern: "highest (level )?(of )?(security )?clearance|clearance level (previously|currently|held|obtained)|level of (security )?clearance", value: "literal:Secret"}
   # Negative lookahead: auth-without-sponsorship must NOT match (falls through to Yes).
   # Pure sponsorship-NEED questions still match -> No.
-  - {pattern: "^(?!.*(authoriz|eligible to work|permitted to work|right to work|legally.{0,18}work)).*\\bsponsor", value: "literal:No"}
+  - {pattern: "^(?!.*(authoriz|eligible to work|permitted to work|right to work|legally.{0,18}work)).*(visa sponsor|require.{0,20}sponsor|\\bsponsorship\\b)", value: "literal:No"}
   # Sponsorship-NEED even when a parenthetical says "work authorization".
   # That phrase must not fall through to authoriz->Yes. Keyed on sponsor so
   # "authorized to work" (no sponsor) still hits the Yes rule below.
-  - {pattern: "^(?!.*(authoriz|eligible|permitted|right to work|legally.{0,18}work).{0,60}without.{0,15}sponsor).*?(?:require[s]?\\s.{0,40}sponsor|(need|requir\\w+).{0,25}sponsor|visa sponsor|immigration sponsor|sponsorship .{0,40}(now|future|attain|maintain|employ))", value: "literal:No"}
+  - {pattern: "^(?!.*(authoriz|eligible|permitted|right to work|legally.{0,18}work).{0,200}without.{0,30}sponsor).*?(?:require[s]?\\s.{0,40}sponsor|(need|requir\\w+).{0,25}sponsor|visa sponsor|immigration sponsor|sponsorship .{0,40}(now|future|attain|maintain|employ))", value: "literal:No"}
   - {pattern: "secondary employment|competitive in nature|conflict with your (ability|working|duties)|hold any secondary|outside (employment|business)", value: "literal:No"}
   - {pattern: "located in the (nyc|new york)|\\bnyc area\\b|located in .{0,15}new york city|in the (nyc|new york) (metro|area)", value: "literal:No"}
-  - {pattern: "authoriz\\w* .{0,20}\\bwork\\b|work authoriz|legally .{0,18}work|(eligible|right|permitted|entitled) to .{0,10}work|lawfully work", value: "literal:Yes"}
+  - {pattern: "authoriz\\w* .{0,20}\\bwork\\b|authoriz\\w* to (accept|obtain|seek|hold) employment|work authoriz|legally .{0,18}work|(eligible|right|permitted|entitled) to .{0,10}work|lawfully work", value: "literal:Yes"}
   - {pattern: "visa status|citizenship status|immigration status|work eligibility status", value: "identity.work_auth"}
   - {pattern: "u\\.?s\\.? citizen|are you a citizen|citizen of the united states|\\bcitizenship\\b", value: "literal:Yes"}
-  - {pattern: "willing to relocate|relocation|relocate",                          value: "literal:No"}
-  - {pattern: "do you (currently )?(have|hold|possess).{0,20}clearance|currently have this clearance|have (this|a) .{0,20}clearance", value: "literal:Yes"}
-  - {pattern: "security clearance|clearance",                                     value: "clearance.level"}
+  - {pattern: "willing to relocate|open to relocat|able to relocate|\\brelocate\\b|relocation (package|assistance|required|support)|^relocation\\??$",                          value: "literal:No"}
+  - {pattern: "do you (currently )?(have|hold|possess).{0,50}clearance|currently have this clearance|have (this|a) .{0,20}clearance", value: "literal:Yes"}
+  - {pattern: "^(?!.*experience).*(security clearance|clearance (level|status|held|type)|what clearance|your clearance)", value: "clearance.level"}
   - {pattern: "highest level of education|level of education completed|education level", value: "education.degree"}
   - {pattern: "(how many years of|years of) (relevant |professional |work |total |industry )*experience(?!.{0,40}\\b(with|using|working|managing|administering|supporting|developing|building|designing|writing|maintaining|implementing|deploying|configuring|leading|operating|automating|programming|coding)\\b)", value: "candidate.years_it"}
   - {pattern: "able to work a .{0,15}contract|work a contract position|contract position|open to contract", value: "literal:Yes"}
@@ -96,7 +101,7 @@ fields:
   - {pattern: "e-?mail",                                   value: "identity.email"}
   - {pattern: "country phone code|phone country code|country code",  value: "literal:+1"}
   - {pattern: "phone device type|device type|phone type",  value: "literal:Mobile"}
-  - {pattern: "phone extension|extension|ext\\.?$",                    value: "pause:optional"}
+  - {pattern: "phone extension|^extension$|\\bext\\.?$",                    value: "pause:optional"}
   - {pattern: "phone number|phone|mobile|cell",           value: "identity.phone"}
   - {pattern: "linkedin",                                  value: "identity.linkedin"}
   - {pattern: "current (job )?title|present (job )?title|current position|current role|most recent (job )?title|^job title$|^title$", value: "identity.current_title"}
@@ -104,7 +109,7 @@ fields:
   - {pattern: "(years of professional experience|total years of experience|years of relevant experience)(?!.{0,40}\\b(with|using|working|managing|administering|supporting|developing|building|designing|writing|maintaining|implementing|deploying|configuring|leading|operating|automating|programming|coding)\\b)|^years of experience$", value: "candidate.years_it"}
   - {pattern: "brought you to this (job )?posting|what brought you|how did you (find|hear about) this (job|posting|role)|where did you (find|see) this", value: "application_defaults.how_did_you_hear"}
   - {pattern: "how did you (hear|learn|find out)|where did you (hear|learn)|referral source|how were you referred", value: "literal:LinkedIn"}
-  - {pattern: "time ?zone|what time zone", value: "literal:Eastern Time"}
+  - {pattern: "(?<![\\w-])(what |which |your )?time ?zone\\b", value: "literal:Eastern Time"}
   # Confirming you read a statement is not an in-person-willingness question.
   # General "will you interview in person" stays review (no rule).
   - {pattern: "please confirm you (have )?read|acknowledge this statement", value: "literal:Yes"}
@@ -115,7 +120,7 @@ fields:
   # Willing to JOIN a rotation is a different question from "have you been on-call".
   # Same answer. In-person interview has no rule and must stay review.
   - {pattern: "willing.{0,60}(join|participat\\w*).{0,50}on-?call|participat\\w*.{0,50}on-?call.{0,40}rotation|on-?call support rotation", value: "literal:Yes"}
-  - {pattern: "on-?call rotation|participated in on-?call|been on-?call", value: "literal:Yes"}
+  - {pattern: "^(?!.*(experience|how have you|describe|tell us)).*(on-?call rotation|participated in on-?call|been on-?call)", value: "literal:Yes"}
   - {pattern: "built .{0,30}(tooling|automation)|production tooling|automation to (improve|reduce|solve)|automating infrastructure", value: "literal:Yes"}
   - {pattern: "experience with (monitoring|observability)|monitoring and observability|hands-on .{0,20}(monitoring|observability)", value: "literal:Yes"}
   - {pattern: "code (diff|review)|technical interview includes|comfortable .{0,20}(code review|pair)|participate in a (pair|live coding)", value: "literal:Yes"}
@@ -143,9 +148,9 @@ fields:
   - {pattern: "preferred language|^language|language\\b", value: "literal:English"}
   - {pattern: "proof of.{0,20}eligibility|provide proof of your eligibility|proof of (legal )?(right|authorization) to work|eligibility to work in the", value: "literal:Yes"}
   - {pattern: "previously employed|formerly employed|former employee|previous employee|are you a (former|previous) employee|previously worked (at|for)|\\brehire\\b|boomerang employee", value: "literal:No"}
-  - {pattern: "github|git hub|\\bgit\\b profile", value: "identity.github"}
-  - {pattern: "\\bwebsite\\b|portfolio|personal (site|website)|other url|blog|github|gitlab", value: "pause:optional"}
-  - {pattern: "address line ?2|apartment|apt|suite|\\bunit\\b",  value: "pause:optional"}
+  - {pattern: "github (url|profile|username|link|account)|^github\\*?$|git hub|\\bgit\\b profile", value: "identity.github"}
+  - {pattern: "^(?!.*experience).*(personal website|your website|website url|^website\\*?$|portfolio|personal (site|website)|other url|blog url|^blog|gitlab (url|profile))", value: "pause:optional"}
+  - {pattern: "address line ?2|apartment|\\bapt\\b|\\bsuite\\b|\\bunit\\s*(#|number)|^unit$",  value: "pause:optional"}
   - {pattern: "address line ?1|street address|^street$",  value: "ifreq:identity.street"}
   - {pattern: "^location\\*?$|^location$|\\blocation\\b|where are you (based|located)|current location", value: "identity.city"}
   - {pattern: "mailing address|mailing street", value: "identity.street"}
@@ -162,7 +167,7 @@ fields:
   - {pattern: "location of residence and language|location of residence", value: "literal:Other"}   # Jobvite regional gate; Other = non-India
   - {pattern: "current location|^location$|your location",  value: "identity.location_full"}
   - {pattern: "\\bcity\\b",                                value: "identity.city_only"}
-  - {pattern: "\\bstate\\b|\\bprovince\\b",                value: "identity.state"}
+  - {pattern: "^(?!.{90,})(?!.*recogni).*(\\bstate\\b|\\bprovince\\b)",                value: "identity.state"}
   - {pattern: "\\bzip\\b|\\bpostal\\b|zip code|postal code|post ?code", value: "identity.zip"}
   - {pattern: "\\bcountry\\b",                             value: "literal:United States"}
 
