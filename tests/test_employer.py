@@ -77,6 +77,341 @@ class EmployerKey(unittest.TestCase):
             "location": "New York, NY", "workplace": "New York, NY",
             "role": "Engineer", "remote": True}))
 
+    def test_remote_only_title_onsite_hybrid_overrides_workplace(self):
+        # JobSpy often sets workplace=Remote while the title says onsite/hybrid.
+        wp = {"workplace": "Remote", "location": "", "remote": True}
+        drops = [
+            "IT Infrastructure Engineer (Onsite - Dallas)",
+            "Senior DevOps Engineer (hybrid)",
+            "Systems Administrator (onsite at Muskegon Community College)",
+            "Systems Engineer (Mid-Level)- Hybrid (Partial Remote)",
+        ]
+        for role in drops:
+            self.assertFalse(
+                serve._passes_remote_only(dict(wp, role=role)), role)
+        keeps = [
+            "Senior Cloud Engineer (Hybrid @ Bellevue, WA or Remote @ Florida)",
+            "Hybrid Infrastructure Engineer (Cloud Migration Lead)",
+        ]
+        for role in keeps:
+            self.assertTrue(
+                serve._passes_remote_only(dict(wp, role=role)), role)
+        # in-office token; remote alternative forms
+        self.assertFalse(serve._passes_remote_only(dict(
+            wp, role="Platform Engineer (in-office, Austin)")))
+        self.assertTrue(serve._passes_remote_only(dict(
+            wp, role="SRE - Hybrid with remote option")))
+        self.assertTrue(serve._passes_remote_only(dict(
+            wp, role="Cloud Engineer /remote")))
+        # tech hybrid phrases are not workplace
+        self.assertTrue(serve._passes_remote_only(dict(
+            wp, role="Engineer - hybrid cloud migration")))
+        self.assertTrue(serve._passes_remote_only(dict(
+            wp, role="hybrid environment platform lead")))
+        self.assertTrue(serve._passes_remote_only(dict(
+            wp, role="hybrid IT systems engineer")))
+        self.assertTrue(serve._passes_remote_only(dict(
+            wp, role="hybrid multi-cloud architect")))
+
+    def test_remote_only_aggregator_five_leaks_fail(self):
+        # Board seq 135: jobspy/builtin must not pass on remote_hint alone.
+        cases = [
+            {
+                "source": "jobspy:indeed", "company": "Langley FCU",
+                "role": "Cloud Infrastructure Engineer",
+                "location": "Newport News, VA", "workplace": "",
+                "remote_hint": True,
+                "desc": "THIS IS NOT A REMOTE POSITION. Hybrid schedule from our "
+                        "Oyster Point building.",
+            },
+            {
+                "source": "jobspy:indeed", "company": "Wenger Group",
+                "role": "Systems Engineer",
+                "location": "Lancaster, PA", "workplace": "",
+                "remote_hint": True,
+                "desc": "Family-owned food and agricultural services in Pennsylvania.",
+            },
+            {
+                "source": "builtin", "company": "Systems Technology Forum",
+                "role": "Systems Administrator",
+                "location": "Pearl Harbor, HI", "workplace": "Remote",
+                "remote": True, "desc": "",
+            },
+            {
+                "source": "builtin", "company": "Upwind",
+                "role": "DevOps Engineer - US East Coast/Central",
+                "location": "US", "workplace": "Remote",
+                "remote": True, "desc": "",
+            },
+            {
+                "source": "builtin", "company": "Horizon Industries",
+                "role": "Senior Systems Administrator DaaS API GW",
+                "location": "USA", "workplace": "Remote",
+                "remote": True, "desc": "",
+            },
+        ]
+        for row in cases:
+            self.assertFalse(serve._passes_remote_only(row), row.get("company"))
+            reason = serve._remote_only_filter_reason(row)
+            self.assertIn(reason, ("not_remote", "remote_unknown"), row.get("company"))
+        self.assertEqual(
+            serve._remote_only_filter_reason(cases[0]), "not_remote")
+        # City/state with no remote positive -> not_remote (seq 138).
+        for row in cases[1:3]:
+            self.assertEqual(
+                serve._remote_only_filter_reason(row), "not_remote",
+                row.get("company"))
+        # Country-only US/USA with no signal -> remote_unknown (seq 138).
+        for row in cases[3:]:
+            self.assertEqual(
+                serve._remote_only_filter_reason(row), "remote_unknown",
+                row.get("company"))
+            self.assertEqual(serve._remote_status(row), "unknown", row.get("company"))
+
+    def test_remote_only_aggregator_keep_cases(self):
+        keeps = [
+            {"source": "jobspy:indeed", "role": "Senior SRE (Remote)",
+             "location": "Austin, TX", "desc": ""},
+            {"source": "builtin", "role": "Platform Engineer",
+             "location": "Remote, US", "desc": "", "remote": True},
+            {"source": "jobspy:indeed", "role": "SRE",
+             "location": "United States",
+             "desc": "This is a fully remote role."},
+            {"source": "builtin", "role": "Cloud Engineer",
+             "location": "Denver, CO",
+             "desc": "Hybrid or remote options available."},
+        ]
+        for row in keeps:
+            self.assertTrue(serve._passes_remote_only(row), row)
+            self.assertIsNone(serve._remote_only_filter_reason(row), row)
+            self.assertEqual(serve._remote_status(row), "remote", row)
+
+    def test_remote_only_ats_keeps_current_logic(self):
+        # ats-api / hiringcafe still trust remote / country-only location.
+        self.assertTrue(serve._passes_remote_only({
+            "source": "ats-api", "location": "New York, NY",
+            "role": "Engineer", "remote": True, "desc": ""}))
+        self.assertTrue(serve._passes_remote_only({
+            "source": "hiringcafe", "location": "United States",
+            "role": "SRE", "workplace": "", "desc": ""}))
+        self.assertFalse(serve._passes_remote_only({
+            "source": "ats-api", "location": "Austin, TX",
+            "role": "DevOps Engineer", "workplace": "", "desc": ""}))
+
+    def test_remote_only_desc_positives_seq136(self):
+        # Board seq 136: workplace phrases in the description pass.
+        # Desc negatives still override unless a remote alternative matches.
+        base = {"source": "jobspy:indeed", "location": "Austin, TX",
+                "workplace": "", "remote_hint": True, "role": "Engineer"}
+        positives = [
+            ("QED.ai", "The position can be remote, with periodic visits encouraged"),
+            ("Ford", "This role is posted as remote unless you reside within 50 miles of Dearborn"),
+            ("Worth", "All Remote Hires will be required to travel to Orlando"),
+            ("Logic20/20", "Can work independently in a remote setting with minimal supervision"),
+            ("Peraton", "This position is 100% remote."),
+            ("Kit", "We have always been entirely remote."),
+            ("LucyRx", "We are a nimble, remote-first team."),
+            ("Justrite", "This remote-eligible role supports the ERP."),
+            ("Johnson & Johnson", "This position is remote eligible."),
+            ("Highmark", "Position Type: Remote-based"),
+            ("Agilent", "It includes the option to work remotely."),
+            ("Serco", "Telework eligible for this position"),
+        ]
+        for company, desc in positives:
+            row = dict(base, company=company, desc=desc)
+            self.assertTrue(serve._passes_remote_only(row), desc)
+            self.assertIsNone(serve._remote_only_filter_reason(row), desc)
+        # City/state (Austin, TX) with no workplace positive -> not_remote (seq 138).
+        negatives = [
+            ("Glydways", "scaling them with remote caching and remote build execution",
+             "not_remote"),
+            ("mecka", "device identity, remote updates, rollback, and recovery",
+             "not_remote"),
+            ("Wyetech", "Perform remote maintenance and refresh efforts across eight sites",
+             "not_remote"),
+            ("NinjaOne", "autonomous patching, backup, and remote access in a single console",
+             "not_remote"),
+            ("Stanford", "geographically distinct replication in a remote data center",
+             "not_remote"),
+            ("Synopsys", "**Remote Eligible** **No** and remote access support",
+             "not_remote"),
+            ("James Madison University",
+             "This is an on-campus, on-site position (not remote) with normal business hours",
+             "not_remote"),
+            ("James Madison University",
+             "This is an on-campus, on\\-site position (not remote) with normal business hours",
+             "not_remote"),
+            ("Charleston ENT", "This position is not remote.", "not_remote"),
+            ("Northrop Grumman",
+             "This position is 100% on site in Chandler, AZ (strongly preferred). "
+             "Remote candidates may also be considered.",
+             "not_remote"),
+        ]
+        for company, desc, reason in negatives:
+            row = dict(base, company=company, desc=desc)
+            self.assertFalse(serve._passes_remote_only(row), desc)
+            self.assertEqual(serve._remote_only_filter_reason(row), reason, desc)
+
+    def test_remote_only_desc_positives_seq137(self):
+        # Board seq 137: more workplace phrases pass; boilerplate does not.
+        # "for remote workers" (seq 136 Workato keep) is a support object now.
+        base = {"source": "jobspy:indeed", "location": "Austin, TX",
+                "workplace": "", "remote_hint": True, "role": "Engineer"}
+        positives = [
+            ("Motorola", "Schedule: Remote Full Time work, Mon - Fri"),
+            ("Motorola", "remote full-time"),
+            ("Packaging Corporation of America",
+             "along active production lines when required. #LI-Remote"),
+            ("Packaging Corporation of America",
+             "disability line \\#LI\\-Remote \\#LI\\-PW1"),
+            ("Modular", "in our office in Los Altos, CA or remotely from home"),
+            ("Modular", "You can work in our office or remotely."),
+            ("Mastercard", "Remote - Georgia: $170,000 - $281,000 USD"),
+            ("Mastercard", "Remote - New Jersey: $170,000"),
+            ("Anywhere", "Employees can work remotely from anywhere in the US."),
+        ]
+        for company, desc in positives:
+            row = dict(base, company=company, desc=desc)
+            self.assertTrue(serve._passes_remote_only(row), desc)
+            self.assertIsNone(serve._remote_only_filter_reason(row), desc)
+        # Pay line is line-anchored and capitalised. Mid-line does not count.
+        # City/state base -> not_remote (seq 138).
+        row = dict(base, company="Mastercard",
+                   desc="Target cash Remote - Georgia: $170,000")
+        self.assertEqual(
+            serve._remote_only_filter_reason(row), "not_remote")
+        # "or remotely" without an office alternative is not a workplace.
+        row = dict(base, company="Other",
+                   desc="Travel or remotely as needed for the project.")
+        self.assertEqual(
+            serve._remote_only_filter_reason(row), "not_remote")
+        # A workplace phrase in another sentence still counts when E-Verify
+        # boilerplate shares the posting.
+        row = dict(base, company="Modular", desc=(
+            "You can work in our office in Los Altos, CA or remotely from home. "
+            "This employer participates in E-Verify and will provide Form I-9 "
+            "information."))
+        self.assertIsNone(serve._remote_only_filter_reason(row))
+        negatives = [
+            ("Sweet James", "AVD environment for remote workers",
+             "not_remote"),
+            ("Workato", "ranked the best company for remote workers",
+             "not_remote"),
+            ("Mueller",
+             "all applicants and employees, including those hired to work "
+             "remotely. Upon enrollment, employers participating in E\\-Verify "
+             "are required to provide Form I\\-9 information.",
+             "not_remote"),
+            ("Mueller",
+             "This fully remote role uses E-Verify and Form I-9.",
+             "not_remote"),
+            ("Las Vegas Sands", "Work remotely as necessary.",
+             "not_remote"),
+            ("Lincoln International",
+             "Monday through Thursday in office, with the option to work "
+             "remotely or from the office on Fridays.",
+             "not_remote"),
+            ("Lincoln International",
+             "option to work remotely one day a week",
+             "not_remote"),
+            ("Lincoln International",
+             "option to work remotely occasionally",
+             "not_remote"),
+        ]
+        for company, desc, reason in negatives:
+            row = dict(base, company=company, desc=desc)
+            self.assertFalse(serve._passes_remote_only(row), desc)
+            self.assertEqual(serve._remote_only_filter_reason(row), reason, desc)
+
+    def test_remote_status_unknown_and_include_unknown_seq138(self):
+        # Empty / country-only + no signal -> unknown; city/state -> not_remote.
+        unknown_rows = [
+            {"source": "jobspy:indeed", "company": "NVIDIA", "role": "SRE",
+             "location": "", "desc": "", "workplace": "", "remote_hint": True},
+            {"source": "builtin", "company": "Akamai", "role": "Engineer",
+             "location": "US", "desc": "", "workplace": "", "remote": True},
+            {"source": "jobspy:indeed", "company": "Cisco", "role": "Platform",
+             "location": "USA", "desc": ""},
+            {"source": "builtin", "company": "VAST", "role": "DevOps",
+             "location": "United States", "desc": ""},
+            {"source": "jobspy:indeed", "company": "Recharge", "role": "SRE",
+             "location": "U.S.", "desc": ""},
+            {"source": "builtin", "company": "Other", "role": "Engineer",
+             "location": "America", "desc": ""},
+        ]
+        for row in unknown_rows:
+            self.assertEqual(
+                serve._remote_only_filter_reason(row), "remote_unknown", row)
+            self.assertEqual(serve._remote_status(row), "unknown", row)
+            self.assertFalse(serve._passes_remote_only(row), row)
+        city = {"source": "jobspy:indeed", "role": "Engineer",
+                "location": "Austin, TX", "desc": "", "remote_hint": True}
+        self.assertEqual(serve._remote_only_filter_reason(city), "not_remote")
+        self.assertEqual(serve._remote_status(city), "not_remote")
+        # ats-api: remote or not_remote only (no unknown).
+        self.assertEqual(serve._remote_status({
+            "source": "ats-api", "location": "United States",
+            "role": "SRE", "workplace": ""}), "remote")
+        self.assertEqual(serve._remote_status({
+            "source": "ats-api", "location": "Austin, TX",
+            "role": "DevOps", "workplace": ""}), "not_remote")
+        # include_unknown keeps unknown under remote_only; default drops them.
+        rows = [unknown_rows[0], city, {
+            "source": "jobspy:indeed", "role": "SRE (Remote)",
+            "location": "Austin, TX", "desc": ""}]
+        kept_default = serve._filter_ranked(rows, {"remote_only": ["1"]})
+        self.assertEqual(len(kept_default), 1)
+        self.assertIn("Remote", kept_default[0]["role"])
+        kept_inc = serve._filter_ranked(
+            rows, {"remote_only": ["1"], "include_unknown": ["1"]})
+        self.assertEqual(len(kept_inc), 2)
+        statuses = {serve._remote_status(r) for r in kept_inc}
+        self.assertEqual(statuses, {"remote", "unknown"})
+
+    def test_remote_only_desc_positives_seq138(self):
+        # New workplace phrases; amenity / product names stay non-positives.
+        base = {"source": "jobspy:indeed", "location": "",
+                "workplace": "", "remote_hint": True, "role": "Engineer"}
+        positives = [
+            ("Recharge",
+             "Monthly Remote Life and Merchant stipends for every teammate"),
+            ("Blackpoint",
+             "comfortable in a remote, fast-moving environment"),
+            ("Blackpoint",
+             "thrives in a remote, distributed environment"),
+            ("Blackpoint",
+             "works well in a remote environment with autonomy"),
+            ("Atlassian",
+             "Engineering | San Francisco, United States | Remote, Remote"),
+            ("Atlassian",
+             "Team | Austin, United States | Remote"),
+        ]
+        for company, desc in positives:
+            row = dict(base, company=company, desc=desc)
+            self.assertTrue(serve._passes_remote_only(row), desc)
+            self.assertIsNone(serve._remote_only_filter_reason(row), desc)
+            self.assertEqual(serve._remote_status(row), "remote", desc)
+        # Must stay false: amenity on-site phrases are not workplace negatives;
+        # product "Remote Flight Deck" is not a workplace positive.
+        false_rows = [
+            ("JPMorgan",
+             "Access to on-site health and wellness centers for employees",
+             "remote_unknown"),
+            ("iT1",
+             "Perks include Onsite Fitness Center and free parking",
+             "remote_unknown"),
+            ("Skydio",
+             "Experience with the Remote Flight Deck product and autonomy stack",
+             "remote_unknown"),
+        ]
+        for company, desc, reason in false_rows:
+            row = dict(base, company=company, desc=desc, location="")
+            self.assertFalse(serve._passes_remote_only(row), desc)
+            self.assertEqual(serve._remote_only_filter_reason(row), reason, desc)
+            self.assertEqual(serve._remote_status(row), "unknown", desc)
+            # Amenity text must not trip the on-site negative either.
+            self.assertIsNone(serve._DESC_REMOTE_NEG_RE.search(desc), desc)
+
 
 class EmployerHide(unittest.TestCase):
     @classmethod

@@ -47,6 +47,27 @@ class ClassifyPause(unittest.TestCase):
             self.assertEqual(apply.score_intents(q, bank), [], q)
 
 
+PROD_YEARS = "How many years of hands-on production experience do you have with AWS and Azure?"
+
+
+class WholeWordKeywords(unittest.TestCase):
+    def _hits(self, q):
+        bank = apply.load("answers.yaml")["intents"]
+        return [i for _, i in apply.score_intents(q, bank)]
+
+    def test_product_does_not_hit_production_years(self):
+        self.assertNotIn("cross_team_collab", self._hits(PROD_YEARS))
+
+    def test_product_as_its_own_word_still_scores(self):
+        self.assertIn("cross_team_collab", self._hits("How do you work with the product team?"))
+
+    def test_k8s_still_scores(self):
+        self.assertIn("kubernetes", self._hits("Do you have k8s experience?"))
+
+    def test_multiword_phrase_still_scores(self):
+        self.assertIn("cross_team_collab", self._hits("Tell us about operational friction you reduced."))
+
+
 class DefinitionGenres(unittest.TestCase):
     def g(self, q):
         return essay.classify_genre(q, essay.parse_constraints(q, None))

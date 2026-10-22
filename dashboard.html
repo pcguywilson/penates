@@ -73,6 +73,9 @@
   input::placeholder,textarea::placeholder{color:var(--text-3)}
   textarea{width:100%;background:var(--surface-2);border:1px solid var(--line-strong);border-radius:6px;color:var(--text);padding:8px 10px;font:12px/1.5 var(--mono);min-height:120px;resize:vertical}
   pre{white-space:pre-wrap;background:var(--surface-2);border:1px solid var(--line);border-radius:6px;padding:12px;font:12px/1.5 var(--mono);max-height:60vh;overflow:auto}
+  .fgroup{display:inline-flex;gap:12px;align-items:center;border:1px solid var(--line-strong);border-radius:8px;padding:4px 10px 6px;margin:0}
+  .fgroup legend{font-size:11px;color:var(--text-3);padding:0 4px;text-transform:uppercase;letter-spacing:.04em}
+  .ftchk input[type=checkbox]{width:14px;height:14px;margin:0;accent-color:var(--accent);cursor:pointer}
   .toggle,.ftchk{display:inline-flex;gap:8px;align-items:center;color:var(--text);white-space:nowrap;cursor:pointer;user-select:none}
   .toggle input[type=checkbox]{appearance:none;width:28px;height:16px;border-radius:8px;background:var(--line-strong);position:relative;cursor:pointer;margin:0;flex:none;transition:background .12s}
   .toggle input[type=checkbox]::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--text);transition:transform .12s}
@@ -258,8 +261,11 @@ tr.jobrow:hover .icon,.icon:focus-visible{opacity:1}
     <div class="stats" id="stats"></div>
     <div class="toolbar">
       <input type="search" id="q" placeholder="Filter by company, role, ATS...">
-      <label class="toggle"><input type="checkbox" id="fRemote" checked> Remote</label>
-      <label class="toggle"><input type="checkbox" id="fUS" checked> US only</label>
+      <fieldset class="fgroup"><legend>Location</legend>
+        <label class="toggle"><input type="checkbox" id="fRemote" checked> Remote only</label>
+        <label class="ftchk" title="Also show jobs with no location and no remote or on-site wording"><input type="checkbox" id="fUnknown"> Include unknown</label>
+        <label class="toggle"><input type="checkbox" id="fUS" checked> US only</label>
+      </fieldset>
       <label class="ftchk">Min $ <input type="number" id="fSalary" min="0" step="5000" placeholder="0"></label>
       <label class="toggle"><input type="checkbox" id="fClosed"> Closed</label>
       <label class="toggle" title="Hide roles you already opened from the Role link"><input type="checkbox" id="fHideSeen"> Hide viewed</label>
@@ -559,7 +565,7 @@ function postedFmt(p){ if(!p) return ''; let s=String(p).replace(' ','T');
   const rel=days<=0?'today':days===1?'1 day ago':days+'d ago'; return rel+' · '+dt; }
 // NEW = found in the latest sync: full timestamp within 30 min of stats.last_added (Grok seq 227).
 // Date-only legacy rows never chip. Viewed = Role link / Open posting clicked (POST /seen).
-let LAST_ADDED='';
+let LAST_ADDED=''; const COLLAPSED=new Set();   // groups the user closed even though a sibling is NEW
 function isNew(j){
   const s=String(j.discovered_at||''); if(!s.includes('T')||!LAST_ADDED) return false;
   const t=new Date(s).getTime(), la=new Date(LAST_ADDED).getTime();
@@ -580,7 +586,10 @@ function markSeen(url){
 }
 function rankedUrl(){
   const p=new URLSearchParams();
-  if($('fRemote')&&$('fRemote').checked) p.set('remote_only','1');
+  if($('fRemote')&&$('fRemote').checked){
+    p.set('remote_only','1');
+    if($('fUnknown')&&$('fUnknown').checked) p.set('include_unknown','1');
+  }
   if($('fUS')&&$('fUS').checked) p.set('us_only','1');
   const sm=parseInt(($('fSalary')&&$('fSalary').value)||'0',10);
   if(sm>0) p.set('salary_min',String(sm));
@@ -615,6 +624,13 @@ function scoreTieDesc(a,b){
   if(as===null) return 1;   // unscored sorts below every number
   if(bs===null) return -1;
   return bs-as;
+}
+function locText(j){
+  if(j.remote_status==='unknown'){
+    const L=(j.location||'').trim();
+    return (!L || /^(remote|anywhere|us|usa|united states|u\.s\.?|america)$/i.test(L)) ? 'Unknown' : L+' (unknown)';
+  }
+  return j.location || 'Unknown';
 }
 function cmpJobs(a,b){
   if(sortKey==='score'){
@@ -657,7 +673,7 @@ function jobRowHtml(j, opt){
       <td class="role"><a class="role-link" href="${esc(j.apply)}" data-url="${esc(j.apply)}" target="_blank" rel="noopener">${esc(j.role)}</a>${nw?'<span class="chip-new" title="Found in the latest sync">NEW</span>':''}${seen?'<span class="viewed-tag" title="Opened '+esc(j.seen_at)+'">viewed</span>':''}</td>
       <td class="muted" style="white-space:nowrap;font-size:12px">${esc(discFmt(j.discovered_at))}</td>
       <td class="muted" style="white-space:nowrap;font-size:12px">${esc(postedFmt(j.posted))}</td>
-      <td class="muted" style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.location||'')}</td>
+      <td class="muted" style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(locText(j))}</td>
       <td class="muted" style="font-size:12px;white-space:nowrap">${esc(j.salary||'')}</td>
       <td class="ats">${esc(j.ats||'')}${j.closed_reason?' <span class="muted">'+esc(j.closed_reason)+'</span>':''}</td>
       <td class="act">${ap?'<span class="muted">applied</span>':
@@ -674,8 +690,12 @@ function render(){
     if(!groups.has(k)) groups.set(k, []);
     groups.get(k).push(j);
   });
-  const list=[...groups.entries()].map(([k,members])=>({k, members, head:pickHead(members)}));
-  list.sort((a,b)=>cmpJobs(a.head, b.head));
+  // Groups sort by their best member under the CURRENT sort, not by the head row: a company with
+  // an old head and a NEW sibling (Jobgether, Lambda, GDIT 10-22) sorted with its old rows and the
+  // new role landed far below the fold.
+  const list=[...groups.entries()].map(([k,members])=>({k, members, head:pickHead(members),
+                                                         rep:members.slice().sort(cmpJobs)[0]}));
+  list.sort((a,b)=>cmpJobs(a.rep, b.rep));
   const roles=list.reduce((n,g)=>n+g.members.length,0);
   $('count').textContent=list.length+' employers \u00b7 '+roles+' roles';
   $('empty').hidden=list.length>0;
@@ -683,12 +703,12 @@ function render(){
   list.forEach(g=>{
     const sibs=g.members.filter(j=>j!==g.head).sort(cmpJobs);
     const sibNew=sibs.some(isNew);
-    const open=!!q || EXPANDED.has(g.k) || sibNew;
+    const open=!!q || EXPANDED.has(g.k) || (sibNew && !COLLAPSED.has(g.k));
     html.push(jobRowHtml(g.head, {head:true, key:g.k, extra:sibs.length, open, anyNew:sibNew}));
     if(open) sibs.forEach(j=>html.push(jobRowHtml(j, {head:false, key:g.k})));
   });
   $('rows').innerHTML=html.join('');
-  document.querySelectorAll('.mini.apply').forEach(b=>b.onclick=e=>{e.stopPropagation();doApply(b.dataset.url);});
+  document.querySelectorAll('.mini.apply').forEach(b=>b.onclick=e=>{e.stopPropagation();markSeen(b.dataset.url);doApply(b.dataset.url);});
   document.querySelectorAll('.mini.mk').forEach(b=>{
     if(b.classList.contains('hide-emp')) return;
     b.onclick=e=>{e.stopPropagation();mark(e.currentTarget);};
@@ -700,7 +720,8 @@ function render(){
   document.querySelectorAll('.exp').forEach(b=>b.onclick=e=>{
     e.stopPropagation();
     const k=b.dataset.key;
-    if(EXPANDED.has(k)) EXPANDED.delete(k); else EXPANDED.add(k);
+    const isOpen=b.textContent.indexOf('less')>=0;
+    if(isOpen){ EXPANDED.delete(k); COLLAPSED.add(k); } else { EXPANDED.add(k); COLLAPSED.delete(k); }
     render();
   });
   document.querySelectorAll('.hide-emp').forEach(b=>b.onclick=e=>{
@@ -732,7 +753,7 @@ function openDrawer(j){
   const scN=scoreNum(j);
   if(scN!==null)chips.push(['Score',scN]);
   if(j.posted)chips.push(['Posted',postedFmt(j.posted)]);
-  if(j.location)chips.push(['Location',j.location]);
+  chips.push(['Location',locText(j)]);
   if(j.workplace&&j.workplace!==j.location)chips.push(['',j.workplace]);
   if(j.salary)chips.push(['',j.salary]);
   if(j.ats)chips.push(['ATS',j.ats]);
@@ -766,7 +787,13 @@ async function mark(b){ b.disabled=true;b.textContent='...';
   const j=JOBS.find(x=>x.apply===b.dataset.url); if(j)j.status='applied';
 }
 $('q').oninput=render;
-['fRemote','fUS','fClosed'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',loadJobs);});
+try{ const u=$('fUnknown'); if(u) u.checked=localStorage.getItem('penates.includeUnknown')==='1'; }catch(e){}
+function syncUnknown(){ const u=$('fUnknown'), r=$('fRemote'); if(u&&r){ u.disabled=!r.checked; u.parentElement.style.opacity=r.checked?'1':'.45'; } }
+syncUnknown(); if($('fRemote')) $('fRemote').addEventListener('change',syncUnknown);
+['fRemote','fUS','fClosed','fUnknown'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',()=>{
+  if(id==='fUnknown'){ try{ localStorage.setItem('penates.includeUnknown',el.checked?'1':'0'); }catch(e){} }
+  loadJobs();
+});});
 (function(){const el=$('fHideSeen'); if(!el) return;
   try{ el.checked=localStorage.getItem('penates.hideSeen')==='1'; }catch(e){}
   el.addEventListener('change',()=>{ try{ localStorage.setItem('penates.hideSeen',el.checked?'1':'0'); }catch(e){} render(); });

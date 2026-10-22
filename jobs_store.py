@@ -6,7 +6,7 @@ Every feature reads/writes rows here so they share one shape:
   id, company, role, url, status, note,        (existing)
   ats, source, score, discovered_at, applied_at, seen_at, answers[]   (added, all optional)
 
-status vocabulary: discovered, verify, go, applied, closed, skip, expired
+status vocabulary: discovered, verify, go, applied, closed, skip, expired, filtered
 This module is import-safe with no third-party deps (stdlib only).
 """
 import os, json, re, datetime, threading
@@ -68,7 +68,7 @@ def _enrich(existing, j):
     nd = j.get("desc") or ""
     if nd and len(nd) > len(existing.get("desc") or ""):
         existing["desc"] = nd; changed = True
-    for k in ("posted", "location", "workplace", "salary", "apply_url", "ats_id", "board", "remote"):
+    for k in ("posted", "location", "workplace", "salary", "apply_url", "ats_id", "board", "remote", "remote_hint"):
         v = j.get(k)
         if v not in (None, "") and not existing.get(k):
             existing[k] = v; changed = True
@@ -232,7 +232,7 @@ def add_discovered(jobs):
                    "source": j.get("source", "discovery"),
                    "score": j.get("score"), "discovered_at": today}
             for k in ("posted", "location", "workplace", "salary", "desc",
-                      "apply_url", "ats_id", "board", "remote"):
+                      "apply_url", "ats_id", "board", "remote", "remote_hint"):
                 if j.get(k) is not None and j.get(k) != "":
                     row[k] = j[k]
             q.append(row)
@@ -245,6 +245,64 @@ def add_discovered(jobs):
             d["last_added"] = datetime.datetime.now().isoformat(timespec="seconds")
             save(d)
         return added
+
+
+def reconcile_remote_only():
+    """Mark discovered jobspy/builtin rows that fail remote-only as filtered.
+
+    Also re-run filtered rows whose filter_reason is remote_unconfirmed or
+    remote_unknown: restore when they now pass; otherwise rewrite the reason
+    (legacy remote_unconfirmed -> remote_unknown or not_remote). filter_reason
+    is 'not_remote' (desc negative or city/state with no remote positive) or
+    'remote_unknown' (empty or country-only location, no remote signal).
+    Does not delete rows. Does not change user-set statuses (anything other
+    than discovered, or filtered for a reason other than remote_unconfirmed /
+    remote_unknown). ats-api / hiringcafe are left alone. JobSpy
+    workplace=Remote is moved to remote_hint. Returns (newly_filtered, restored).
+    """
+    import serve
+    _REWRITE = ("remote_unconfirmed", "remote_unknown")
+    with _LOCK:
+        d = load()
+        q = d["queue"]
+        n = 0
+        restored = 0
+        changed = False
+        for r in q:
+            src = (r.get("source") or "").lower()
+            if not (src.startswith("jobspy") or src == "builtin"):
+                continue
+            # Aggregator Remote stamps are hints only (JobSpy is_remote / builtin badge).
+            if str(r.get("workplace") or "").strip().lower() == "remote":
+                r["remote_hint"] = True
+                r["workplace"] = ""
+                changed = True
+            if (r.get("status") == "filtered"
+                    and r.get("filter_reason") in _REWRITE):
+                reason = serve._remote_only_filter_reason(r)
+                if not reason:
+                    r["status"] = "discovered"
+                    r.pop("filter_reason", None)
+                    restored += 1
+                    changed = True
+                elif reason != r.get("filter_reason"):
+                    r["filter_reason"] = reason
+                    changed = True
+                continue
+            if r.get("status") != "discovered":
+                continue
+            reason = serve._remote_only_filter_reason(r)
+            if not reason:
+                continue
+            r["status"] = "filtered"
+            r["filter_reason"] = reason
+            n += 1
+            changed = True
+        if changed:
+            d["last_remote_reconcile"] = datetime.datetime.now().isoformat(timespec="seconds")
+            d["last_remote_restored"] = restored
+            save(d)
+        return n, restored
 
 def _on_or_after(datestr, start):
     try:

@@ -125,7 +125,8 @@ def score_intents(question, intents):
     q = question.lower()
     scored = []
     for intent, spec in intents.items():
-        s = sum(2 + kw.count(" ") for kw in spec.get("keywords", []) if kw in q)
+        s = sum(2 + kw.count(" ") for kw in spec.get("keywords", [])
+                if re.search(r'(?<![a-z0-9])' + re.escape(kw) + r'(?![a-z0-9])', q))
         if s: scored.append((s, intent))
     scored.sort(reverse=True)
     return scored

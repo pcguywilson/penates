@@ -126,12 +126,12 @@ def parse_constraints(question, limit=None):
 
 # ---------------------------------------------------------------- genre
 _GENRE_RULES = [
-    ("why_company",  r"why (do you want|are you interested|us\b|here\b|this (company|organization|team))|what (excites|interests|draws|appeals to) you|what makes you (excited|want)|excited to (work|join|be part)|want to work (at|for|here)|(like|want|love|wish) to (work|join) (with|at|for|us)\b|why (would you like )?work(ing)? (here|with us|for us)|interested in (working|joining)|^\s*why \S+\s*\??\s*$"),
+    ("why_company",  r"why (do you want|are you interested|us\b|here\b|this (company|organization|team))|what (excites|interests|draws|appeals to) you|what motivates you (to (work|join|apply)|about (us|this|our|the (company|role|team|position)))|what makes you (excited|want)|excited to (work|join|be part)|want to work (at|for|here)|(like|want|love|wish) to (work|join) (with|at|for|us)\b|why (would you like )?work(ing)? (here|with us|for us)|interested in (working|joining)|^\s*why \S+\s*\??\s*$"),
     ("why_role",     r"why this (position|role|job)|why (are you interested in )?(this )?(devops|sre|cloud|platform|the) (role|position)|why do you want this (role|position|job)"),
     ("hypothetical", r"what would you build(?!.{0,40}\b(relationship|rapport|manager|culture)\b)|how (would you|you would) handle (a |an |the )?(sev|incident|outage|page)|if you (were|had|could|got)|imagine (you|that)|suppose you|given (a|the).{0,20}(month|week|opportunity|chance)|spend a (month|week|day)|how would you (design|build|approach|architect)|greenfield|from scratch, what|blue ?sky"),
     ("behavioral",   r"influenc\w+|disagree\w*|convince|persuad\w+|conflict|push(ed)? ?back|difficult (person|co-?worker|colleague|teammate|customer|client|manager|boss|conversation|stakeholder)|had to (get|win|bring|convince|persuade|talk)|build(ing)? consensus|align(ing|ed)? (a |the )?(team|group|stakeholders|people)|work(ed)? with (a )?(difficult|resistant)|handl\w+ (a )?(disagreement|conflict)|gave (someone )?(difficult|hard|critical) feedback"),
-    ("owned_project",r"describe (a|an|the|your)\b(?!.{0,24}\b(ideal|type of|kind of|sort of|desired|preferred|dream)\b).{0,40}\b(project|situation|example|incident|outage|migration)\b|describe (a|an|one)\b time (when|you)\b|describe (one|an)\b.{0,50}\byou\b.{0,30}\b(built|led|owned|designed|implemented|fixed|solved|migrated|automated|maintained|handled)\b|\b(explain|talk about) a time (when|you)\b|describe (any|some)\b.{0,40}\bexperience\b|\byou\b.{0,20}\b(identified|resolved|fixed|solved|delivered|handled|shipped|reduced|improved|found and fixed)\b|tell (us|me)(?: \w+ly)? about (a|an|the|your)\b(?!self\b).{0,40}\b(time|project|situation|example|incident|outage|system|migration|issue|problem)\b|most (complex|challenging|difficult|impactful)|(a|one) (project|time|situation) (you|where you)|walk (us|me) through (a|an|the|your)\b.{0,50}\b(project|migration|incident|outage|system|design|architecture|deployment|time)\b|you (personally )?(owned|led|built|architected)|give (us|me) an example of (a|an|the|your)\b|share an? (specific|concrete|real) example\b|share an example of (a|an|the|your)\b.{0,50}\b(project|time|incident|outage|situation|migration|system)\b|(?<!how many )(what|which|how).{0,80}have you(?: ever| personally)? (set up|built|maintained|implemented|configured|automated|designed|deployed|migrated|improved|owned|contributed|managed|debugged|planned|shifted)"),
-    ("technical_experience", r"what is your experience\b|what experience do you have|do you have (any )?experience (with|in|using|building|running)\b|(tell (us|me) about |share |describe |outline )?your experience\b|have you (ever )?used\b|have you worked with\b|\bhave you (ever |personally )?(set up|built|maintained|implemented|configured|automated|designed|deployed|migrated|managed|debugged)\b|describe your\b(?!.{0,24}\b(ideal|desired|preferred|dream|type of|kind of)\b).{0,30}\b(patching|deployment|release|backup|monitoring|incident|change management|ci/?cd|testing)\b|what is your background (in|with)\b|do you have experience (with|in)\b|describe your .{0,30}experience|how (do|have) you (use|used)|rate your (experience|proficiency|familiarity|skill)|proficiency (with|in)|how familiar are you|level of (hands-on )?experience|walk (us|me) through your\b.{0,40}\bexperience\b|how (do|did) you (approach|find and fix|fix|resolv\w*|design|handle (an? |the )?(incident|outage|production|sev|page|alert|failure|migration|deploy)|implement|shift|migrat\w*)\b"),
+    ("owned_project",r"describe (a|an|the|your)\b(?!.{0,24}\b(ideal|type of|kind of|sort of|desired|preferred|dream)\b).{0,80}\b(project|situation|example|incident|outage|migration|solution|system|platform)\b|describe (a|an|one)\b time (when|you)\b|describe (one|an)\b.{0,50}\byou\b.{0,30}\b(built|led|owned|designed|implemented|fixed|solved|migrated|automated|maintained|handled)\b|\b(explain|talk about) a time (when|you)\b|describe (any|some)\b.{0,40}\bexperience\b|\byou\b.{0,20}\b(identified|resolved|fixed|solved|delivered|handled|shipped|reduced|improved|found and fixed)\b|tell (us|me)(?: \w+ly)? about (a|an|the|your)\b(?!self\b).{0,40}\b(time|project|situation|example|incident|outage|system|migration|issue|problem)\b|most (complex|challenging|difficult|impactful)|(a|one) (project|time|situation) (you|where you)|walk (us|me) through (a|an|the|your)\b.{0,50}\b(project|migration|incident|outage|system|design|architecture|deployment|time|achievement|accomplishment)\b|\bproudest\b|\bmost proud of\b|\b(biggest|greatest|top|proudest) (professional )?(achievement|accomplishment)|you (personally )?(owned|led|built|architected)|give (us|me) an example of (a|an|the|your)\b|share an? (specific|concrete|real) example\b|share an example of (a|an|the|your)\b.{0,50}\b(project|time|incident|outage|situation|migration|system)\b|(?<!how many )(what|which|how).{0,80}have you(?: ever| personally)? (set up|built|maintained|implemented|configured|automated|designed|deployed|migrated|improved|owned|contributed|managed|debugged|planned|shifted)"),
+    ("technical_experience", r"^\s*(hands-on|practical|professional|production)\s+[\w./+#-]+(\s+[\w./+#-]+){0,3}\s+experience\s*\??\s*$|what is your (hands-on |practical |professional |production )?experience\b|what experience do you have|do you have (any )?experience (with|in|using|building|running)\b|(tell (us|me) about |share |describe |outline )?your experience\b|have you (ever )?used\b|have you worked with\b|\bhave you (ever |personally )?(set up|built|maintained|implemented|configured|automated|designed|deployed|migrated|managed|debugged)\b|describe your\b(?!.{0,24}\b(ideal|desired|preferred|dream|type of|kind of)\b).{0,30}\b(patching|deployment|release|backup|monitoring|incident|change management|ci/?cd|testing)\b|what is your background (in|with)\b|do you have experience (with|in)\b|describe your .{0,30}experience|how (do|have) you (use|used)|rate your (experience|proficiency|familiarity|skill)|proficiency (with|in)|how familiar are you|level of (hands-on )?experience|walk (us|me) through your\b.{0,40}\bexperience\b|how (do|did) you (approach|find and fix|fix|resolv\w*|design|handle (an? |the )?(incident|outage|production|sev|page|alert|failure|migration|deploy)|implement|shift|migrat\w*)\b"),
     ("definition",   r"what does .{0,30}mean to you|what does it mean to\b|(what|how) would you define\b|how do you define|what is your definition|what do you (understand|think).{0,20}means"),
 ]
 # Inventory / list questions ("which AWS services / what tools have you used") must enumerate the
@@ -143,7 +143,7 @@ _INVENTORY_RE = re.compile(
     r"|what\b.{0,70}\bhave you\b.{0,14}\b(set up|configured?|maintain\w*|worked with)\b",
     re.I)
 _NARRATIVE_CUE_RE = re.compile(
-    r"describe (a|an|one|your)|give (us|me) an example|share an example|walk (us|me) through"
+    r"describe (a|an|one|your|the)\b|\bmost (complex|challenging|difficult|impactful|significant)\b|give (us|me) an example|share an example|walk (us|me) through"
     r"|tell (us|me)\b.{0,15}\babout"
     r"|\b(a|an|one)\b.{0,40}\b(time|project|issue|incident|problem|situation|example)\b", re.I)
 _PRACTICE_RE = re.compile(r"\b(testing|test suite|synthetic monitoring|integration tests?|endpoint checks?|unit tests?|smoke tests?|monitoring practice)\b", re.I)
@@ -196,7 +196,7 @@ _LLM_CUE_RE = re.compile(
     r"|how (would|did|have) you (design|build|approach|handle|implement|improv|debug|migrat|automat|lead|fix|resolv)"
     r"|\b(proficien\w*|years of(?! age\b)|familiar with)\b",
     re.I)
-_LLM_WHY_CUE_RE = re.compile(r"why (do|would) you (want|like)|why (are you interested|us\b|here\b|join|work|this (company|role|position|job|team|organization))|^\s*why \S+\s*\??\s*$|interest(ed)? in (this|the|our|working|joining)|excite|draws? you|appeal|want to (work|join)", re.I)
+_LLM_WHY_CUE_RE = re.compile(r"why (do|would) you (want|like)|motivates you to (work|join)|why (are you interested|us\b|here\b|join|work|this (company|role|position|job|team|organization))|^\s*why \S+\s*\??\s*$|interest(ed)? in (this|the|our|working|joining)|excite|draws? you|appeal|want to (work|join)", re.I)
 # Kept for any external import; no longer used as a gate.
 _EXPERIENCE_CUE_RE = _LLM_CUE_RE
 
@@ -319,7 +319,9 @@ def _named_system_gaps(question):
         if not t or t in seen:
             continue
         rx = re.compile(r"(?<![a-z0-9])" + re.escape(t) + r"s?(?![a-z0-9])", re.I)
-        if rx.search(q) and not rx.search(cand):
+        # A term the user listed in limited_or_none is a declared gap: _cand_text() dumps the whole
+        # profile, including that list, so the 'not in candidate text' test would always hide it.
+        if rx.search(q) and (t in lim_none or not rx.search(cand)):
             seen.add(t)
             out.append(_a._gap_disp(t))
     return out
@@ -333,7 +335,19 @@ def detect_gaps(question):
         if g not in merged:
             merged.append(g)
     limited = _a._question_limited(question)                 # [(display, qualifier)]
+    # Alternatives list ("Python, Go, JavaScript, or another language", "such as Terraform or
+    # CloudFormation"): the question asks for ANY of them. When the candidate has one, the others
+    # are not gaps (10-22: "I have not worked directly with JavaScript" led a Python answer).
+    if merged and _ALT_LIST_RE.search(question or ""):
+        try:
+            import skills as _sk
+            if _sk.canon_skills_in(question or "") & set(_sk.have_set()):
+                merged = []
+        except Exception:
+            pass
     return {"hard": merged, "limited": limited}
+
+_ALT_LIST_RE = re.compile(r"\bsuch as\b|\be\.g\.|\bfor example\b|\bor (another|other|any|similar|equivalent)\b|\b\w+,\s*\w+,?\s+or\s+\w+|\b\w+ or \w+\b", re.I)
 
 def _domain_gap(question, story):
     q = (question or "").lower()
@@ -364,6 +378,8 @@ def why_claims_unowned(text):
         cand = (_a._cand_text() or "").lower()
     except Exception:
         cand = ""
+    # Owned stories are the candidate's own record too (approach_only ones are not).
+    cand += " " + " ".join(l[1] for l in _owned_lines() if l[0] == "hero").lower()
     for term in _WHY_CLAIM_TERMS:
         term = term.strip().lower()
         if not term:
@@ -613,12 +629,24 @@ def _owned_lines():
     except Exception:
         p = {}
     out = []
-    for v in (p.get("canonical_stories") or {}).values():
-        if v:
+    # A canonical entry whose stories.yaml twin is approach_only (e.g. idp: how the user WOULD do it)
+    # is never told as done work.
+    try:
+        _st = _a.load("stories.yaml") or []
+        _st = _st.get("stories", _st) if isinstance(_st, dict) else _st
+    except Exception:
+        _st = []
+    _approach = {str(x.get("id", "")).split("-")[0] for x in _st if isinstance(x, dict) and x.get("approach_only")}
+    for k, v in (p.get("canonical_stories") or {}).items():
+        if v and str(k).split("_")[0] not in _approach:
             out.append(("story", str(v)))
     for v in (p.get("signature_projects") or []):
         if v:
             out.append(("project", str(v)))
+    for x in _st:
+        if isinstance(x, dict) and x.get("owned") and not x.get("approach_only") and x.get("hero"):
+            dom = " ".join(str(d) for d in (x.get("domains") or []))
+            out.append(("hero", str(x["hero"]), dom))
     return out
 
 
@@ -647,8 +675,54 @@ def _owned_sentence(line_kind, text, lead=""):
     if line_kind == "story" and re.match(r"^[A-Z][a-z]+ly$", w[0]) and len(w) > 1:   # 'Independently built ...'
         body = "I " + w[0].lower() + " " + w[1]
         return (lead + ", which is work I have done hands-on: " + body) if lead else body
-    low = t[0].lower() + t[1:] if not t[:2].isupper() else t
+    first = re.match(r"[A-Za-z][\w.+-]*", t)
+    keep = t[:2].isupper() or (first and first.group(0) in _proper_nouns())   # employer / product names keep their case
+    low = t if keep else t[0].lower() + t[1:]
     return (lead + ", and my recent work covers that: " + low) if lead else ("Recent work of mine: " + low)
+
+
+_PN_CACHE = None
+def _proper_nouns():
+    """Capitalized words from the profile's employers and tool lists (a sentence that starts with
+    one keeps its case: 'Acme multi-tenant ...' must not become 'acme ...')."""
+    global _PN_CACHE
+    if _PN_CACHE is None:
+        words = set()
+        try:
+            p = _a.load("profile.yaml") or {}
+            def walk(v):
+                if isinstance(v, dict):
+                    for x in v.values(): walk(x)
+                elif isinstance(v, list):
+                    for x in v: walk(x)
+                elif isinstance(v, str) and len(v) < 80:
+                    for w in re.findall(r"\b[A-Z][\w.+-]*", v):
+                        words.add(w)
+            walk(p)
+        except Exception:
+            pass
+        try:
+            wh = _a.load(os.path.join("data", "work_history.yaml")) or {}
+            for j in (wh.get("jobs") or wh.get("work_history") or []) if isinstance(wh, dict) else (wh or []):
+                for w in re.findall(r"\b[A-Z][\w.+-]*", str((j or {}).get("company") or "")):
+                    words.add(w)
+        except Exception:
+            pass
+        common = {"i", "a", "an", "the", "on", "in", "at", "for", "with", "and", "or", "to", "of", "yes", "no"}
+        words = {w for w in words if w.split("-")[0].lower() not in common}
+        _PN_CACHE = words
+    return _PN_CACHE
+
+
+def _why_matched_skills_req(job_text):
+    """Required-section posting skills the user HAS (the head of _why_matched_skills)."""
+    try:
+        import skills as _sk
+        req, pref, found = _sk.extract_jd_skills(job_text or "")
+        _, rm, _, _ = _sk.coverage(req, _sk.have_set(), _sk.supported_set())
+        return sorted(rm)
+    except Exception:
+        return []
 
 
 def _why_matched_skills(job_text):
@@ -665,7 +739,7 @@ def _why_matched_skills(job_text):
 
 
 _WHY_FRAMES = [
-    ("The posting centers on %s.", "That is the work I want to keep doing."),
+    ("%s's posting centers on %s.", "That is the work I want to keep doing."),
     ("Most of what this role asks for is %s.", "It is the kind of work I want more of."),
     ("%s is where this role puts its weight.", "More of that work is what I am looking for."),
 ]
@@ -686,24 +760,47 @@ def _why_candidate_only(facts, c, target_role=None, company=None, job_text=""):
     parts = []
     domain, ndom = _company_domain_ranked(job_text or "")
     if domain and ndom >= 2:
-        d = frame[0] % domain
+        if frame[0].startswith("%s's"):
+            d = frame[0] % (co, domain) if co else "The posting centers on %s." % domain
+        else:
+            d = frame[0] % domain
         parts.append(d[0].upper() + d[1:])
+    top_rx = None
+    if parts:
+        top_rx = next((rx for rx, ph in _WHY_DOMAINS if ph == domain), None)
     matched = _why_matched_skills(job_text)
     owned = ""
-    if matched:
+    if matched or top_rx:
         try:
             import skills as _sk
+            req = set(matched[:len(_why_matched_skills_req(job_text))])
             best, best_n = None, 0
-            for kind, text in _owned_lines():
-                n = len(_sk.canon_skills_in(text) & set(matched))
+            for ln in _owned_lines():
+                kind, text = ln[0], ln[1]
+                dom = ln[2] if len(ln) > 2 else ""
+                have = _sk.canon_skills_in(text) & set(matched)
+                n = len(have) + len(have & req)                 # required skills count double
+                if top_rx and top_rx.search(text + " " + dom):
+                    n += 3                                      # an identity-focused posting once got an unrelated cloud line
                 if n > best_n:
                     best, best_n = (kind, text), n
             if best:
                 overlap = [m for m in matched if m in _sk.canon_skills_in(best[1])]
                 named = (overlap or matched)[:2]
-                lead = "The posting asks for %s" % " and ".join(named)
-                for ld in (lead, ""):                       # drop the named skills if it tips into a tech dump
-                    sent = _owned_sentence(best[0], best[1], ld).rstrip(".") + "."
+                lead = "The posting asks for %s" % " and ".join(named) if named else ""
+                if top_rx and top_rx.search(best[1]) and parts:
+                    lead = ""                                   # domain sentence already says what they want
+                for ld in ((lead, "") if lead else ("",)):      # drop the named skills if it tips into a tech dump
+                    if best[0] == "hero":
+                        w = best[1].strip().split(" ", 1)
+                        body = "I " + w[0].lower() + (" " + w[1] if len(w) > 1 else "")
+                        sent = ((ld + ", which is work I have done hands-on: " + body) if ld
+                                else ("I have done that work hands-on: " + body if parts else body))
+                        sent = sent.rstrip(".") + "."
+                    else:
+                        sent = _owned_sentence(best[0], best[1], ld).rstrip(".") + "."
+                        if parts and sent.startswith("Recent work of mine: "):
+                            sent = "My recent work covers that: " + sent[len("Recent work of mine: "):]
                     sent = sent[0].upper() + sent[1:]
                     trial = _no_dash(" ".join(parts + [sent]))
                     if not why_tech_dump(trial) and not why_claims_unowned(trial):
@@ -883,6 +980,13 @@ def subject_stories(question, want_owned):
         st, _ = retrieve_story(question, want_owned, pool=cand) if cand else (None, -1)
         out.append((subj, st))
     return out
+
+_GAP_ANALOG = [
+    (r"\b(bazel|jenkins|gradle|maven|circleci|travis|teamcity|bamboo|buildkite|argo ?cd|spinnaker)\b", "CI/CD"),
+    (r"\b(gcp|google cloud|oci|oracle cloud|alibaba)\b", "AWS"),
+    (r"\b(openshift|rancher|nomad|eks|aks|gke)\b", "Kubernetes"),
+    (r"\b(pulumi|cloudformation|bicep|chef|salt(stack)?)\b", "Terraform"),
+]
 
 _ROLE_ASK_RE = re.compile(r"\byour role\b|\bwhat (was|is) your (role|part|responsibilit)", re.I)
 
@@ -1455,6 +1559,28 @@ def answer_essay(question, limit=None, company=None, url=None, model=None, want_
         out["review"] = True
     return out
 
+_PROUDEST_RE = re.compile(r"\bproudest\b|\bmost proud of\b|\b(biggest|greatest|top) (professional )?(achievement|accomplishment)", re.I)
+_RELATES_RE = re.compile(r"relates? to (the|this|your) (role|position|job)|(relevant|applies|apply|connects?) to (the|this) (role|position|job)|how (it|this) (relates|connects|applies)", re.I)
+# (theme label, regex the ANSWER must match, regex the POSTING must match)
+_TIE_THEMES = [
+    ("documentation", r"\bdocument", r"\bdocument\w*|runbooks?"),
+    ("automation", r"\bautomat", r"\bautomat\w*"),
+    ("AWS", r"\bAWS\b", r"\bAWS\b"),
+    ("security and compliance", r"\b(secur|complian|FedRAMP)", r"\b(security|compliance|SOC ?2|FedRAMP)\b"),
+    ("owning a platform end to end", r"\bindependently\b|\bend[- ]to[- ]end\b|\btook ownership\b", r"\bown(ership)? (the|our)\b|\bend[- ]to[- ]end\b"),
+    ("supporting end users", r"\bend[- ]users?\b", r"\bend[- ]users?\b|\bemployees\b|\bnon-technical\b"),
+    ("containers", r"\b(Docker|container)", r"\b(Docker|containers?|Kubernetes)\b"),
+]
+def _role_tie(answer, posting):
+    hit = [lbl for lbl, ra, rp in _TIE_THEMES
+           if re.search(ra, answer or "", re.I) and re.search(rp, posting or "", re.I)]
+    if not hit:
+        return ""
+    hit = hit[:3]
+    lst = hit[0] if len(hit) == 1 else (" and ".join(hit) if len(hit) == 2 else "%s, %s, and %s" % tuple(hit))
+    return "It relates to this role through %s, which the posting also asks for." % lst
+
+
 def _answer_essay(question, limit=None, company=None, url=None, model=None, want_meta=True, page_context=None, role=None, why_hybrid=False, regen_prev=None):
     q = (question or "").strip()
     if not q:
@@ -1538,7 +1664,17 @@ def _answer_essay(question, limit=None, company=None, url=None, model=None, want
     # just want the nearest true work to point at).
     if is_gap:
         gstory, gscore = retrieve_story(q, True, ignore_not_implied=True)
-        cite = gstory if (gscore is not None and gscore >= 1) else None
+        cite = gstory if (gscore is not None and gscore >= 1 and story_topic_hits(q, gstory) >= 1) else None
+        # Closest real work for a gap tool: a build/CI tool cites the CI/CD story, a cloud cites the
+        # AWS story. With no tagged analog and no topic overlap, cite nothing (2026-10-16: Bazel and
+        # Jenkins cited an unrelated security-monitoring story on the owned bonus alone).
+        ql = q.lower()
+        for rx, subj in _GAP_ANALOG:
+            if re.search(rx, ql):
+                pool = [st for st in _load_stories() if not st.get("approach_only") and st.get("kind") != "function" and story_covers(st, subj)]
+                if pool:
+                    cite = retrieve_story(q, True, ignore_not_implied=True, pool=pool)[0] or pool[0]
+                break
         honest = _honest_gap(q, gaps, cite, c)
         flag = list(gaps["hard"]) + [d for d, _ in gaps["limited"]]
         return {"ok": True, "kind": "answer", "method": "gap_analog", "genre": "gap_analog",
@@ -1580,6 +1716,34 @@ def _answer_essay(question, limit=None, company=None, url=None, model=None, want
                     "genre": genre, "grounding": "stories", "story": ",".join(ids),
                     "subjects": [sj for sj, _ in pairs], "chars": len(text), "words": _wordcount(text),
                     "gaps": missing, "review": bool(fails), "checks": fails, "text": text}
+
+    # Proudest achievement: the user's stated answer (answers.yaml built_unprompted), plus a role tie
+    # only from themes BOTH the answer and the posting name. The template used to ignore
+    # "and how it relates to the role you are applying for".
+    if _PROUDEST_RE.search(q):
+        base = ""
+        try:
+            base = str(((_a.load("answers.yaml") or {}).get("intents") or {}).get("built_unprompted", {}).get("answer") or "")
+        except Exception:
+            base = ""
+        base = re.sub(r"\s+", " ", base).strip()
+        if base:
+            checks = []
+            text = base
+            if _RELATES_RE.search(q):
+                try:
+                    jt, _g = _jc.resolve_job_text(url, page_context)
+                except Exception:
+                    jt = page_context or ""
+                tie = _role_tie(base, jt)
+                if tie:
+                    text = base + " " + tie
+                else:
+                    checks.append("add how it relates to this role (no shared theme with the posting)")
+            text = _no_dash(_a.enforce_length(text, {}, c.get("max_chars") or 1200, False).strip())
+            return {"ok": True, "kind": "answer", "method": ("review:" if checks else "essay:") + "proudest",
+                    "genre": genre, "grounding": "stated", "story": None, "chars": len(text),
+                    "words": _wordcount(text), "gaps": [], "review": True, "checks": checks, "text": text}
 
     # No-story floor (Grok seq 225): a story with no domain/tool overlap is not an answer. The
     # Oracle backup story once answered a remote/async question via the stem "working". Blank +

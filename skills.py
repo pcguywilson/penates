@@ -2,12 +2,12 @@
 """skills.py - profile-relative skill engine for job-fit scoring.
 
 Single source of truth for how Penates recognizes skills in a JD and classifies
-them against your own profile. Ported from a section-aware extraction approach
+them against the user's actual profile. Ported from the a section-aware extraction approach
 (skill-extract.mjs + jd-skill-gap.mjs) and Resume-Matcher's coverage tokenizer,
 tailored to a cloud/DevOps profile and driven by profile.yaml so nothing about
 the candidate is hardcoded here (the sanitized public repo ships profile.example.yaml).
 
-HARD RULE (a hard-won lesson, and the reason a naive keyword scorer puts a
+HARD RULE (the a hard-won lesson, and the reason our old scorer put a
 pure-GCP role at 100): NO umbrella aliases. 'cloud' / 'devops' / 'sre' /
 'platform' / 'infrastructure' are NOT skills in this vocabulary - they never
 credit AWS/GCP/Azure. Only concrete tools/services/languages count. Umbrella
@@ -17,7 +17,7 @@ import re, html, functools
 
 # --------------------------------------------------------------- canonical vocab
 # surface spelling (lowercased) -> canonical display form. Curated cloud / devops /
-# security / language set: the tools your target roles actually name, INCLUDING
+# security / language set: the tools the user's target roles actually name, INCLUDING
 # ones he lacks (GCP, Jenkins, ...) so a JD requiring them is recognized and can be
 # scored as a gap. Longest surface forms are matched first (see _VOCAB_RE).
 CANON = {
@@ -80,6 +80,9 @@ CANON = {
     "vpn": "VPN", "nginx": "Nginx", "apache": "Apache",
     "active directory": "Active Directory", "vmware": "VMware", "hyper-v": "Hyper-V",
     "wsus": "WSUS",
+    "entra id": "Entra ID", "entra": "Entra ID", "azure ad": "Entra ID", "azure active directory": "Entra ID",
+    "active directory": "Active Directory",
+    "intune": "Intune", "autopilot": "Intune",
     # databases
     "postgresql": "PostgreSQL", "postgres": "PostgreSQL", "mysql": "MySQL",
     "oracle": "Oracle", "mongodb": "MongoDB", "redis": "Redis",
@@ -109,7 +112,7 @@ def canon_skills_in(text):
     return out
 
 # --------------------------------------------------------------- section-aware JD parse
-# Section-aware JD parsing. A REQUIRED header opens a requirements
+# Ported from a section-aware JD parser. A REQUIRED header opens a requirements
 # block; a PREFERRED header opens a lighter block; a NON-REQ header closes it.
 _REQ_HEADER = re.compile(
     r"^\s{0,6}(?:required|requirements|qualifications|must[- ]?have|"
@@ -268,7 +271,7 @@ def _profile():
         return yaml.safe_load(f) or {}
 
 def have_set():
-    """Canonical skills you HAVE, from profile.yaml HAVE lists (+ derived: CI/CD
+    """Canonical skills the user HAS, from profile.yaml HAVE lists (+ derived: CI/CD
     from GitHub Actions, IaC from Terraform/Ansible)."""
     p = _profile()
     have = set()
@@ -282,7 +285,7 @@ def have_set():
     return have
 
 def gap_set():
-    """Canonical skills you LACK (heavier penalty when REQUIRED), from
+    """Canonical skills the user LACKS (heavier penalty when REQUIRED), from
     profile.yaml limited_or_none plus Go/Ruby (no primary-language experience)."""
     p = _profile()
     gap = set()
@@ -332,7 +335,7 @@ def coverage(required, HAVE, SUPP):
     candidate has any member (0.5 when only SUPPORTED); its unmet members are alternatives,
     not gaps. Every other required skill (including a lone group member) scores individually.
     frac is credit/units in 0..1, the Resume-Matcher coverage denominator with one-of-many
-    collapsed so a multi-cloud JD does not gap the provider you happen to lack."""
+    collapsed so a multi-cloud JD does not gap the provider the user happens to lack."""
     required = set(required)
     if not required:
         return 0.0, set(), set(), set()

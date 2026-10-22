@@ -79,7 +79,6 @@ intents:
   aws_years:
     type: static
     keywords:
-    - how many years
     - years of aws
     - years of professional experience with aws
     answer: I have approximately 7+ years of professional AWS experience, including commercial AWS and

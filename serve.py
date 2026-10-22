@@ -37,14 +37,22 @@ Routes:
   A required question that asks the candidate to provide references is filled
   from profile.references. Optional, willingness, and referred-by stay as before.
   /ranked  (GET)   -> scored job list. Optional filters (AND, post-sort):
-                      remote_only=0|1, us_only=0|1, salary_min=<int annual USD>,
-                      show_hidden=0|1.
-                      Every row includes employer_key. Keys listed in
-                      config.json employers_hidden are dropped unless
-                      show_hidden=1. score is null when the row is unscored.
-                      remote_only drops a city/state location that has no remote
-                      token in location, workplace, or title (role). Country-only
-                      values (United States, USA, Multiple Locations) stay.
+                      remote_only=0|1, include_unknown=0|1, us_only=0|1,
+                      salary_min=<int annual USD>, show_hidden=0|1.
+                      Every row includes employer_key and remote_status.
+                      Keys listed in config.json employers_hidden are dropped
+                      unless show_hidden=1. score is null when the row is
+                      unscored.
+                      remote_only: ats-api/hiringcafe keep city/country rules
+                      (remote_status remote|not_remote). jobspy/builtin need a
+                      positive remote token in role, location, or desc
+                      (aggregator remote flags are hints only). Desc negatives
+                      override desc positives unless a remote alternative
+                      matches; tech hybrid stays. Empty or country-only
+                      location with no remote signal is remote_status=unknown
+                      (filter_reason remote_unknown). include_unknown=1 with
+                      remote_only=1 also returns those unknown rows (as if
+                      discovered); default include_unknown=0 hides them.
                       Missing salary is KEPT.
                       Each row includes seen_at (null until marked) and
                       discovered_at as stored.
@@ -551,7 +559,7 @@ _CO_STOP = {"the", "and", "of", "a", "an"}
 
 
 def _company_tokens(name):
-    """Case/punct/Inc/LLC-normalized tokens. Slashes become spaces (LiveNation split)."""
+    """Case/punct/Inc/LLC-normalized tokens. Slashes become spaces (e.g. 'Acme/Globex' splits)."""
     s = (name or "").lower().replace("&", " and ")
     s = re.sub(r"[^\w\s]", " ", s)
     s = _LEGAL_SUFFIX.sub(" ", s)
@@ -574,7 +582,7 @@ def _token_slice_match(left, right):
 def _companies_match(target, employer):
     """Both ways: 'Acme' hits 'Acme/Globex'; a leading phrase hits the legal name.
 
-    Slash/pipe components are compared on their own so LiveNation matches the stored alias.
+    Slash/pipe components are compared on their own so Globex matches the stored alias.
     A one-word name matches only the first token of the other (not a trailing 'Solutions').
     """
     t_parts = [p for p in re.split(r"[/|]", target or "") if p.strip()]
@@ -896,6 +904,56 @@ def _field_match(q, required=True):
     return prof, val, how, key
 
 
+# Sentinel: the Yes fits a compound auth+sponsorship list, but no Yes-led option
+# safely negates sponsorship. Callers must blank-review, not fall through to the model.
+_FIT_BLANK = object()
+_SPONSOR_MENTION_RE = re.compile(r"sponsor|visa|immigration", re.I)
+_SPONSOR_REQUIRE_RE = re.compile(r"will require|but i will require", re.I)
+_SPONSOR_NEGATE_RE = re.compile(
+    r"will not|do not|won't|won’t|without.{0,40}sponsor|no.{0,20}sponsor", re.I)
+
+
+def _sponsorship_not_required():
+    """True only when the locked profile says sponsorship is not required."""
+    try:
+        ident = (_load_profile_doc().get("identity") or {})
+    except Exception:
+        return False
+    return ident.get("sponsorship_required") is False
+
+
+def _yes_led_options(options):
+    return [o for o in (options or []) if re.match(r"^yes\b", _norm_option(o))]
+
+
+def _negates_sponsorship(option):
+    """Yes-led text that refuses sponsorship. 'will require' is never a negate."""
+    text = option or ""
+    if _SPONSOR_REQUIRE_RE.search(text):
+        return False
+    return bool(_SPONSOR_NEGATE_RE.search(text))
+
+
+def _compound_sponsorship_option(yn, opts):
+    """Auth Yes onto a Greenhouse compound dropdown.
+
+    None when this is not that dropdown (caller uses the normal Yes/No pick).
+    An option string when exactly one Yes-led option negates sponsorship.
+    _FIT_BLANK when the dropdown matches but nothing safe to pick.
+    """
+    if yn != "Yes" or not _sponsorship_not_required():
+        return None
+    led = _yes_led_options(opts)
+    if len(led) <= 1:
+        return None
+    if not any(_SPONSOR_MENTION_RE.search(o or "") for o in opts):
+        return None
+    neg = [o for o in led if _negates_sponsorship(o)]
+    if len(neg) == 1:
+        return neg[0]
+    return _FIT_BLANK
+
+
 def _fit_value_to_options(val, opts):
     """Exact option, then case/punct-normalized, then yes/no-shaped."""
     s = str(val if val is not None else "").strip()
@@ -911,6 +969,11 @@ def _fit_value_to_options(val, opts):
                 return o
     yn = _yes_no_from_text(s)
     if yn:
+        compound = _compound_sponsorship_option(yn, opts)
+        if compound is _FIT_BLANK:
+            return _FIT_BLANK
+        if compound:
+            return compound
         return _pick_yes_no_option(yn, opts)
     money = _fit_money_bracket(s, opts)
     if money:
@@ -1262,8 +1325,314 @@ def _degree_choice(q, opts, prof):
     return fitted, key
 
 
+# A named tool was extracted and is not in the profile lists. Blank after field
+# literals; do not ask the model. Not a dict, so a literal can still win first.
+_STACK_UNKNOWN = object()
+_STACK_EXP_RE = re.compile(r"\bdo you have (?:any )?experience\b(.*)$", re.I)
+_STACK_LEAD_RE = re.compile(
+    r"^(?:in|with|using|writing|managing|running|working|on)\b\s*", re.I)
+_STACK_TRAIL_RE = re.compile(r"\b(?:resources?|software)\s*$", re.I)
+_TOOL_ALIAS = {"k8s": "kubernetes", "kubernetes": "kubernetes"}
+_LANG_MULTI_RE = re.compile(
+    r"experience working in|programming languages?|\blanguages\b", re.I)
+_LANG_SCALE_RE = re.compile(
+    r"\b(?:expert|intermediate|proficient|beginner|years)\b", re.I)
+_NONE_ABOVE_RE = re.compile(r"none of the above|none of these", re.I)
+
+
+def _canon_tool(name):
+    t = re.sub(r"[^a-z0-9+#.]+", " ", str(name or "").lower()).strip()
+    t = re.sub(r"\s+", " ", t)
+    return _TOOL_ALIAS.get(t, t)
+
+
+def _extract_experience_tool(q):
+    """The tool a 'do you have experience ...' question names, or None.
+
+    Verbs and 'resources'/'software' are stripped. More than three words is not
+    one tool (leave it for other tiers). Never the verb alone.
+    """
+    m = _STACK_EXP_RE.search(q or "")
+    if not m:
+        return None
+    rest = (m.group(1) or "").strip().rstrip("?").strip()
+    while rest:
+        nxt = _STACK_LEAD_RE.sub("", rest, count=1).strip()
+        if nxt == rest:
+            break
+        rest = nxt
+    rest = _STACK_TRAIL_RE.sub("", rest).strip(" .,:;?-")
+    if not rest or len(rest.split()) > 3:
+        return None
+    if _canon_tool(rest) in ("writing", "managing", "running", "working", "resources", "resource"):
+        return None
+    return rest
+
+
+def _tool_listed(tool, items):
+    want = _canon_tool(tool)
+    if not want:
+        return False
+    for item in items or []:
+        if _canon_tool(item) == want:
+            return True
+    return False
+
+
+def _stack_experience_choice(payload, prof):
+    """Yes/No for one named tool. Separate from _honesty_choice.
+
+    Profile stack lists and limited_experience -> Yes (no forced review).
+    limited_or_none -> No. Unknown tool -> _STACK_UNKNOWN. None => not this question.
+    """
+    q = (payload.get("question") or "").strip()
+    opts = _options_clean(payload.get("options"))
+    if not q or not _options_are_yesno(opts) or _is_years_question(q):
+        return None
+    tool = _extract_experience_tool(q)
+    if not tool:
+        return None
+    if _tool_listed(tool, (prof or {}).get("limited_or_none")):
+        picked = _pick_yes_no_option("No", opts)
+        if not picked:
+            out = _blank_review()
+            out["_tier"] = "stack"
+            return out
+        return {"ok": True, "method": "field", "text": picked, "gaps": [tool],
+                "review": False, "_tier": "stack"}
+    limited = ((prof or {}).get("limited_experience") or {})
+    if _tool_listed(tool, _skill_list(prof)) or _tool_listed(tool, limited.keys()):
+        picked = _pick_yes_no_option("Yes", opts)
+        if not picked:
+            out = _blank_review()
+            out["_tier"] = "stack"
+            return out
+        return {"ok": True, "method": "field", "text": picked, "gaps": [],
+                "review": False, "_tier": "stack"}
+    return _STACK_UNKNOWN
+
+
+def _language_option_match(option, languages):
+    ol = _norm_option(option)
+    for lang in languages or []:
+        ll = _norm_option(str(lang))
+        if not ll:
+            continue
+        if ol == ll or re.search(r"(?<![a-z0-9])" + re.escape(ll) + r"(?![a-z0-9])", ol):
+            return True
+    return False
+
+
+def _language_multiselect(payload, prof):
+    """Checkbox / select-all language list. Languages only. None => not this question."""
+    q = (payload.get("question") or "").strip()
+    opts = _options_clean(payload.get("options"))
+    kind = str(payload.get("kind") or "").strip().lower()
+    if not q or not opts or _options_are_yesno(opts):
+        return None
+    multi = kind == "checkbox" or bool(_SELECT_ALL_RE.search(q))
+    if not multi or not _LANG_MULTI_RE.search(q) or _LANG_SCALE_RE.search(q):
+        return None
+    hits = [o for o in opts if _language_option_match(o, (prof or {}).get("languages"))]
+    if hits:
+        return {"ok": True, "method": "field", "text": " | ".join(hits), "gaps": [],
+                "review": False, "_tier": "languages"}
+    na = _pick_na_option(opts)
+    if not na:
+        for o in opts:
+            if _NONE_ABOVE_RE.search(o or ""):
+                na = o
+                break
+    if na:
+        return {"ok": True, "method": "field", "text": na, "gaps": [],
+                "review": False, "_tier": "languages"}
+    out = _blank_review()
+    out["_tier"] = "languages"
+    return out
+
+
+def _emit_choice(result, kind):
+    tier = result.pop("_tier", "gap")
+    review = True if not (result.get("text") or "").strip() else bool(result.get("review"))
+    return _choice_out(result, tier=tier, review=review, kind=kind)
+
+
+_DECLINE_OPT_RE = re.compile(
+    r"prefer not|decline to|don'?t wish|do not wish|do not want to (?:answer|say)|"
+    r"choose not|rather not|self-identify",
+    re.I)
+_EEO_NOT_RE = re.compile(r"\b(no|not|neither)\b|\b(do not|don't|am not)\b", re.I)
+
+
+def _is_decline_option(option):
+    return bool(_DECLINE_OPT_RE.search(option or ""))
+
+
+def _options_are_yesno_decline(opts):
+    """Short Yes/No plus an optional prefer-not / decline label."""
+    if len(opts or []) < 2:
+        return False
+    saw = False
+    for o in opts:
+        no = _norm_option(o)
+        if no in ("yes", "y", "no", "n", "true", "false"):
+            saw = True
+            continue
+        if (re.fullmatch(r"(yes|no)([\s,].*)?", no) and len(no) <= 24
+                and not no.startswith("non")):
+            saw = True
+            continue
+        if _is_decline_option(o) and len(no) <= 60:
+            continue
+        return False
+    return saw
+
+
+def _eeo_yes_no(text):
+    """Yes/No from a short answer or from a long EEO sentence ('I am not a ...')."""
+    yn = _yes_no_from_text(text)
+    if yn:
+        return yn
+    if _EEO_NOT_RE.search(text or ""):
+        return "No"
+    return None
+
+
+def _eeo_short_value(key, prof):
+    """eeo.disability_status -> profile eeo.disability_short, when that sibling exists."""
+    if not key or not str(key).startswith("eeo."):
+        return None
+    name = str(key).split(".", 1)[1]
+    eeo = (prof or {}).get("eeo") or {}
+    cands = []
+    if name.endswith("_status"):
+        cands.append(name[: -len("_status")] + "_short")
+    cands.append(name + "_short")
+    for cand in cands:
+        val = eeo.get(cand)
+        if val not in (None, ""):
+            return val
+    return None
+
+
+def _option_yes_no_side(option):
+    """Yes, No, or None. Decline labels are not an answer. 'Non-binary' is not No."""
+    if _is_decline_option(option):
+        return None
+    yn = _yes_no_from_text(option)
+    if yn:
+        return yn
+    if _EEO_NOT_RE.search(option or ""):
+        return "No"
+    return None
+
+
+def _pick_polarity_option(yn, opts):
+    """Map Yes/No onto one long EEO label ('Not Hispanic or Latino', 'I am not a ...')."""
+    if yn not in ("Yes", "No"):
+        return None
+    nos = []
+    yeses = []
+    other = []
+    for o in opts:
+        side = _option_yes_no_side(o)
+        if side == "No":
+            nos.append(o)
+        elif side == "Yes":
+            yeses.append(o)
+        elif side is None and not _is_decline_option(o):
+            other.append(o)
+    if yn == "No":
+        return nos[0] if len(nos) == 1 else None
+    if len(yeses) == 1:
+        return yeses[0]
+    if not yeses and len(other) == 1:
+        return other[0]
+    return None
+
+
+def _fit_eeo_long_short(key, val, prof, opts):
+    """Long EEO prose vs short Yes/No/Prefer-not, and the reverse.
+
+    Short profile sibling (eeo.disability_short) wins, then a leading Yes/No
+    token or a 'not' sentence. None when nothing is safe to pick.
+    """
+    if not key or not str(key).startswith("eeo.") or not opts:
+        return None
+    short = _eeo_short_value(key, prof)
+    yn = _eeo_yes_no(short) if short not in (None, "") else None
+    if not yn:
+        yn = _eeo_yes_no(val)
+    if not yn:
+        return None
+    if _options_are_yesno_decline(opts):
+        return _pick_yes_no_option(yn, opts)
+    return _pick_polarity_option(yn, opts)
+
+
+def _tail_is_option_labels(tail, labels):
+    """True when tail is only option labels, each used at most once."""
+    rest = (tail or "").strip()
+    if not rest or not labels:
+        return False
+    pool = sorted((lab for lab in labels if lab), key=len, reverse=True)
+    used = [False] * len(pool)
+    count = 0
+    while rest:
+        hit = False
+        for i, lab in enumerate(pool):
+            if used[i]:
+                continue
+            m = re.match(r"\s*" + re.escape(lab) + r"(?:\s+|$)", rest, re.I)
+            if not m:
+                continue
+            rest = rest[m.end():].strip()
+            used[i] = True
+            count += 1
+            hit = True
+            break
+        if not hit:
+            return False
+    return count > 0
+
+
+def _strip_appended_options(q, opts):
+    """Drop option labels a client appended after the real question.
+
+    Lever radios send 'What gender do you identify as? Female Male Non-binary
+    Transgender ...'. Field rules must not see those labels (Transgender would
+    win). A question that merely ends with one of its own options stays intact.
+    """
+    text = re.sub(r"\s+", " ", (q or "").strip())
+    labels = [re.sub(r"\s+", " ", str(o).strip()) for o in (opts or []) if str(o).strip()]
+    if not text or not labels:
+        return text
+    qpos = text.rfind("?")
+    if qpos != -1:
+        tail = text[qpos + 1:]
+        if tail.strip() and _tail_is_option_labels(tail, labels):
+            return text[:qpos + 1].strip()
+        return text
+    peeled = text
+    n = 0
+    for _ in range(len(labels)):
+        hit = False
+        for lab in sorted(labels, key=len, reverse=True):
+            m = re.search(r"\s" + re.escape(lab) + r"\s*$", peeled, re.I)
+            if m and m.start() > 0:
+                peeled = peeled[:m.start()].rstrip()
+                n += 1
+                hit = True
+                break
+        if not hit:
+            break
+    if n >= 2 and peeled:
+        return peeled
+    return text
+
+
 def _choice_deterministic(payload):
-    """Tier-0, named-tech honesty, degree, fields.yaml, then years. None => model."""
+    """Tier-0, honesty, stack Yes/No, degree, fields, years, languages. None => model."""
     q = (payload.get("question") or "").strip()
     opts = _options_clean(payload.get("options"))
     kind = str(payload.get("kind") or "").strip().lower()
@@ -1272,7 +1641,7 @@ def _choice_deterministic(payload):
         if not (guard.get("text") or "").strip():
             return _choice_out(guard, tier="0", review=bool(guard.get("review")), kind=kind)
         fitted = _fit_value_to_options(guard.get("text"), opts)
-        if not fitted:
+        if fitted is _FIT_BLANK or not isinstance(fitted, str):
             return _choice_out(
                 {"ok": False, "method": "choice-unknown", "text": "", "gaps": []},
                 tier="0", review=True, kind=kind)
@@ -1281,15 +1650,18 @@ def _choice_deterministic(payload):
             tier="0", review=bool(guard.get("review")), kind=kind)
     prof = {}
     try:
-        prof, val, how, key = _field_match(q, _required_flag(payload))
+        prof, val, how, key = _field_match(
+            _strip_appended_options(q, opts), _required_flag(payload))
     except Exception as e:
         print("[tier1 skip] " + str(e), flush=True)
         val, how, key = None, "no-field", None
     honest = _honesty_choice(payload, prof)
     if honest is not None:
-        tier = honest.pop("_tier", "gap")
-        review = True if not (honest.get("text") or "").strip() else bool(honest.get("review"))
-        return _choice_out(honest, tier=tier, review=review, kind=kind)
+        return _emit_choice(honest, kind)
+    stack = _stack_experience_choice(payload, prof)
+    if isinstance(stack, dict):
+        return _emit_choice(stack, kind)
+    stack_unknown = stack is _STACK_UNKNOWN
     deg = _degree_choice(q, opts, prof)
     if deg:
         text, dkey = deg
@@ -1302,13 +1674,23 @@ def _choice_deterministic(payload):
             tier="1", review=False, kind=kind)
     if how == "field" and val not in (None, ""):
         fitted = _fit_value_to_options(val, opts)
-        if fitted:
+        if fitted is not _FIT_BLANK and not (isinstance(fitted, str) and fitted):
+            if key and str(key).startswith("eeo."):
+                alt = _fit_eeo_long_short(key, val, prof, opts)
+                if isinstance(alt, str) and alt:
+                    fitted = alt
+        if fitted is _FIT_BLANK:
+            return _choice_out(_blank_review(), tier="1", review=True, kind=kind)
+        if isinstance(fitted, str) and fitted:
             out = {"ok": True, "method": "field", "text": fitted, "gaps": [], "field": key}
             return _choice_out(out, tier="1", review=False, kind=kind)
         yn_years = _years_field_yesno(q, opts, key, val)
         if yn_years:
             out = {"ok": True, "method": "field", "text": yn_years, "gaps": [], "field": key}
             return _choice_out(out, tier="1", review=False, kind=kind)
+        # EEO never goes to the model. A miss is a blank review.
+        if key and str(key).startswith("eeo."):
+            return _choice_out(_blank_review(), tier="1", review=True, kind=kind)
     bucket = _years_bucket_option(q, opts, prof)
     if bucket:
         return _choice_out(
@@ -1319,6 +1701,11 @@ def _choice_deterministic(payload):
         return _choice_out(
             {"ok": True, "method": "field", "text": yn, "gaps": []},
             tier="years", review=False, kind=kind)
+    lang = _language_multiselect(payload, prof)
+    if lang is not None:
+        return _emit_choice(lang, kind)
+    if stack_unknown:
+        return _choice_out(_blank_review(), tier="stack", review=True, kind=kind)
     return None
 
 
@@ -1987,6 +2374,91 @@ _RANK_COUNTRY_ONLY = re.compile(
     r"multiple locations|\d+ locations?|anywhere)\b|[-,/()|.]")
 _RANK_REMOTE_RE = re.compile(
     r"(?i)\b(remote|work from home|wfh|telecommut|virtual|distributed)\b")
+# Positive remote confirmation in role/location for jobspy/builtin
+# (aggregator flags are hints only).
+_REMOTE_POS_RE = re.compile(
+    r"(?i)\b(remote|telework|work from home|wfh|virtual)\b")
+# Desc positives are tighter: bare "remote"/"virtual" hits "remote locations"
+# and "virtual environments". Keep-cases still match (fully remote role;
+# remote options via alt or this pattern). Board seq 136 adds workplace
+# phrases that were stuck in remote_unconfirmed. Seq 137 adds schedule /
+# full-time / #LI-Remote / remotely-from-home / office-or-remotely / a
+# pay-location line, and drops boilerplate (remote workers, E-Verify
+# "hired to work remotely", "as necessary", partial-week Fridays).
+# "remote eligible ... No" is not a yes. Tech nouns (access, caching,
+# updates, maintenance) are absent on purpose. "remote workers" is not a
+# workplace (support object: "for remote workers").
+# Seq 138: remote life stipend; "in a remote, fast-moving environment";
+# location crumbs "Remote, Remote" / "| Remote". Product names like
+# "Remote Flight Deck" stay out (no bare \bremote\b here).
+_DESC_REMOTE_POS_RE = re.compile(
+    r"(?i)(?:"
+    r"(?<!\bnot\s)(?:\b100%\s+|\bfully\s+|\bentirely\s+)remote\b"
+    r"|\bremote[\s-]+(?:role|position|job|work|opportunity|opening|only|"
+    r"first|friendly|based|options?|life)\b"
+    r"|\bremote[\s-]+full[- ]time\b"
+    r"|\bschedule\s*:\s*remote\b"
+    r"|\bremote[\s-]+eligible\b(?!\W{0,24}no\b)"
+    r"|\b(?:work|working)\s+remotely\b(?!\s+as\s+necessary\b)"
+    r"|\bremotely\s+from\s+(?:home|anywhere)\b"
+    r"|\b(?:office|on-?site|in[- ]person)\b.{0,100}\bor\s+remotely\b"
+    r"|\bor\s+remotely\b.{0,80}\b(?:office|on-?site|in[- ]person)\b"
+    r"|\\?#\\?LI\\?-Remote\b"
+    r"|\bwork\s+from\s+home\b|\bwfh\b|\btelework(?:ing)?\b"
+    r"|location\s*:\s*[^\n]{0,60}\bremote\b"
+    r"|\bthis\s+is\s+a\s+(?:fully\s+)?remote\b"
+    r"|\b(?:position|role|job|opportunity)\s+(?:can|may|will)\s+be\s+"
+    r"(?:performed\s+)?(?:fully\s+|100%\s+)?remote\b"
+    r"|\bposted\s+as\s+remote\b"
+    r"|\bremote\s+hires?\b"
+    r"|\bin\s+a\s+remote,?\s+(?:(?:fast-moving|distributed)\s+)?"
+    r"(?:setting|environment|capacity)\b"
+    r"|\bremote,\s*remote\b"
+    r"|\|\s*remote\b"
+    r")")
+# Pay/location line, case-sensitive state: "Remote - Georgia: $170,000".
+# Not under (?i): a lowercase "remote - the" line is not this form.
+_DESC_REMOTE_PAY_RE = re.compile(
+    r"(?m)^\s*[Rr]emote\s*[-:,]\s*[A-Z][a-z]+")
+# Boilerplate that must not count as a workplace positive (seq 137).
+_DESC_REMOTE_POS_SKIP_RE = re.compile(
+    r"(?i)(?:"
+    r"\bhired\s+to\s+work\s+remotely\b"
+    r"|\b(?:work|working)\s+remotely\s+as\s+necessary\b"
+    r"|\boption\s+to\s+work\s+remotely\b.{0,80}?\b(?:on\s+)?"
+    r"(?:fridays|one\s+day|occasionally)\b"
+    r")")
+# A positive inside a sentence that mentions E-Verify or I-9 is boilerplate.
+# Indeed often stores the hyphen as "\-".
+_EVERIFY_SENT_RE = re.compile(
+    r"(?i)[^.!?\n]*\b(?:e\\?-?verify|i\\?-9)\b[^.!?\n]*")
+# Title/location workplace tokens that override a false Remote workplace flag
+# (JobSpy is_remote). Tech "hybrid …" is not a workplace. Remote alternatives
+# keep the row ("Hybrid @ X or Remote @ Y").
+_TECH_HYBRID_RE = re.compile(
+    r"(?i)\bhybrid\s+(?:cloud|infrastructure|environment|it|multi-?cloud)\b")
+_ONSITE_HYBRID_WP_RE = re.compile(
+    r"(?i)\b(?:on-?site(?:\s+only)?|in[- ]office|hybrid)\b")
+_REMOTE_ALT_RE = re.compile(
+    r"(?i)(?:\bor\s+remote\b|\bremote\s+option\b|\bremote\s*@|/remote\b)")
+# Desc negatives for aggregator remote-only. Bare "in person" is too noisy;
+# these are the tightened forms (board seq 135).
+# Indeed descriptions often escape hyphens as "\-". "100% On-Site **No**"
+# is a field saying on-site is not required, so that "No" does not count.
+_DESC_REMOTE_NEG_RE = re.compile(
+    r"(?i)(?:"
+    r"not\s+(?:a\s+|an\s+)?(?:fully\s+|100%\s+)?remote\b"
+    r"|this\s+(?:is|role\s+is|position\s+is)\s+(?:a\s+|an\s+)?(?:fully\s+)?"
+    r"(?:on-?site|hybrid|in[- ]office)"
+    r"|hybrid\s+(?:schedule|work\s+schedule|role|position)"
+    r"|work\s+location:\s*in\s+person"
+    r"|required\s+to\s+work\s+(?:in\s+person|on-?site|in\s+(?:the\s+)?office)"
+    r"|\d(?:-\d)?\s*days?\s+(?:a|per)\s+week\s+in\s+(?:the\s+)?office"
+    r"|\d(?:-\d)?\s*days?\s+in\s+office"
+    r"|fully\s+on\\?-?\s*site"
+    r"|100%\s+on\\?\s*-?\s*site\b(?!\W{0,16}no\b)"
+    r"|on\\?-?\s*site\s+(?:only|required|position|role)"
+    r")")
 _EMPLOYER_PAREN_RE = re.compile(r"\s*\([^)]*\)\s*$")
 _EMPLOYER_SUFFIX_RE = re.compile(
     r"(?:,\s*|\s+)\b(?:inc|llc|corp|co|ltd)\b\.?\s*$", re.I)
@@ -2129,14 +2601,121 @@ def _ranked_remote_signal(r):
         return True
     return _RANK_REMOTE_RE.search(blob) is not None
 
-def _passes_remote_only(r):
-    """Drop a city/state location with no remote token. Country-only stays.
+def _explicit_onsite_hybrid_blocks_remote(r):
+    """True when role/title/location names onsite/in-office/hybrid with no remote alternative.
 
-    Mirrors scan_ats._remote_signal / _COUNTRY_ONLY. A location that still
-    has text after country-only tokens are removed, and no remote token in
-    location, workplace, or title (role), is onsite or unknown and drops.
-    Empty location stays. 'United States', 'USA', and 'Multiple Locations' stay.
+    Ignores tech hybrid phrases (hybrid cloud/infrastructure/environment/it/multi-cloud).
+    A remote alternative (or remote, remote option, remote @, /remote) keeps the row.
+    Does not consult the workplace field (JobSpy often sets it Remote falsely).
     """
+    blob = " ".join(str(r.get(k) or "") for k in ("role", "title", "location"))
+    if not blob.strip():
+        return False
+    scrubbed = _TECH_HYBRID_RE.sub(" ", blob)
+    if not _ONSITE_HYBRID_WP_RE.search(scrubbed):
+        return False
+    if _REMOTE_ALT_RE.search(blob):
+        return False
+    return True
+
+def _desc_remote_pos_text(desc):
+    """Description with E-Verify/I-9 sentences and seq 137 boilerplate removed.
+
+    Positives are matched on what remains, so a real workplace phrase in
+    another sentence still counts.
+    """
+    text = str(desc or "")
+    if not text:
+        return ""
+    text = _EVERIFY_SENT_RE.sub(" ", text)
+    return _DESC_REMOTE_POS_SKIP_RE.sub(" ", text)
+
+def _desc_has_remote_pos(desc):
+    text = _desc_remote_pos_text(desc)
+    if not text:
+        return False
+    if _DESC_REMOTE_POS_RE.search(text):
+        return True
+    return _DESC_REMOTE_PAY_RE.search(text) is not None
+
+def _aggregator_remote_source(r):
+    """True for jobspy:* and builtin rows (aggregator remote flags are untrusted)."""
+    src = (r.get("source") or "").lower()
+    return src.startswith("jobspy") or src == "builtin"
+
+# Country-only location tokens for remote_unknown (board seq 138).
+_REMOTE_UNKNOWN_COUNTRY_RE = re.compile(
+    r"(?i)^(united\s+states(?:\s+of\s+america)?|usa|u\.s\.a?\.?|us|america)$")
+
+def _location_empty_or_country_only(loc):
+    """True when location is blank or only US/USA/United States/U.S./America."""
+    s = str(loc or "").strip()
+    if not s:
+        return True
+    if _REMOTE_UNKNOWN_COUNTRY_RE.match(s):
+        return True
+    # Strip commas/slashes/parens but keep dots so U.S. / U.S.A. still match.
+    cleaned = re.sub(r"[-,/()|]", " ", s)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return bool(cleaned and _REMOTE_UNKNOWN_COUNTRY_RE.match(cleaned))
+
+def _remote_only_filter_reason(r):
+    """For jobspy/builtin: 'not_remote', 'remote_unknown', or None if it passes.
+
+    Positive confirmation = remote token in role, location, or desc.
+    Desc negatives override unless _REMOTE_ALT_RE also matches (role/loc/desc).
+    remote / remote_hint / workplace=Remote are hints only and do not pass alone.
+    No positive and no negative: remote_unknown when location is empty or
+    country-only (US/USA/United States/U.S./America); else not_remote
+    (city/state location).
+    """
+    if not _aggregator_remote_source(r):
+        return None
+    role_loc = " ".join(str(r.get(k) or "") for k in ("role", "title", "location"))
+    desc = str(r.get("desc") or "")
+    blob = role_loc + " " + desc
+    has_alt = bool(_REMOTE_ALT_RE.search(blob))
+    if _DESC_REMOTE_NEG_RE.search(desc) and not has_alt:
+        return "not_remote"
+    if _REMOTE_POS_RE.search(role_loc) or _desc_has_remote_pos(desc) or has_alt:
+        return None
+    if _location_empty_or_country_only(r.get("location")):
+        return "remote_unknown"
+    return "not_remote"
+
+def _remote_status(r):
+    """remote | not_remote | unknown for /ranked.
+
+    jobspy/builtin use _remote_only_filter_reason (unknown = remote_unknown).
+    ats-api/hiringcafe and others: remote or not_remote from _passes_remote_only.
+    """
+    if _aggregator_remote_source(r):
+        reason = _remote_only_filter_reason(r)
+        if reason is None:
+            return "remote"
+        if reason == "remote_unknown":
+            return "unknown"
+        return "not_remote"
+    return "remote" if _passes_remote_only(r) else "not_remote"
+
+def _passes_remote_only(r):
+    """Remote-only gate for /ranked.
+
+    jobspy/builtin: require positive remote confirmation in role, location, or
+    desc. Aggregator remote flags and workplace=Remote are hints only. Desc
+    negatives override desc positives unless a remote alternative is present.
+    Empty/country-only with no signal fails (remote_unknown); use
+    include_unknown=1 to keep those.
+
+    ats-api / hiringcafe / other: drop a city/state location with no remote
+    token. Country-only stays. Empty location stays. Explicit onsite/in-office/
+    hybrid in role/title/location overrides a remote signal unless a remote
+    alternative is offered.
+    """
+    if _aggregator_remote_source(r):
+        return _remote_only_filter_reason(r) is None
+    if _explicit_onsite_hybrid_blocks_remote(r):
+        return False
     loc = str(r.get("location") or "").strip()
     if loc and not _ranked_remote_signal(r) and _RANK_COUNTRY_ONLY.sub(" ", loc).strip():
         return False
@@ -2280,11 +2859,14 @@ def _passes_salary_min(r, minimum):
     return top >= minimum
 
 def _filter_ranked(rows, qs):
-    """Apply optional remote_only / us_only / salary_min / employers_hidden (AND).
+    """Apply optional remote_only / include_unknown / us_only / salary_min /
+    employers_hidden (AND).
 
+    include_unknown=1 with remote_only=1 also keeps remote_status=unknown rows.
     Hidden employer keys drop unless show_hidden=1. Job status is not changed.
     """
     want_remote = _qs_flag(qs, "remote_only")
+    include_unknown = _qs_flag(qs, "include_unknown")
     want_us = _qs_flag(qs, "us_only")
     show_hidden = _qs_flag(qs, "show_hidden")
     sal_min = _qs_int(qs, "salary_min")
@@ -2293,8 +2875,13 @@ def _filter_ranked(rows, qs):
         return rows
     out = []
     for r in rows:
-        if want_remote and not _passes_remote_only(r):
-            continue
+        if want_remote:
+            if _passes_remote_only(r):
+                pass
+            elif include_unknown and _remote_status(r) == "unknown":
+                pass
+            else:
+                continue
         if want_us and not _passes_us_only(r):
             continue
         if sal_min is not None and not _passes_salary_min(r, sal_min):
@@ -2994,7 +3581,27 @@ class H(BaseHTTPRequestHandler):
                 import jobs_store
                 qs = urllib.parse.parse_qs(parsed.query)
                 st = (qs.get("status") or ["discovered"])[0].strip() or "discovered"
-                rows = _filter_ranked(jobs_store.ranked(status=st), qs)
+                rows = list(jobs_store.ranked(status=st))
+                # remote_only + include_unknown: also surface filtered
+                # remote_unknown rows as if discovered.
+                if (st == "discovered"
+                        and _qs_flag(qs, "remote_only")
+                        and _qs_flag(qs, "include_unknown")):
+                    seen = {(r.get("url") or "") + "|" + (r.get("apply_url") or "")
+                            for r in rows}
+                    for r in jobs_store.load().get("queue") or []:
+                        if (r.get("status") != "filtered"
+                                or r.get("filter_reason") != "remote_unknown"):
+                            continue
+                        if not jobs_store.applyable(r):
+                            continue
+                        key = (r.get("url") or "") + "|" + (r.get("apply_url") or "")
+                        if key in seen:
+                            continue
+                        rows.append(r)
+                        seen.add(key)
+                    rows.sort(key=lambda r: (r.get("score") or 0), reverse=True)
+                rows = _filter_ranked(rows, qs)
                 out = []
                 for r in rows:
                     raw_score = r.get("score")
@@ -3011,7 +3618,8 @@ class H(BaseHTTPRequestHandler):
                         "url": r.get("url", ""),
                         "apply": r.get("apply_url") or r.get("url", ""),
                         "closed_reason": r.get("closed_reason") or "",
-                        "employer_key": employer_key(r.get("company") or "", r.get("role") or "")})
+                        "employer_key": employer_key(r.get("company") or "", r.get("role") or ""),
+                        "remote_status": _remote_status(r)})
                 return self._json(200, {"count": len(out), "jobs": out})
             except Exception as e:
                 return self._json(500, {"error": str(e)})

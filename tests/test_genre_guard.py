@@ -224,5 +224,25 @@ class GenreGuard(unittest.TestCase):
             self.assertEqual(essay.classify_genre(q, essay.parse_constraints(q, None)), want, q)
 
 
+class DescribeTheMost(unittest.TestCase):
+    """2026-10-13 Lever: 'Describe the most complex ... which technologies did you use' went to the
+    inventory stack list; 'Describe a significant production ... incident' fell to other."""
+    def g(self, q):
+        return essay.classify_genre(q, essay.parse_constraints(q, None))
+
+    def test_most_complex_is_story(self):
+        q = ("Describe the most complex cloud infrastructure solution you have personally designed and implemented. "
+             "What were the customer or business requirements, which technologies did you use, and what was your specific contribution?")
+        self.assertEqual(self.g(q), "owned_project")
+
+    def test_long_incident_is_story(self):
+        q = ("Describe a significant production cloud or infrastructure incident you personally investigated and resolved. "
+             "What was the root cause, how did you troubleshoot the issue, and what changes did you implement to prevent recurrence?")
+        self.assertEqual(self.g(q), "owned_project")
+
+    def test_inventory_still_inventory(self):
+        self.assertEqual(self.g("Which AWS services have you used?"), "inventory")
+
+
 if __name__ == "__main__":
     unittest.main()

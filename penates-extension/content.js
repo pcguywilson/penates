@@ -12,7 +12,7 @@
 (() => {
   if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
   window.__penatesInit = true;
-  const PENATES_BUILD = "build 54";   // shown in the report header; if you don't see it after a reload, the extension didn't update
+  const PENATES_BUILD = "build 57";   // shown in the report header; if you don't see it after a reload, the extension didn't update
   const IS_TOP = window.top === window;
   // The content script is injected only on ATS hosts (manifest matches). When an ATS application
   // form is EMBEDDED as a cross-origin iframe inside a company careers page (e.g. a Greenhouse
@@ -219,6 +219,19 @@
     return out.length >= 8 ? out.trim() : s;
   }
 
+  // Lever: every question is an li.application-question with its own .application-label. Reading
+  // that label beats the input placeholder ("Type your response") and keeps radio option labels
+  // ("Female Male Non-binary ...") out of the question text.
+  const EEO_Q_RE = /\b(gender|pronoun|ethnic|race|hispanic|latin[oax]|disabilit|veteran|sexual orientation|transgender)\b/i;
+  function leverLabel(el) {
+    try {
+      const li = el.closest && el.closest("li.application-question, .application-question");
+      const lab = li && li.querySelector(".application-label");
+      const t = lab ? clean(lab.innerText || lab.textContent || "").replace(/\s*[\u2731*]+\s*$/, "").trim() : "";
+      return t.length >= 3 && t.length <= 400 ? t : "";
+    } catch (_) { return ""; }
+  }
+
   function questionFor(el) {
     const sel = clean(window.getSelection && String(window.getSelection()));
     const selUsable = el === (currentEl || lastEditable) && sel.length >= 12 && sel.length <= 500;
@@ -231,6 +244,7 @@
     if (selUsable && openEnded) return sel;
     const tries = [];
     const root = el.getRootNode ? el.getRootNode() : document;
+    const lv = leverLabel(el); if (lv) tries.push(lv);      // Lever's own question label beats label[for]
     if (el.id) {
       let l = null;
       try { l = root.querySelector && root.querySelector('label[for="' + CSS.escape(el.id) + '"]'); } catch (_) {}
@@ -319,6 +333,7 @@
   // not the group's question. That sends the wrong text to the engine. Climb to the container
   // that holds the group's question heading and return that instead.
   function groupQuestion(el) {
+    const lv = leverLabel(el); if (lv) return stripSectionHead(lv).slice(0, 240);
     // ARIA group label first: Workable wraps checkbox/radio sets in div[role=group] /
     // fieldset[role=radiogroup] with aria-labelledby pointing at the real question. Climbing
     // innerText instead glued option text onto the question (or returned the option alone).
@@ -395,6 +410,49 @@
     r = clean(r).slice(0, 100);
     return _ROLE_JUNK.test(r) ? "" : r;   // don't send form chrome as the role
   }
+
+  // ---- auto "applied" on the ATS confirmation (build 57) ----
+  // You review and submit yourself; Penates never submits. After a fill on this page, the
+  // ATS "thank you / application submitted" screen (same tab, same origin) logs the job as
+  // applied once. Text that was already on the page at fill time never counts.
+  const SUBMIT_TEXT_RE = /\b(thanks?( you)? for (applying|your application|submitting|your interest and application)|application (was |has been )?(successfully )?(submitted|received)|we(?:'|\u2019)?ve received your application|we have received your application|your application (is|was|has been) (in|complete|sent|submitted))\b/i;
+  const SUBMIT_URL_RE = /(\/confirmation\b|\/thanks\b|\/thank-?you\b|application[_-]?(submitted|confirmation)|[?&](submitted|applied)=(true|1))/i;
+  const FILL_KEY = "penates.lastFill";
+  function pageText() { try { return (document.body && document.body.innerText || "").slice(0, 20000); } catch (_) { return ""; } }
+  function rememberFill() {
+    try {
+      sessionStorage.setItem(FILL_KEY, JSON.stringify({ url: location.href, company: companyGuess(), role: roleGuess(),
+        t: Date.now(), pre: SUBMIT_TEXT_RE.test(pageText()) }));
+    } catch (_) {}
+    watchSubmitted();
+  }
+  function lastFill() {
+    try { const f = JSON.parse(sessionStorage.getItem(FILL_KEY) || "null"); return (f && Date.now() - f.t < 3 * 3600e3) ? f : null; }
+    catch (_) { return null; }
+  }
+  let _subObs = null, _subTimer = null;
+  async function checkSubmitted() {
+    const f = lastFill();
+    if (!f) return;
+    const urlHit = SUBMIT_URL_RE.test(location.href) && location.href !== f.url;
+    const textHit = !f.pre && SUBMIT_TEXT_RE.test(pageText());
+    if (!urlHit && !textHit) return;
+    try { sessionStorage.removeItem(FILL_KEY); } catch (_) {}
+    if (_subObs) { _subObs.disconnect(); _subObs = null; }
+    const payload = { url: f.url, company: f.company || companyGuess(), role: f.role || roleGuess() };
+    try {
+      const resp = await chrome.runtime.sendMessage({ type: "FETCH_APPLIED", payload });
+      if (resp && resp.ok && resp.data && resp.data.ok) toast("Penates logged this as applied: " + (resp.data.company || "this role"));
+      else toast("Submitted, but Penates could not log it (is serve.py running?)", true);
+    } catch (e) { toast("Submitted, but Penates could not log it: " + e, true); }
+  }
+  function watchSubmitted() {
+    if (_subObs || !lastFill() || !document.body) return;
+    _subObs = new MutationObserver(() => { clearTimeout(_subTimer); _subTimer = setTimeout(checkSubmitted, 800); });
+    _subObs.observe(document.body, { childList: true, subtree: true, characterData: true });
+    setTimeout(() => { if (_subObs) { _subObs.disconnect(); _subObs = null; } }, 45 * 60e3);
+  }
+  if (CAN_SURFACE) setTimeout(() => { checkSubmitted(); watchSubmitted(); }, 1500);
 
   async function markApplied() {
     const payload = { url: location.href, company: companyGuess(), role: roleGuess() };
@@ -647,7 +705,8 @@
   const _SELF_ASK = /^\s*(have|do|did|are|were|will|would|can|could|has|is there)\b/i;
   function skipQuestion(q) {
     if (!q) return false;
-    const cond = CONDITIONAL_RE.test(q) && !_SELF_ASK.test(q);
+    const qc = String(q).replace(/\(\s*if (applicable|any)\s*\)/ig, " ");   // "What is your notice period (if applicable)?" is a real ask
+    const cond = CONDITIONAL_RE.test(qc) && !_SELF_ASK.test(qc);
     return cond || LEAVE_BLANK_RE.test(q) || JUNK_RE.test(q);
   }
 
@@ -1129,7 +1188,7 @@
     return { filled };
   }
   // ===== Start-date fields ======================================================
-  // Rule (user): free text -> "2 weeks from offer" (profile, server side); an actual DATE field ->
+  // Rule (the user): free text -> "2 weeks from offer" (profile, server side); an actual DATE field ->
   // the second Monday from today. Covers Workday Month/Day/Year spinners, <input type=date> and
   // MM/DD/YYYY text boxes whose label asks when you can start.
   const START_Q = /when (could|can|would) you (start|begin)|start date|earliest (start|available|date)|available to start|availability date|date (you are )?available|begin work|able to start|join date/i;
@@ -1565,6 +1624,7 @@
     if (fillBusy) return;
     fillBusy = true;
     openReport();
+    rememberFill();
 
     // Keep the MV3 service worker alive for the whole fill. An open port prevents Chrome's idle
     // shutdown of the worker, so the batch resolve (and any per-field fallback) can't stall on a
@@ -1798,7 +1858,7 @@
         if (!data || data.__error || !data.text) { rows.push([q.slice(0, 60), "skip", data && data.__error ? "engine: " + data.__error : "no answer -> you"]); skipped++; continue; }
         // a bare structured value (tier-1 field match) belongs in an input/select, never a prose
         // box: this is where a demographic token leaks into a free-text field. Leave it for you.
-        // Middle name only when the field is actually required (user preference).
+        // Middle name only when the field is actually required (the user preference).
         if (/\bmiddle\s+(name|initial)\b/i.test(q) && !_fieldRequired(el)) {
           rows.push([q.slice(0, 60), "skip", "middle name optional -> left blank"]); skipped++; continue;
         }
@@ -1813,7 +1873,10 @@
           // "salary expectations" a textarea). Allow compensation field values + salary questions through.
           const salaryish = /^compensation\./.test(fkey)
             || /salary|compensation|desired pay|pay expectation|expected pay/i.test(q);
-          if (!urlish && !salaryish) { rows.push([q.slice(0, 60), "skip", "structured value not for a text box -> you"]); skipped++; continue; }
+          // A literal prose answer (no profile key, or a long multi-word sentence) belongs in a prose box.
+          const t = String(data.text || "").trim();
+          const prose = t.length >= 40 && /\s/.test(t) && /[a-z]{3,}\s+[a-z]{3,}/i.test(t) && !/^(compensation|eeo|identity|eligibility)\./.test(fkey);
+          if (!urlish && !salaryish && !prose) { rows.push([q.slice(0, 60), "skip", "structured value not for a text box -> you"]); skipped++; continue; }
         }
         const isCombo = isCombobox(el);
         const singleLine = tag !== "TEXTAREA" && !el.isContentEditable;
@@ -1827,7 +1890,7 @@
           let pickText = data.text;
           let ok = false;
           // Field of study rarely lists "Computer Information Technology" verbatim. Try the closest
-          // common catalog names in order ("Information Technology" first), then the exact value.
+          // common catalog names in order (the user: "Information Technology" first), then the exact value.
           let alts = FIELD_Q.test(q) ? [...new Set(["Information Technology", data.text, ...FIELD_ALTS])] : [data.text];
           const _ab = stateAbbr(data.text);
           const _cur = comboShown(el);
@@ -2113,14 +2176,18 @@
               continue;
             }
             if (skipQuestion(q)) continue;                        // genuinely meant for you
+            // EEO / identity radios are never guessed in the verify pass (Lever gender got "Non-binary"
+            // from a prefix match on "No"). The main pass fills them from the profile or leaves them.
+            if (EEO_Q_RE.test(q)) continue;
             const data = await askCached(q, 25, false, 40000, true);
             if (!data || data.__error || !data.text) continue;
             const na = norm(data.text);
             const scoreOf = (ol) => {
               if (!ol) return -1;
               if (ol === na) return 100;
-              if (na && ol.startsWith(na)) return 70;
-              if (na && na.startsWith(ol) && ol.length >= 3) return 60;
+              const wb = (a, b) => a.startsWith(b) && (a.length === b.length || !/[a-z0-9]/i.test(a.charAt(b.length)));
+              if (na && wb(ol, na)) return 70;                       // "no" must not match "non-binary"
+              if (na && ol.length >= 3 && wb(na, ol)) return 60;
               if (na.length >= 3 && (" " + ol + " ").includes(" " + na + " ")) return 50;
               if (na.length >= 5 && ol.includes(na)) return 20;
               return -1;
@@ -2148,12 +2215,13 @@
           // native <select> still on its placeholder (some Country / yes-no fields) - re-pick.
           if (tag === "SELECT" && (el.selectedIndex <= 0 || !(el.value || "").trim())) {
             const q = questionFor(el);
-            if (q && !skipQuestion(q)) {
+            if (q && !skipQuestion(q) && !EEO_Q_RE.test(q)) {     // EEO selects are never guessed here
               const data = await askCached(q, null, false, 40000, true);
               if (data && !data.__error && data.text) {
                 const want = norm(data.text);
+                const wbStart = (a, b) => a.startsWith(b) && (a.length === b.length || !/[a-z0-9]/i.test(a.charAt(b.length)));
                 const opt = [...el.options].find((o) => norm(o.textContent) === want || norm(o.value) === want)
-                          || [...el.options].find((o) => want.length >= 2 && norm(o.textContent).startsWith(want));
+                          || [...el.options].find((o) => want.length >= 2 && wbStart(norm(o.textContent), want));
                 if (opt) { el.value = opt.value; el.dispatchEvent(new Event("change", { bubbles: true }));
                   fixed++; rows.push([q.slice(0, 60), "filled", (opt.textContent || "").trim().slice(0, 50) + " (verify)"]); }
               }

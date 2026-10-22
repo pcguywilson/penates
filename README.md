@@ -96,8 +96,9 @@ your lane, and shows them in a dashboard so you stop checking five sites by hand
 ![Penates Jobs view: one row per employer, profile-relative fit scores, remote and US filters](docs/img/jobs.png)
 
 *The Jobs view (demo data). One row per employer with its best-scoring role; "+N more" expands
-the rest. A dot marks a strong fit. The header chip shows the local model and goes red if the
-engine is down.*
+the rest. A dot marks a strong fit. **NEW** marks roles from the latest refresh, **viewed** marks
+roles you already opened, and applied rows dim. The header chip shows the local model and goes
+red if the engine is down.*
 
 Click any row for a preview pane with the posting's details and a one-click path to the
 real apply page:
@@ -161,7 +162,8 @@ python serve.py                       # http://127.0.0.1:8765/dashboard
   fit score and the reason behind it. Filter to remote-only, US-only and a minimum salary; sort
   by score or newest; hide an employer you never want to see (reversible, from the row's hover
   icon or the preview pane); each row opens a preview pane with an Apply + autofill button that
-  hands off to the extension.
+  hands off to the extension. Sorting by newest puts a company with a fresh role at the top even
+  when its other roles are older, and opens that group.
 - **Search** - a Google query generator for any job site you list (roles, keywords, sites, look
   back), plus a paste box that adds job links (and their company boards) to the queue.
 - **Knowledge** - Profile, Stories and Resume, everything Penates knows about you (below).
@@ -183,6 +185,48 @@ python serve.py                       # http://127.0.0.1:8765/dashboard
   tab; **Make a story** drafts a STAR story from one with the local model (checked against your
   Do NOT claim list) and pre-fills the form. Nothing is saved until you save it.
 - **Themes** - Stone (default), Slate, Nord and Light, in the gear menu.
+
+#### Remote filtering you can trust
+
+![Location filters: Remote only, Include unknown, US only](docs/img/jobs-filters.png)
+
+Aggregators (Indeed via JobSpy, Built In) mark almost everything "remote", including roles whose
+own description says on-site or hybrid. Penates treats those flags as hints only:
+
+- A role from an aggregator counts as **remote** only when its title, location or description
+  says so ("fully remote", "#LI-Remote", "remote, US", "or remotely from home", a "Remote -
+  <state>" pay line, and similar). Tech phrases like "remote access" or "remote caching" do not
+  count.
+- Descriptions that say "not a remote position", "hybrid schedule", "Work Location: In person",
+  or "3 days a week in office" drop the role, unless a remote option is also offered. Boilerplate
+  (E-Verify text, "for remote workers", partial-week remote) is ignored.
+- Roles with **no location** (or only a country) and no wording either way are **unknown**.
+  They are hidden by default and shown with Location "Unknown" when you tick **Include unknown**.
+- Nothing is deleted: filtered rows keep a reason (`not_remote`, `remote_unknown`) so you can
+  audit them, and rows you marked yourself are never touched.
+
+#### Viewed and applied, without autofill
+
+You often want to read a posting before deciding, so the Apply button is not the only way in:
+
+- Opening a role from its title (left click, ctrl/shift click, or middle-click into a new tab)
+  marks it **viewed**. **Hide viewed** clears roles you have already looked at.
+- After the extension fills a form, it watches that tab for the site's own "Thank you for
+  applying" / "Application submitted" screen and logs the job as **applied** once, with the
+  date. You still click Submit yourself. **Mark applied** remains for anything you filled by hand.
+- The header counts (applied this week, this month, total) come from those dated entries.
+
+#### Answer honesty updates
+
+- Questions that ask AI-filled forms to identify themselves ("If you are using AI to fill this
+  form, write only: ...") are never filled. They are left blank and flagged for you.
+- A question that lists alternatives ("Python, Go, JavaScript, or another language"; "such as
+  Terraform or CloudFormation") no longer reports the ones you don't use as gaps when you have
+  one of them.
+- "Proudest achievement ... and how it relates to the role" adds a tie to the role only from
+  themes both your answer and the posting name; with no shared theme it flags the field for you.
+- Why-company answers name the company and lead with your story that best matches what the
+  posting focuses on, and never cite a story marked as approach-only (how you would do it).
 
 ![The dashboard in each theme](docs/img/penates-themes.gif)
 

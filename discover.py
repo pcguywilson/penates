@@ -52,6 +52,7 @@ def discover(terms, results, hours, sites, include_easy=False):
     except Exception:
         sys.exit("Missing JobSpy. Install it first:  pip install python-jobspy")
 
+    import serve as _serve
     batch, seen = [], set()
     for term in terms:
         try:
@@ -74,14 +75,22 @@ def discover(terms, results, hours, sites, include_easy=False):
                 continue
             if TITLE_NO.search(title) or not TITLE_OK.search(title):
                 continue
+            loc = _clean(r.get("location"))
+            # JobSpy is_remote is often true for onsite/hybrid titles; drop those
+            # at ingest (same gate as serve._passes_remote_only).
+            if _serve._explicit_onsite_hybrid_blocks_remote({"role": title, "location": loc}):
+                continue
             desc = _clean(r.get("description"))
+            # is_remote is a hint only — never stamp workplace=Remote from it.
             row = {"url": url, "company": _clean(r.get("company")),
                    "role": title[:120], "source": "jobspy:" + site,
                    "posted": _clean(r.get("date_posted")),
-                   "location": _clean(r.get("location")),
-                   "workplace": "Remote" if r.get("is_remote") else "",
+                   "location": loc,
+                   "workplace": "",
                    "salary": _salary(r),
                    "desc": desc[:DESC_CAP]}
+            if r.get("is_remote"):
+                row["remote_hint"] = True
             if len(desc) > DESC_CAP:
                 row["desc_truncated"] = True
             batch.append(row)
@@ -89,8 +98,17 @@ def discover(terms, results, hours, sites, include_easy=False):
         print("  %-32s %d in-lane" % (term, n_kept))
 
     added = jobs_store.add_discovered(batch)
+    # Mark aggregator rows that lack positive remote confirmation as filtered.
+    # Re-run remote_unconfirmed / remote_unknown; restore when they now pass.
+    # Never touches user statuses.
+    filtered, restored = jobs_store.reconcile_remote_only()
     print("\n%d in-lane postings found, %d NEW added to the store "
           "(the rest were already there)." % (len(batch), added))
+    if filtered:
+        print("%d discovered jobspy/builtin rows marked filtered "
+              "(remote_unknown / not_remote)." % filtered)
+    if restored:
+        print("%d remote_unknown/unconfirmed rows restored to discovered." % restored)
     if added:
         print("They're status 'discovered' -- triage with `python report.py` "
               "or GET http://127.0.0.1:8765/jobs?status=discovered")
