@@ -12,7 +12,7 @@
 (() => {
   if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
   window.__penatesInit = true;
-  const PENATES_BUILD = "build 57";   // shown in the report header; if you don't see it after a reload, the extension didn't update
+  const PENATES_BUILD = "build 59";   // shown in the report header; if you don't see it after a reload, the extension didn't update
   const IS_TOP = window.top === window;
   // The content script is injected only on ATS hosts (manifest matches). When an ATS application
   // form is EMBEDDED as a cross-origin iframe inside a company careers page (e.g. a Greenhouse
@@ -232,6 +232,7 @@
     } catch (_) { return ""; }
   }
 
+  const ADDR_PART_RE = /^\s*(city|town|state|province|state\s*\/\s*province|region|zip|zip\s*code|postal|postal\s*code|postcode|country|apt|suite|unit|address\s*(line)?\s*2)\b/i;
   function questionFor(el) {
     const sel = clean(window.getSelection && String(window.getSelection()));
     const selUsable = el === (currentEl || lastEditable) && sel.length >= 12 && sel.length <= 500;
@@ -254,6 +255,10 @@
     const lb = el.getAttribute && el.getAttribute("aria-labelledby");
     if (lb) tries.push(lb.split(/\s+/).map((i) => (document.getElementById(i) || {}).innerText || "").join(" "));
     if (el.getAttribute) tries.push(el.getAttribute("aria-label"));
+    // Split address rows (JazzHR/applytojob): one "Address" label over street + City / State /
+    // Postal inputs that only have placeholders. With no label of its own, a placeholder that names
+    // an address part is the question; the shared group label would fill the street everywhere.
+    if (!tries.some((t) => clean(t || "")) && el.placeholder && ADDR_PART_RE.test(el.placeholder)) return clean(el.placeholder);
     const fs = el.closest && el.closest("fieldset");
     if (fs) { const lg = fs.querySelector("legend"); if (lg) tries.push(lg.innerText); }
     // SLDS / LWC: the question lives in an ancestor shadow root (c-as-apply-question,
@@ -1394,6 +1399,10 @@
       };
       (r.questions || []).forEach(add);
       (r.location_questions || []).forEach(add);
+      // Greenhouse renders a Hispanic/Latino Yes/No select (id hispanic_ethnicity) that the API's
+      // compliance list omits; Race only appears after it is answered. Ask it first.
+      if (document.getElementById("hispanic_ethnicity") && !items.some((i) => i.id === "hispanic_ethnicity"))
+        items.push({ ats: "greenhouse", id: "hispanic_ethnicity", q: "Are you Hispanic/Latino?", required: false, kind: "select", options: null });
       (r.compliance || []).forEach((c) => (c.questions || []).forEach(add));
       // Page-level widgets the schema does not list (phone country, location typeahead, education).
       const extra = [["country", "Country"], ["candidate-location", "Location (City)"], ["school--0", "School"], ["degree--0", "Degree"], ["discipline--0", "Discipline"]];
@@ -1540,14 +1549,14 @@
     // No matching place in the list: leave our typed value so the field isn't the wrong town, flag it.
     return { ok: !!clean(el.value), shown: clean(el.value), loose: true };
   }
-  async function adapterFill(items, rows) {
+  async function adapterFill(items, rows, _late) {
     const out = { filled: 0, review: 0, skipped: 0 };
-    const todo = [];
+    const todo = [], unrendered = [];
     for (const it of items) {
       const el = _adEl(it);
       it.el = el;
       if (/cover.?letter/i.test(it.id + " " + it.q)) { if (it.required) { rows.push([it.q.slice(0, 60), "skip", "cover letter required -> dashboard Cover"]); out.skipped++; } continue; }
-      if (!el && it.kind !== "radio" && it.kind !== "checkbox") continue;          // not rendered on this page
+      if (!el && it.kind !== "radio" && it.kind !== "checkbox") { unrendered.push(it); continue; }   // not rendered (yet)
       if (el && (it.kind === "text" || it.kind === "textarea") && clean(el.value)) continue;  // prefilled
       if (it.kind === "location" && !el) continue;
       if (el && (it.kind === "select" || it.kind === "combobox") && (comboCommitted(el) || (clean(el.value) && (it.options || []).some((o) => norm(o) === norm(el.value))))) continue;
@@ -1616,6 +1625,16 @@
         if (ok) { rows.push([label, isReview ? "review" : "filled", shownVal.slice(0, 60)]); isReview ? out.review++ : out.filled++; }
         else { rows.push([label, "skip", "couldn't set '" + shownVal.slice(0, 30) + "' -> you"]); out.skipped++; }
       } catch (e) { rows.push([label, "skip", "error: " + String(e).slice(0, 40)]); out.skipped++; }
+    }
+    // Conditional fields that render only after an earlier answer (Greenhouse Race after
+    // Hispanic/Latino = No): one more pass over the ones that have appeared since.
+    if (!_late && unrendered.length) {
+      await sleep(400);
+      const now = unrendered.filter((it) => _adEl(it));
+      if (now.length) {
+        const r2 = await adapterFill(now, rows, true);
+        out.filled += r2.filled; out.review += r2.review; out.skipped += r2.skipped;
+      }
     }
     return out;
   }
