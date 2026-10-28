@@ -68,7 +68,7 @@ def _enrich(existing, j):
     nd = j.get("desc") or ""
     if nd and len(nd) > len(existing.get("desc") or ""):
         existing["desc"] = nd; changed = True
-    for k in ("posted", "location", "workplace", "salary", "apply_url", "ats_id", "board", "remote", "remote_hint"):
+    for k in ("posted", "location", "workplace", "salary", "apply_url", "ats_id", "board", "remote", "remote_hint", "job_type"):
         v = j.get(k)
         if v not in (None, "") and not existing.get(k):
             existing[k] = v; changed = True
@@ -232,7 +232,7 @@ def add_discovered(jobs):
                    "source": j.get("source", "discovery"),
                    "score": j.get("score"), "discovered_at": today}
             for k in ("posted", "location", "workplace", "salary", "desc",
-                      "apply_url", "ats_id", "board", "remote", "remote_hint"):
+                      "apply_url", "ats_id", "board", "remote", "remote_hint", "job_type"):
                 if j.get(k) is not None and j.get(k) != "":
                     row[k] = j[k]
             q.append(row)

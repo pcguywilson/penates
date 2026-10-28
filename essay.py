@@ -118,6 +118,11 @@ def parse_constraints(question, limit=None):
         if m: c["min_words"] = int(m.group(1))
         m = re.search(r"(?:under|below|no more than|max(?:imum)?(?: of)?|fewer than|up to|less than)\s*(\d{2,4})\s*words", q)
         if m: c["max_words"] = int(m.group(1))
+    # "maximum 1000 characters" / "500 characters max" in the question text
+    if not c["max_chars"]:
+        m = (re.search(r"(?:max(?:imum)?|up to|no more than|under|limit(?:ed)? (?:of|to)|less than)\s*(?:of\s*)?(\d{2,5})\s*char", q)
+             or re.search(r"(\d{2,5})\s*char(?:acter)?s?\s*(?:max(?:imum)?|limit|or less|or fewer)", q))
+        if m: c["max_chars"] = int(m.group(1))
     # char cap from a "words" range dominates the popup maxlength if both present
     if c["max_words"] and not c["max_chars"]:
         c["max_chars"] = int(c["max_words"] * 6.5)
@@ -130,8 +135,8 @@ _GENRE_RULES = [
     ("why_role",     r"why this (position|role|job)|why (are you interested in )?(this )?(devops|sre|cloud|platform|the) (role|position)|why do you want this (role|position|job)"),
     ("hypothetical", r"what would you build(?!.{0,40}\b(relationship|rapport|manager|culture)\b)|how (would you|you would) handle (a |an |the )?(sev|incident|outage|page)|if you (were|had|could|got)|imagine (you|that)|suppose you|given (a|the).{0,20}(month|week|opportunity|chance)|spend a (month|week|day)|how would you (design|build|approach|architect)|greenfield|from scratch, what|blue ?sky"),
     ("behavioral",   r"influenc\w+|disagree\w*|convince|persuad\w+|conflict|push(ed)? ?back|difficult (person|co-?worker|colleague|teammate|customer|client|manager|boss|conversation|stakeholder)|had to (get|win|bring|convince|persuade|talk)|build(ing)? consensus|align(ing|ed)? (a |the )?(team|group|stakeholders|people)|work(ed)? with (a )?(difficult|resistant)|handl\w+ (a )?(disagreement|conflict)|gave (someone )?(difficult|hard|critical) feedback"),
-    ("owned_project",r"describe (a|an|the|your)\b(?!.{0,24}\b(ideal|type of|kind of|sort of|desired|preferred|dream)\b).{0,80}\b(project|situation|example|incident|outage|migration|solution|system|platform)\b|describe (a|an|one)\b time (when|you)\b|describe (one|an)\b.{0,50}\byou\b.{0,30}\b(built|led|owned|designed|implemented|fixed|solved|migrated|automated|maintained|handled)\b|\b(explain|talk about) a time (when|you)\b|describe (any|some)\b.{0,40}\bexperience\b|\byou\b.{0,20}\b(identified|resolved|fixed|solved|delivered|handled|shipped|reduced|improved|found and fixed)\b|tell (us|me)(?: \w+ly)? about (a|an|the|your)\b(?!self\b).{0,40}\b(time|project|situation|example|incident|outage|system|migration|issue|problem)\b|most (complex|challenging|difficult|impactful)|(a|one) (project|time|situation) (you|where you)|walk (us|me) through (a|an|the|your)\b.{0,50}\b(project|migration|incident|outage|system|design|architecture|deployment|time|achievement|accomplishment)\b|\bproudest\b|\bmost proud of\b|\b(biggest|greatest|top|proudest) (professional )?(achievement|accomplishment)|you (personally )?(owned|led|built|architected)|give (us|me) an example of (a|an|the|your)\b|share an? (specific|concrete|real) example\b|share an example of (a|an|the|your)\b.{0,50}\b(project|time|incident|outage|situation|migration|system)\b|(?<!how many )(what|which|how).{0,80}have you(?: ever| personally)? (set up|built|maintained|implemented|configured|automated|designed|deployed|migrated|improved|owned|contributed|managed|debugged|planned|shifted)"),
-    ("technical_experience", r"^\s*(hands-on|practical|professional|production)\s+[\w./+#-]+(\s+[\w./+#-]+){0,3}\s+experience\s*\??\s*$|what is your (hands-on |practical |professional |production )?experience\b|what experience do you have|do you have (any )?experience (with|in|using|building|running)\b|(tell (us|me) about |share |describe |outline )?your experience\b|have you (ever )?used\b|have you worked with\b|\bhave you (ever |personally )?(set up|built|maintained|implemented|configured|automated|designed|deployed|migrated|managed|debugged)\b|describe your\b(?!.{0,24}\b(ideal|desired|preferred|dream|type of|kind of)\b).{0,30}\b(patching|deployment|release|backup|monitoring|incident|change management|ci/?cd|testing)\b|what is your background (in|with)\b|do you have experience (with|in)\b|describe your .{0,30}experience|how (do|have) you (use|used)|rate your (experience|proficiency|familiarity|skill)|proficiency (with|in)|how familiar are you|level of (hands-on )?experience|walk (us|me) through your\b.{0,40}\bexperience\b|how (do|did) you (approach|find and fix|fix|resolv\w*|design|handle (an? |the )?(incident|outage|production|sev|page|alert|failure|migration|deploy)|implement|shift|migrat\w*)\b"),
+    ("owned_project",r"describe (a|an|the|your)\b(?!\s+(\w+\s+)?experience\b)(?!.{0,24}\b(ideal|type of|kind of|sort of|desired|preferred|dream)\b).{0,80}\b(project|situation|example|incident|outage|migration|solution|system|platform)\b|describe (a|an|one)\b time (when|you)\b|describe (one|an)\b.{0,50}\byou\b.{0,30}\b(built|led|owned|designed|implemented|fixed|solved|migrated|automated|maintained|handled)\b|\b(explain|talk about) a time (when|you)\b|describe (any|some)\b.{0,40}\bexperience\b|\byou\b.{0,20}\b(identified|resolved|fixed|solved|delivered|handled|shipped|reduced|improved|found and fixed)\b|tell (us|me)(?: \w+ly)? about (a|an|the|your)\b(?!self\b).{0,40}\b(time|project|situation|example|incident|outage|system|migration|issue|problem)\b|most (complex|challenging|difficult|impactful)|(a|one) (project|time|situation) (you|where you)|walk (us|me) through (a|an|the|your)\b.{0,50}\b(project|migration|incident|outage|system|design|architecture|deployment|time|achievement|accomplishment)\b|\bproudest\b|\bmost proud of\b|\b(biggest|greatest|top|proudest) (professional )?(achievement|accomplishment)|you (personally )?(owned|led|built|architected)|give (us|me) an example of (a|an|the|your)\b|share an? (specific|concrete|real) example\b|share an example of (a|an|the|your)\b.{0,50}\b(project|time|incident|outage|situation|migration|system)\b|(?<!how many )(what|which|how).{0,80}have you(?: ever| personally)? (set up|built|maintained|implemented|configured|automated|designed|deployed|migrated|improved|owned|contributed|managed|debugged|planned|shifted)"),
+    ("technical_experience", r"have you been (directly |personally )?responsible for\b|describe your role and responsibilities|^\s*(hands-on|practical|professional|production)\s+[\w./+#-]+(\s+[\w./+#-]+){0,3}\s+experience\s*\??\s*$|what is your (hands-on |practical |professional |production )?experience\b|what experience do you have|do you have (any )?experience (with|in|using|building|running)\b|(tell (us|me) about |share |describe |outline )?your experience\b|have you (ever )?used\b|have you worked with\b|\bhave you (ever |personally )?(set up|built|maintained|implemented|configured|automated|designed|deployed|migrated|managed|debugged)\b|describe your\b(?!.{0,24}\b(ideal|desired|preferred|dream|type of|kind of)\b).{0,30}\b(patching|deployment|release|backup|monitoring|incident|change management|ci/?cd|testing)\b|what is your background (in|with)\b|do you have experience (with|in)\b|describe your .{0,30}experience|how (do|have) you (use|used)|rate your (experience|proficiency|familiarity|skill)|proficiency (with|in)|how familiar are you|level of (hands-on )?experience|walk (us|me) through your\b.{0,40}\bexperience\b|how (do|did) you (approach|find and fix|fix|resolv\w*|design|handle (an? |the )?(incident|outage|production|sev|page|alert|failure|migration|deploy)|implement|shift|migrat\w*)\b"),
     ("definition",   r"what does .{0,30}mean to you|what does it mean to\b|(what|how) would you define\b|how do you define|what is your definition|what do you (understand|think).{0,20}means"),
 ]
 # Inventory / list questions ("which AWS services / what tools have you used") must enumerate the
@@ -154,7 +159,7 @@ _PRACTICE_RE = re.compile(r"\b(testing|test suite|synthetic monitoring|integrati
 # off, schedule, pay, preferences, "anything else") is "other" -> no essay, left for review.
 # History: an unmatched question used to default to owned_project, so "Please list any upcoming
 # time off" got the Wazuh story (2026-10-01). Never default into a story again.
-# Rules (design board seq 102-103):
+# Rules (board seq 102-103):
 #   - a story genre from a POSITIVE RULE is trusted unless the question is logistics (intent
 #     phrases only, never bare tokens like "rate"/"shift"/"source") without a narrative override;
 #   - a story or why_* genre picked by the LLM needs its own narrow cue, else "other";
@@ -746,7 +751,7 @@ _WHY_FRAMES = [
 
 
 def _why_candidate_only(facts, c, target_role=None, company=None, job_text=""):
-    """Deterministic why-company floor, v2 (design board seq 98, 2026-09-30).
+    """Deterministic why-company floor, v2 (board seq 98, 2026-09-30).
     (1) optional company-focus sentence, only when >=2 domain themes hit; the top theme by count,
         stated as the posting's focus, never 'same ground I cover';
     (2) ONE owned sentence from canonical_stories/signature_projects with the most overlap with the
@@ -781,7 +786,7 @@ def _why_candidate_only(facts, c, target_role=None, company=None, job_text=""):
                 have = _sk.canon_skills_in(text) & set(matched)
                 n = len(have) + len(have & req)                 # required skills count double
                 if top_rx and top_rx.search(text + " " + dom):
-                    n += 3                                      # an identity-focused posting once got an unrelated cloud line
+                    n += 3                                      # Baseten 10-21: identity role got the AWS line
                 if n > best_n:
                     best, best_n = (kind, text), n
             if best:
@@ -947,6 +952,11 @@ _SUBJECTS = [
     ("Terraform", r"\bterraform\b|\biac\b|infrastructure as code", ["terraform", "iac"]),
     ("Linux", r"\blinux\b|\brhel\b", ["linux", "rhel", "rocky linux"]),
     ("Windows", r"\bwindows\b", ["windows", "windows server"]),
+    ("incident response", r"\bincidents?\b|\boutages?\b|root cause|\brca\b|problem management|production support|troubleshoot",
+     ["incident", "outage", "root cause", "troubleshooting"]),
+    ("observability", r"\bobservability\b|\bmonitoring\b|\balerting\b|\bsiem\b", ["observability", "security monitoring", "siem"]),
+    ("backup and recovery", r"\bbackups?\b|disaster recovery|\bdr\b|\brestores?\b|\brecovery\b", ["backup", "restore", "recovery"]),
+    ("resiliency", r"\bresilien\w*|high availability|zero[- ]downtime|operational readiness|\bredundan\w*", ["zero downtime", "reliability"]),
 ]
 _AI_TOOLS_RE = re.compile(r"\b(ai|llm|genai)\s+tools?\b|\busing ai\b|\bai[- ]assisted\b", re.I)
 
@@ -1020,14 +1030,30 @@ def build_multi_prompt(question, c, pairs):
     user = "QUESTION:\n%s\n\n%s\n\nAnswer:" % (question, "\n\n".join(blocks))
     return sysp, user
 
+def _hero_sentence(st):
+    h = re.sub(r"\s+", " ", str(st.get("hero") or "")).strip().rstrip(".")
+    if not h:
+        return ""
+    w = h.split(" ", 1)
+    if re.match(r"^[A-Z][a-z]+$", w[0]) and not w[0].endswith("s") or re.match(r"^[A-Z][a-z]+(ed|lt|nt|ran|ought|ade|ept|ound)$", w[0]):
+        first = w[0] if w[0] in _proper_nouns() else w[0].lower()
+        h = "I " + first + (" " + w[1] if len(w) > 1 else "")
+    return h + "."
+
 def _compose_multi(pairs):
+    """One block per story, in question order, built only from that story's own summary and
+    result. Facts never move between stories (10-22: a model merge put an Azure project in AWS
+    and attached one job's release process to another tool)."""
     seen, parts = set(), []
     for _subj, st in pairs:
         if st is None or st.get("id") in seen:
             continue
         seen.add(st["id"])
         s = st.get("star") or {}
-        parts.append(" ".join(x.strip() for x in (s.get("action", ""), s.get("result", "")) if x))
+        hero = _hero_sentence(st)
+        res = re.sub(r"\s+", " ", str(s.get("result") or "")).strip()
+        body = hero or re.sub(r"\s+", " ", str(s.get("action") or "")).strip()
+        parts.append(" ".join(x if x.endswith((".", "!", "?")) else x + "." for x in (body, res) if x))
     return " ".join(p for p in parts if p)
 
 def story_topic_hits(question, story):
@@ -1276,7 +1302,7 @@ def validate(text, genre, c, gaps, facts=None, current_title=None, target_role=N
     return fails
 
 # ---------------------------------------------------------------- why-company v3
-# design board seq 100-101 (2026-09-30). The MODEL reasons, code keeps it honest:
+# board seq 100-101 (2026-09-30). The MODEL reasons, code keeps it honest:
 #   SELECT (JSON, temp 0): pick by INDEX the posting sentence that describes the company/team/
 #          environment, two posting needs, and one evidence id per need. Code resolves the text.
 #   WRITE  (temp 0.3): 4 sentences from ONLY the selection. Gates + grounded-token check.
@@ -1667,7 +1693,7 @@ def _answer_essay(question, limit=None, company=None, url=None, model=None, want
         cite = gstory if (gscore is not None and gscore >= 1 and story_topic_hits(q, gstory) >= 1) else None
         # Closest real work for a gap tool: a build/CI tool cites the CI/CD story, a cloud cites the
         # AWS story. With no tagged analog and no topic overlap, cite nothing (2026-10-16: Bazel and
-        # Jenkins cited an unrelated security-monitoring story on the owned bonus alone).
+        # Jenkins cited the Wazuh SIEM story on the owned bonus alone).
         ql = q.lower()
         for rx, subj in _GAP_ANALOG:
             if re.search(rx, ql):
@@ -1696,7 +1722,9 @@ def _answer_essay(question, limit=None, company=None, url=None, model=None, want
             for _, st in pairs:
                 if st and st["id"] not in ids:
                     ids.append(st["id"])
-            if _a.ollama_up():
+            # Default: deterministic, one block per story (facts never cross stories). The model
+            # rewrite runs only on a per-field Regenerate.
+            if regen_prev and _a.ollama_up():
                 sysp, user = build_multi_prompt(q, c, pairs)
                 out = _a.ollama(user, sysp, temperature=0.3, model=model or _a.ESSAY_MODEL).strip().strip('"')
                 out = re.sub(r"\b(Situation|Task|Action|Result)\s*:\s*", "", out)
@@ -1709,16 +1737,16 @@ def _answer_essay(question, limit=None, company=None, url=None, model=None, want
                 meth = "multi"
             else:
                 text = _no_dash(_a.enforce_length(_compose_multi(pairs), {}, c.get("max_chars") or 900, False).strip())
-                fails = ["ollama_offline"]
-                meth = "multi-offline"
+                fails = []
+                meth = "multi-stories"
             fails = fails + checks
             return {"ok": True, "kind": "answer", "method": ("review:" if fails else "essay:") + meth,
                     "genre": genre, "grounding": "stories", "story": ",".join(ids),
                     "subjects": [sj for sj, _ in pairs], "chars": len(text), "words": _wordcount(text),
-                    "gaps": missing, "review": bool(fails), "checks": fails, "text": text}
+                    "gaps": missing, "review": True, "checks": fails, "text": text}   # essays are always read before submit
 
     # Proudest achievement: the user's stated answer (answers.yaml built_unprompted), plus a role tie
-    # only from themes BOTH the answer and the posting name. The template used to ignore
+    # only from themes BOTH the answer and the posting name. Baseten 10-21: the template ignored
     # "and how it relates to the role you are applying for".
     if _PROUDEST_RE.search(q):
         base = ""

@@ -261,9 +261,16 @@ tr.jobrow:hover .icon,.icon:focus-visible{opacity:1}
     <div class="stats" id="stats"></div>
     <div class="toolbar">
       <input type="search" id="q" placeholder="Filter by company, role, ATS...">
-      <fieldset class="fgroup"><legend>Location</legend>
-        <label class="toggle"><input type="checkbox" id="fRemote" checked> Remote only</label>
+      <fieldset class="fgroup"><legend>Workplace type</legend>
+        <label class="ftchk" title="Listings that are remote and do not say hybrid"><input type="checkbox" id="wpRemote" checked> Remote</label>
+        <label class="ftchk" title="Listings that say hybrid"><input type="checkbox" id="wpHybrid"> Hybrid</label>
+        <label class="ftchk"><input type="checkbox" id="wpOnsite"> Onsite</label>
         <label class="ftchk" title="Also show jobs with no location and no remote or on-site wording"><input type="checkbox" id="fUnknown"> Include unknown</label>
+      </fieldset>
+      <fieldset class="fgroup"><legend>Job type</legend>
+        <select id="fJobType" title="Unknown types show under Full-time"><option value="">All</option><option value="full_time">Full-time</option><option value="contract">Contract</option></select>
+      </fieldset>
+      <fieldset class="fgroup"><legend>Location</legend>
         <label class="toggle"><input type="checkbox" id="fUS" checked> US only</label>
       </fieldset>
       <label class="ftchk">Min $ <input type="number" id="fSalary" min="0" step="5000" placeholder="0"></label>
@@ -586,10 +593,10 @@ function markSeen(url){
 }
 function rankedUrl(){
   const p=new URLSearchParams();
-  if($('fRemote')&&$('fRemote').checked){
-    p.set('remote_only','1');
-    if($('fUnknown')&&$('fUnknown').checked) p.set('include_unknown','1');
-  }
+  const wp=[['wpRemote','remote'],['wpHybrid','hybrid'],['wpOnsite','onsite']].filter(([id])=>$(id)&&$(id).checked).map(x=>x[1]);
+  if(wp.length && wp.length<3) p.set('workplace',wp.join(','));
+  if($('fUnknown')&&$('fUnknown').checked) p.set('include_unknown','1');
+  const jt=$('fJobType')&&$('fJobType').value; if(jt) p.set('job_type',jt);
   if($('fUS')&&$('fUS').checked) p.set('us_only','1');
   const sm=parseInt(($('fSalary')&&$('fSalary').value)||'0',10);
   if(sm>0) p.set('salary_min',String(sm));
@@ -626,6 +633,10 @@ function scoreTieDesc(a,b){
   return bs-as;
 }
 function locText(j){
+  const tag=(j.workplace==='hybrid'?' · Hybrid':j.workplace==='onsite'?' · Onsite':'')+(j.job_type==='contract'?' · Contract':j.job_type==='part_time'?' · Part-time':'');
+  return locBase(j)+tag;
+}
+function locBase(j){
   if(j.remote_status==='unknown'){
     const L=(j.location||'').trim();
     return (!L || /^(remote|anywhere|us|usa|united states|u\.s\.?|america)$/i.test(L)) ? 'Unknown' : L+' (unknown)';
@@ -663,10 +674,10 @@ function jobRowHtml(j, opt){
   const sc=n===null?'<td class="sc"></td>':`<td class="sc">${n>=65?'<span class="dot m" title="match"></span>':''}${n}</td>`;
   let co=j.company?esc(j.company):'<span class="muted">(unknown)</span>';
   if(opt.head && opt.extra>0){
-    co+=` <button class="grp exp" data-key="${esc(opt.key)}" title="${opt.open?'Collapse':'Show'} ${opt.extra} more role${opt.extra>1?'s':''}">${opt.open?'\u2212 less':'+'+opt.extra+' more'}</button>`;
+    co+=` <button class="grp exp" data-key="${esc(opt.key)}" title="${opt.open?'Collapse':'Show'} ${opt.extra} more role${opt.extra>1?'s':''}">${opt.open?'\u2212 less':'+'+opt.extra+' more'+(opt.newCount?' \u00b7 '+opt.newCount+' new':'')}</button>`;
   }
   const hideBtn=(opt.head&&opt.key)?`<button class="icon hide-emp" data-key="${esc(opt.key)}" title="Hide this employer" aria-label="Hide this employer"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="2"/><path d="M2.5 13.5 13.5 2.5"/></svg></button>`:'<span class="icon" aria-hidden="true" style="visibility:hidden"></span>';
-  const nw=isNew(j)||!!opt.anyNew, seen=!!j.seen_at;
+  const nw=isNew(j), seen=!!j.seen_at;   // NEW only on the role that is new (a collapsed group says "N new" on its button)
   return `<tr class="jobrow ${ap?'applied':''} ${seen?'viewed':''} ${opt.head?'':'sib'}" data-url="${esc(j.apply)}" data-key="${esc(opt.key)}">
       ${sc}
       <td class="co">${co}</td>
@@ -693,8 +704,12 @@ function render(){
   // Groups sort by their best member under the CURRENT sort, not by the head row: a company with
   // an old head and a NEW sibling (Jobgether, Lambda, GDIT 10-22) sorted with its old rows and the
   // new role landed far below the fold.
-  const list=[...groups.entries()].map(([k,members])=>({k, members, head:pickHead(members),
-                                                         rep:members.slice().sort(cmpJobs)[0]}));
+  // Sorting by date: the row shown for a company is its newest role, so the date on screen is the
+  // date the list is sorted by. Sorting by score keeps the best-scoring role as the head.
+  const list=[...groups.entries()].map(([k,members])=>{
+    const rep=members.slice().sort(cmpJobs)[0];
+    return {k, members, rep, head: sortKey==='score' ? pickHead(members) : rep};
+  });
   list.sort((a,b)=>cmpJobs(a.rep, b.rep));
   const roles=list.reduce((n,g)=>n+g.members.length,0);
   $('count').textContent=list.length+' employers \u00b7 '+roles+' roles';
@@ -702,9 +717,9 @@ function render(){
   const html=[];
   list.forEach(g=>{
     const sibs=g.members.filter(j=>j!==g.head).sort(cmpJobs);
-    const sibNew=sibs.some(isNew);
+    const sibNewN=sibs.filter(isNew).length, sibNew=sibNewN>0;
     const open=!!q || EXPANDED.has(g.k) || (sibNew && !COLLAPSED.has(g.k));
-    html.push(jobRowHtml(g.head, {head:true, key:g.k, extra:sibs.length, open, anyNew:sibNew}));
+    html.push(jobRowHtml(g.head, {head:true, key:g.k, extra:sibs.length, open, newCount:sibNewN}));
     if(open) sibs.forEach(j=>html.push(jobRowHtml(j, {head:false, key:g.k})));
   });
   $('rows').innerHTML=html.join('');
@@ -753,8 +768,10 @@ function openDrawer(j){
   const scN=scoreNum(j);
   if(scN!==null)chips.push(['Score',scN]);
   if(j.posted)chips.push(['Posted',postedFmt(j.posted)]);
-  chips.push(['Location',locText(j)]);
-  if(j.workplace&&j.workplace!==j.location)chips.push(['',j.workplace]);
+  chips.push(['Location',locBase(j)]);
+  const WPL={remote:'Remote',hybrid:'Hybrid',onsite:'Onsite',unknown:'Workplace unknown'}, JTL={full_time:'Full-time',contract:'Contract',part_time:'Part-time'};
+  if(j.workplace) chips.push(['Workplace',WPL[j.workplace]||j.workplace]);
+  if(j.job_type && JTL[j.job_type]) chips.push(['Type',JTL[j.job_type]]);
   if(j.salary)chips.push(['',j.salary]);
   if(j.ats)chips.push(['ATS',j.ats]);
   if(j.closed_reason)chips.push(['Closed',j.closed_reason]);
@@ -788,10 +805,12 @@ async function mark(b){ b.disabled=true;b.textContent='...';
 }
 $('q').oninput=render;
 try{ const u=$('fUnknown'); if(u) u.checked=localStorage.getItem('penates.includeUnknown')==='1'; }catch(e){}
-function syncUnknown(){ const u=$('fUnknown'), r=$('fRemote'); if(u&&r){ u.disabled=!r.checked; u.parentElement.style.opacity=r.checked?'1':'.45'; } }
-syncUnknown(); if($('fRemote')) $('fRemote').addEventListener('change',syncUnknown);
-['fRemote','fUS','fClosed','fUnknown'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',()=>{
+try{ const w=JSON.parse(localStorage.getItem('penates.workplace')||'null'); if(Array.isArray(w)) [['wpRemote','remote'],['wpHybrid','hybrid'],['wpOnsite','onsite']].forEach(([id,k])=>{ if($(id)) $(id).checked=w.includes(k); }); }catch(e){}
+try{ const t=localStorage.getItem('penates.jobType'); if(t!==null && $('fJobType')) $('fJobType').value=t; }catch(e){}
+['wpRemote','wpHybrid','wpOnsite','fUS','fClosed','fUnknown','fJobType'].forEach(id=>{const el=$(id); if(el) el.addEventListener('change',()=>{
   if(id==='fUnknown'){ try{ localStorage.setItem('penates.includeUnknown',el.checked?'1':'0'); }catch(e){} }
+  if(/^wp/.test(id)){ try{ localStorage.setItem('penates.workplace',JSON.stringify([['wpRemote','remote'],['wpHybrid','hybrid'],['wpOnsite','onsite']].filter(([i])=>$(i).checked).map(x=>x[1]))); }catch(e){} }
+  if(id==='fJobType'){ try{ localStorage.setItem('penates.jobType',el.value); }catch(e){} }
   loadJobs();
 });});
 (function(){const el=$('fHideSeen'); if(!el) return;

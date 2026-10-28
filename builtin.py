@@ -84,14 +84,17 @@ def _card_meta(card, icon):
 def _geo(r):
     """(location, workplace, remote, keep) for a parsed card. Drops onsite/hybrid-only and
     explicit non-US locations at scan time so they never enter the store."""
-    wp_raw = (r.get("workplace") or "").lower()
+    wp_text = (r.get("workplace") or "").strip()
+    wp_raw = wp_text.lower()
     loc = r.get("location") or ""
     if re.match(r"^\d+ locations?$", loc, re.I):
         loc = ""
+    # Keep the badge text. "Remote or Hybrid" must not collapse to "Remote".
+    # Pure onsite/hybrid (no "remote") still drops (keep=False).
     if "remote" in wp_raw:
-        wp, remote = "Remote", True
+        wp, remote = wp_text, True
     elif wp_raw:
-        return loc, wp_raw.title(), False, False
+        return loc, wp_text, False, False
     else:
         wp, remote = None, None
     if loc:
@@ -124,9 +127,8 @@ def _parse(html, include_easy=False):
     return out
 
 
-def _desc_from_html(page):
-    """Extract (plaintext_description, truncated) from a builtin job page's schema.org
-    JobPosting JSON-LD. Returns ('', False) if no JobPosting.description is found."""
+def _jobposting_node(page):
+    """First schema.org JobPosting node on a builtin job page, or None."""
     # builtin HTML-entity-encodes the + in the type attr (application/ld&#x2B;json), so match
     # +, &#x2B; or &#43; between 'ld' and 'json'.
     for m in re.finditer(r'<script[^>]*application/ld(?:\+|&#x2b;|&#43;)json[^>]*>(.*?)</script>', page, re.S | re.I):
@@ -141,12 +143,38 @@ def _desc_from_html(page):
         else:
             nodes = [data]
         for node in nodes:
-            if isinstance(node, dict) and node.get("@type") == "JobPosting" and node.get("description"):
-                txt = BeautifulSoup(node["description"], "html.parser").get_text("\n")
-                txt = re.sub(r"[ \t\xa0]+", " ", txt)
-                txt = re.sub(r"\n[ \t]*\n[ \t]*\n+", "\n\n", txt).strip()
-                return txt[:DESC_CAP], len(txt) > DESC_CAP
-    return "", False
+            if isinstance(node, dict) and node.get("@type") == "JobPosting":
+                return node
+    return None
+
+
+def _employment_job_type(node):
+    """JSON-LD employmentType -> full_time|part_time|contract, or ''."""
+    if not isinstance(node, dict) or not node.get("employmentType"):
+        return ""
+    try:
+        import serve
+        return serve._stored_job_type(node.get("employmentType"))
+    except Exception:
+        return ""
+
+
+def _desc_from_html(page):
+    """(plaintext_description, truncated, job_type) from JobPosting JSON-LD.
+
+    job_type is '' when employmentType is missing. Description may be empty
+    while employmentType is still returned.
+    """
+    node = _jobposting_node(page)
+    if not node:
+        return "", False, ""
+    jt = _employment_job_type(node)
+    if not node.get("description"):
+        return "", False, jt
+    txt = BeautifulSoup(node["description"], "html.parser").get_text("\n")
+    txt = re.sub(r"[ \t\xa0]+", " ", txt)
+    txt = re.sub(r"\n[ \t]*\n[ \t]*\n+", "\n\n", txt).strip()
+    return txt[:DESC_CAP], len(txt) > DESC_CAP, jt
 
 
 def _job_desc(s, job_url):
@@ -158,8 +186,8 @@ def _job_desc(s, job_url):
             return "", False, "http:%d" % r.status_code
     except Exception as e:
         return "", False, "err:%s" % str(e)[:40]
-    desc, trunc = _desc_from_html(r.text)
-    return desc, trunc, ("ok" if desc else "nojd")
+    desc, trunc, jt = _desc_from_html(r.text)
+    return desc, trunc, ("ok" if desc else "nojd"), jt
 
 
 def _backfill_desc(s):
@@ -170,12 +198,14 @@ def _backfill_desc(s):
     print("Backfilling JD for %d builtin rows with no description...\n" % len(targets))
     got = 0; notes = {}
     for i, r in enumerate(targets, 1):
-        desc, trunc, note = _job_desc(s, (r.get("url") or "").split("?")[0])
+        desc, trunc, note, jt = _job_desc(s, (r.get("url") or "").split("?")[0])
         notes[note.split(":")[0]] = notes.get(note.split(":")[0], 0) + 1
         if desc:
             r["desc"] = desc
             r["desc_truncated"] = bool(trunc)
             got += 1
+        if jt and not r.get("job_type"):
+            r["job_type"] = jt
         if i % 15 == 0:
             jobs_store.save(d); print("  ...%d/%d saved (%d filled) so far: %s" % (i, len(targets), got, notes))
         time.sleep(0.4)
@@ -271,12 +301,14 @@ def main():
     fresh = [r for r in batch if jobs_store._norm_url(r["url"]) not in existing]
     got = 0
     for r in fresh:
-        desc, trunc, _note = _job_desc(s, r["url"])
+        desc, trunc, _note, jt = _job_desc(s, r["url"])
         if desc:
             r["desc"] = desc
             if trunc:
                 r["desc_truncated"] = True
             got += 1
+        if jt:
+            r["job_type"] = jt
         time.sleep(0.4)
     if fresh:
         print("  fetched JD for %d/%d new postings" % (got, len(fresh)))

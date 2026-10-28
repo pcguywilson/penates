@@ -82,6 +82,8 @@ def discover(terms, results, hours, sites, include_easy=False):
                 continue
             desc = _clean(r.get("description"))
             # is_remote is a hint only — never stamp workplace=Remote from it.
+            # job_type is stored when JobSpy has one (fulltime/contract/parttime).
+            # internship maps to part_time. Read-time classification still runs.
             row = {"url": url, "company": _clean(r.get("company")),
                    "role": title[:120], "source": "jobspy:" + site,
                    "posted": _clean(r.get("date_posted")),
@@ -89,6 +91,9 @@ def discover(terms, results, hours, sites, include_easy=False):
                    "workplace": "",
                    "salary": _salary(r),
                    "desc": desc[:DESC_CAP]}
+            jt = _serve._stored_job_type(r.get("job_type"))
+            if jt:
+                row["job_type"] = jt
             if r.get("is_remote"):
                 row["remote_hint"] = True
             if len(desc) > DESC_CAP:

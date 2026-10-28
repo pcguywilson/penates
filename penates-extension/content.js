@@ -12,7 +12,7 @@
 (() => {
   if (window.__penatesInit) return;   // avoid double-init (content_scripts + on-demand inject)
   window.__penatesInit = true;
-  const PENATES_BUILD = "build 59";   // shown in the report header; if you don't see it after a reload, the extension didn't update
+  const PENATES_BUILD = "build 60";   // shown in the report header; if you don't see it after a reload, the extension didn't update
   const IS_TOP = window.top === window;
   // The content script is injected only on ATS hosts (manifest matches). When an ATS application
   // form is EMBEDDED as a cross-origin iframe inside a company careers page (e.g. a Greenhouse
@@ -717,6 +717,26 @@
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  // Character cap for a text box: maxlength, else a visible counter next to it ("1063/1000",
+  // "0 / 500 characters"), else "maximum 1000 characters" in the box's own label text.
+  function charLimit(el) {
+    if (!el) return null;
+    if (el.maxLength && el.maxLength > 0 && el.maxLength < 100000) return el.maxLength;
+    let n = el.parentElement, h = 0;
+    while (n && h < 3) {
+      for (const c of n.children) {
+        if (c === el || c.contains(el)) continue;
+        const t = clean(c.textContent || "");
+        const m = t.length <= 40 && t.match(/^\d{1,5}\s*\/\s*(\d{2,5})(\s*(characters?|chars?))?(\s*(left|remaining|max))?$/i);
+        if (m) return parseInt(m[1], 10);
+      }
+      n = n.parentElement; h++;
+    }
+    const q = questionFor(el) || "";
+    const m2 = q.match(/(?:max(?:imum)?|up to|no more than|under|limit(?:ed)? (?:of|to)|less than)\s*(?:of\s*)?(\d{2,5})\s*char/i)
+            || q.match(/(\d{2,5})\s*char(?:acter)?s?\s*(?:max(?:imum)?|limit|or less|or fewer)/i);
+    return m2 ? parseInt(m2[1], 10) : null;
+  }
   function isCombobox(el) {
     if (!el || el.tagName !== "INPUT") return false;
     if ((el.getAttribute("role") || "") === "combobox") return true;
@@ -1565,7 +1585,7 @@
     setReport("Answering " + todo.length + " questions in one batch...", rows);
     const batch = await askEngineBatch(todo.map((it) => ({ q: it.kind === "location" ? "Current location" : it.q,
       kind: it.kind === "location" ? "text" : it.kind, options: it.options, required: it.required,
-      limit: it.el && it.el.maxLength > 0 ? it.el.maxLength : null })), 90000);
+      limit: charLimit(it.el) })), 90000);
     const answers = (batch && !batch.__error && Array.isArray(batch.answers)) ? batch.answers : [];
     if (!answers.length) { rows.push(["Answer engine", "skip", (batch && batch.__error) || "no batch answers"]); }
     let i = 0;
@@ -1577,7 +1597,7 @@
         let text = (a && a.ok !== false) ? String(a.text || "").trim() : "";
         // Required long textarea that the fast batch deferred: draft it now (local model), review.
         if (!text && it.kind === "textarea" && it.required && a && a.method === "essay-skip") {
-          const d = await askEngine(it.q, it.el && it.el.maxLength > 0 ? it.el.maxLength : null, false, 60000, false);
+          const d = await askEngine(it.q, charLimit(it.el), false, 60000, false);
           if (d && !d.__error && d.text) { text = String(d.text).trim(); a.method = d.method || "essay"; a.review = true; }
         }
         if (!text) { rows.push([label, "skip", (it.required ? "required, " : "") + "no answer -> you"]); out.skipped++; continue; }
@@ -1866,7 +1886,7 @@
           // A STAR story is not a cover letter. Never auto-write this box.
           rows.push([q.slice(0, 60), "skip", _fieldRequired(el) ? "cover letter required -> dashboard Cover" : "cover letter optional -> left blank"]); skipped++; continue;
         }
-        const limit = el.maxLength && el.maxLength > 0 ? el.maxLength : null;
+        const limit = charLimit(el);
         let data = await askCached(q, limit, false, 40000, true);
         if (data && data.method === "essay-skip") {
           // Essays are skipped in the fast batch so it never blocks on a 20s draft. Draft this
@@ -2479,7 +2499,7 @@
     if (!currentQuestion) { setMeta("Click the question on the page, or type it in the box above.", true); return; }
     stopPick();
     setCardBusy(true, fresh ? "Regenerating..." : "Drafting a local answer...");
-    const limit = currentEl && currentEl.maxLength && currentEl.maxLength > 0 ? currentEl.maxLength : null;
+    const limit = charLimit(currentEl);
     const prevDraft = fresh && !qChanged && els.text ? (els.text.value || "").trim() : "";
     const data = await askEngine(currentQuestion, limit, fresh, undefined, false, null, prevDraft);
     setCardBusy(false);

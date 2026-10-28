@@ -412,6 +412,60 @@ class EmployerKey(unittest.TestCase):
             # Amenity text must not trip the on-site negative either.
             self.assertIsNone(serve._DESC_REMOTE_NEG_RE.search(desc), desc)
 
+    def test_remote_only_desc_leaks_seq140(self):
+        # Board seq 140: three jobspy:indeed leaks must fail remote-only.
+        # Bare telework / location-line remote support / Onsite/Remote: label.
+        base = {"source": "jobspy:indeed", "workplace": "",
+                "remote_hint": True, "role": "Engineer"}
+        leaks = [
+            {
+                "company": "State of Alaska",
+                "role": "IT Systems Administrator 1/2/3",
+                "location": "Juneau, AK",
+                "desc": "Enjoy flexible schedules with telework options",
+            },
+            {
+                "company": "Commonwealth of Kentucky",
+                "role": "Systems Administrator",
+                "location": "Frankfort, KY",
+                "desc": ("Base Location: Frankfort, KY – In Office – "
+                         "Provides remote support to KSP employees"),
+            },
+            {
+                "company": "John Deere",
+                "role": "Infrastructure Engineer",
+                "location": "Davenport, IA",
+                "desc": "***Onsite/Remote:****Onsite Position*",
+            },
+        ]
+        for row_data in leaks:
+            row = dict(base, **row_data)
+            self.assertFalse(serve._passes_remote_only(row), row_data["company"])
+            self.assertEqual(
+                serve._remote_only_filter_reason(row), "not_remote",
+                row_data["company"])
+            self.assertEqual(
+                serve._remote_status(row), "not_remote", row_data["company"])
+        # Amenity on-site gyms stay non-signals (not a workplace negative).
+        for desc in ("Access to on-site gyms for employees",
+                     r"Access to on\-site gyms for employees"):
+            row = dict(base, company="AmenityCo", location="", desc=desc)
+            self.assertIsNone(serve._DESC_REMOTE_NEG_RE.search(desc), desc)
+            self.assertEqual(
+                serve._remote_only_filter_reason(row), "remote_unknown", desc)
+        # Keep-cases: work-model Remote value; qualified telework positives.
+        keeps = [
+            ("Onsite/Remote: Remote", "Austin, TX"),
+            ("100% telework", "Juneau, AK"),
+            ("This position is eligible for full-time telework", "Frankfort, KY"),
+        ]
+        for desc, loc in keeps:
+            row = dict(base, company="KeepCo", location=loc, desc=desc,
+                       role="Engineer")
+            self.assertTrue(serve._passes_remote_only(row), desc)
+            self.assertIsNone(serve._remote_only_filter_reason(row), desc)
+            self.assertEqual(serve._remote_status(row), "remote", desc)
+
 
 class EmployerHide(unittest.TestCase):
     @classmethod
@@ -442,8 +496,13 @@ class EmployerHide(unittest.TestCase):
             raise AssertionError("jobs.json was modified")
 
     def setUp(self):
-        with open(self.cfg_path, "wb") as f:
-            f.write(self.real_cfg_bytes)
+        # Seed a minimal temp config: keep live terms (asserted) but start with
+        # an empty employers_hidden so live hides (e.g. jobgether) do not leak
+        # into hide round-trip expectations.
+        live = json.loads(self.real_cfg_bytes.decode("utf-8"))
+        seed = {"terms": live.get("terms", []), "employers_hidden": []}
+        with open(self.cfg_path, "w", encoding="utf-8") as f:
+            json.dump(seed, f)
 
     def _post(self, key, hidden):
         req = urllib.request.Request(

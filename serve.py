@@ -37,22 +37,37 @@ Routes:
   A required question that asks the candidate to provide references is filled
   from profile.references. Optional, willingness, and referred-by stay as before.
   /ranked  (GET)   -> scored job list. Optional filters (AND, post-sort):
-                      remote_only=0|1, include_unknown=0|1, us_only=0|1,
-                      salary_min=<int annual USD>, show_hidden=0|1.
-                      Every row includes employer_key and remote_status.
+                      remote_only=0|1, workplace=remote,hybrid,onsite,
+                      include_unknown=0|1, job_type=full_time|contract,
+                      us_only=0|1, salary_min=<int annual USD>, show_hidden=0|1.
+                      Every row includes employer_key, remote_status, job_type
+                      (contract|full_time|part_time|unknown) and workplace
+                      (remote|hybrid|onsite|unknown). The workplace value is
+                      that bucket. Hybrid wins over remote, so "Remote or
+                      Hybrid" is hybrid. job_type=full_time keeps full_time
+                      and unknown and drops contract and part_time.
+                      workplace is a comma list (OR inside the list). Absent
+                      means no workplace filter. remote_only=1 means
+                      workplace=remote (also added when both are sent).
+                      include_unknown=1 keeps workplace=unknown.
+                      When the list includes hybrid or onsite, filtered rows
+                      with filter_reason not_remote or remote_unknown are
+                      surfaced. Stored status is not changed. workplace=remote
+                      or remote_only with include_unknown=1 still surfaces
+                      remote_unknown only.
                       Keys listed in config.json employers_hidden are dropped
                       unless show_hidden=1. score is null when the row is
                       unscored.
-                      remote_only: ats-api/hiringcafe keep city/country rules
-                      (remote_status remote|not_remote). jobspy/builtin need a
-                      positive remote token in role, location, or desc
-                      (aggregator remote flags are hints only). Desc negatives
-                      override desc positives unless a remote alternative
-                      matches; tech hybrid stays. Empty or country-only
-                      location with no remote signal is remote_status=unknown
-                      (filter_reason remote_unknown). include_unknown=1 with
-                      remote_only=1 also returns those unknown rows (as if
-                      discovered); default include_unknown=0 hides them.
+                      remote_only classification: ats-api/hiringcafe keep
+                      city/country rules (remote_status remote|not_remote).
+                      jobspy/builtin need a positive remote token in role,
+                      location, or desc (aggregator remote flags are hints
+                      only). Desc negatives override desc positives unless a
+                      remote alternative matches; tech hybrid stays. Empty or
+                      country-only location with no remote signal is
+                      remote_status=unknown (filter_reason remote_unknown).
+                      A benefits menu ("in-office, hybrid, or fully remote")
+                      is not a remote confirmation for the workplace bucket.
                       Missing salary is KEPT.
                       Each row includes seen_at (null until marked) and
                       discovered_at as stored.
@@ -559,7 +574,7 @@ _CO_STOP = {"the", "and", "of", "a", "an"}
 
 
 def _company_tokens(name):
-    """Case/punct/Inc/LLC-normalized tokens. Slashes become spaces (e.g. 'Acme/Globex' splits)."""
+    """Case/punct/Inc/LLC-normalized tokens. Slashes become spaces (e.g. "Acme/Globex" split)."""
     s = (name or "").lower().replace("&", " and ")
     s = re.sub(r"[^\w\s]", " ", s)
     s = _LEGAL_SUFFIX.sub(" ", s)
@@ -2391,6 +2406,9 @@ _REMOTE_POS_RE = re.compile(
 # Seq 138: remote life stipend; "in a remote, fast-moving environment";
 # location crumbs "Remote, Remote" / "| Remote". Product names like
 # "Remote Flight Deck" stay out (no bare \bremote\b here).
+# Seq 140: bare telework is not a positive (telework options / hybrid
+# telework / telework N days). Location-line remote stops at dash/pipe/
+# sentence and skips remote support|link|access.
 _DESC_REMOTE_POS_RE = re.compile(
     r"(?i)(?:"
     r"(?<!\bnot\s)(?:\b100%\s+|\bfully\s+|\bentirely\s+)remote\b"
@@ -2404,8 +2422,11 @@ _DESC_REMOTE_POS_RE = re.compile(
     r"|\b(?:office|on-?site|in[- ]person)\b.{0,100}\bor\s+remotely\b"
     r"|\bor\s+remotely\b.{0,80}\b(?:office|on-?site|in[- ]person)\b"
     r"|\\?#\\?LI\\?-Remote\b"
-    r"|\bwork\s+from\s+home\b|\bwfh\b|\btelework(?:ing)?\b"
-    r"|location\s*:\s*[^\n]{0,60}\bremote\b"
+    r"|\bwork\s+from\s+home\b|\bwfh\b"
+    r"|(?:(?:\b100%\s+|\bfully\s+|\bfull(?:-time)?\s+)telework(?:ing)?\b"
+    r"|\btelework(?:ing)?\s+(?:eligible|position|role)\b)"
+    r"|location\s*:\s*[^\n\-–—|;.]{0,60}\bremote\b"
+    r"(?!\s+(?:support|link|access)\b)"
     r"|\bthis\s+is\s+a\s+(?:fully\s+)?remote\b"
     r"|\b(?:position|role|job|opportunity)\s+(?:can|may|will)\s+be\s+"
     r"(?:performed\s+)?(?:fully\s+|100%\s+)?remote\b"
@@ -2436,15 +2457,77 @@ _EVERIFY_SENT_RE = re.compile(
 # (JobSpy is_remote). Tech "hybrid …" is not a workplace. Remote alternatives
 # keep the row ("Hybrid @ X or Remote @ Y").
 _TECH_HYBRID_RE = re.compile(
-    r"(?i)\bhybrid\s+(?:cloud|infrastructure|environment|it|multi-?cloud)\b")
+    r"(?i)\bhybrid\s+(?:cloud|infrastructure|environment|it|multi-?cloud|administrator)\b")
+# Benefit-menu tokens. A sentence with two kinds joined by "or" is not a choice
+# for this posting ("in-office, hybrid, or fully remote").
+_MENU_TOKEN_RE = re.compile(
+    r"(?i)\b(?:in\\?-?\s*office|on\\?-?\s*site|hybrid|fully\s+remote|100%\s+remote)\b")
+# Title: no bare \bcontract\b ("Contract Specialist", "no contract required").
+_TITLE_CONTRACT_RE = re.compile(
+    r"(?i)(?:"
+    r"\(\s*contract(?:\s*-?\s*to\s*-?\s*hire)?\s*\)"
+    r"|contract\s*-?\s*to\s*-?\s*hire"
+    r"|\bC2H\b|\bC2C\b"
+    r"|corp\s*-?\s*to\s*-?\s*corp"
+    r"|\b1099\b"
+    r"|\btemporary\b|\btemp\b"
+    r")")
+# Desc contract signals. Duration allows Indeed's escaped plus (12\+ months).
+# Hourly is not a signal. An employment-type label beats stored FULL_TIME.
+_DESC_CONTRACT_RE = re.compile(
+    r"(?i)(?:"
+    r"duration\s*:\s*\d+\\?\+?\s*months?\b"
+    r"|contract(?:\s*-?\s*to\s*-?\s*hire)?\s+"
+    r"(?:role|position|opportunity|assignment|basis)\b"
+    r"|contract\s*-?\s*to\s*-?\s*hire\b"
+    r"|\bC2H\b|\bC2C\b"
+    r"|corp\s*-?\s*to\s*-?\s*corp"
+    r"|\b1099\b"
+    r"|(?:employment|job|position|employee)\s*type\s*[:\-]\s*"
+    r"(?:contract|contractor|temporary)\b"
+    r"|(?:^|\n)\s*\**\s*contract\s*\**\s*(?:\n|$)"
+    r")")
+_PART_TIME_RE = re.compile(r"(?i)\bpart\s*-?\s*time\b")
+# Desc: a label or "part-time role", not a benefits sentence about part-time staff.
+_DESC_PART_TIME_RE = re.compile(
+    r"(?i)(?:"
+    r"(?:employment|job|position|employee)\s*type\s*[:\-]\s*part\s*-?\s*time\b"
+    r"|\(\s*part\s*-?\s*time\s*\)"
+    r"|\bpart\s*-?\s*time\s+(?:role|position|opportunity|schedule)\b"
+    r")")
+_FULL_TIME_RE = re.compile(
+    r"(?i)\bfull\s*-?\s*time\b|\bfte\b|"
+    r"\bpermanent\s+(?:role|position|employee|employment)\b")
+_HYBRID_POS_RE = re.compile(
+    r"(?i)(?:"
+    r"\bhybrid\s+remote\s+in\b"
+    r"|\bhybrid\s+(?:\d+\s*(?:-\s*\d+)?\s*days?\b|schedule\b|"
+    r"work\s+model\b|role\b|position\b)"
+    r"|\b\d+\s*(?:-\s*\d+)?\s*days?\s+(?:a|per)\s+week\s+in\s+"
+    r"(?:the\s+)?office\b"
+    r")")
+# "be able to work onsite … when needed" is occasional availability, not a
+# hybrid schedule. A direct "work onsite … when needed" still counts.
+_ONSITE_WHEN_NEEDED_RE = re.compile(
+    r"(?i)(?<!able to )\bwork\s+on\\?-?\s*site\b"
+    r"[^.!?\n]{0,80}?\bwhen\s+needed\b")
+_FULLY_REMOTE_ALT_RE = re.compile(
+    r"(?i)\b(?:fully|100%|entirely)\s+remote\b|"
+    r"\bremote\s+(?:option|alternative)\b|\bor\s+remote\b")
 _ONSITE_HYBRID_WP_RE = re.compile(
     r"(?i)\b(?:on-?site(?:\s+only)?|in[- ]office|hybrid)\b")
+# /remote is an alternative; Onsite/Remote: / Remote/Onsite: are field labels.
 _REMOTE_ALT_RE = re.compile(
-    r"(?i)(?:\bor\s+remote\b|\bremote\s+option\b|\bremote\s*@|/remote\b)")
+    r"(?i)(?:\bor\s+remote\b|\bremote\s+option\b|\bremote\s*@|/remote\b(?!\s*:))")
+# Workplace-model field labels (seq 140). Value after the colon is authoritative.
+_WORK_MODEL_LABEL_RE = re.compile(
+    r"(?i)(?:\bonsite\s*/\s*remote|\bremote\s*/\s*onsite|\bwork\s+model)\s*:\s*"
+    r"([^\n*]*)")
 # Desc negatives for aggregator remote-only. Bare "in person" is too noisy;
 # these are the tightened forms (board seq 135).
 # Indeed descriptions often escape hyphens as "\-". "100% On-Site **No**"
 # is a field saying on-site is not required, so that "No" does not count.
+# Seq 140: location-line in-office, en-dash In Office, in-office position.
 _DESC_REMOTE_NEG_RE = re.compile(
     r"(?i)(?:"
     r"not\s+(?:a\s+|an\s+)?(?:fully\s+|100%\s+)?remote\b"
@@ -2458,6 +2541,9 @@ _DESC_REMOTE_NEG_RE = re.compile(
     r"|fully\s+on\\?-?\s*site"
     r"|100%\s+on\\?\s*-?\s*site\b(?!\W{0,16}no\b)"
     r"|on\\?-?\s*site\s+(?:only|required|position|role)"
+    r"|location\s*:.{0,60}\bin[- ]office\b"
+    r"|[–—]\s*in\s+office\s*[–—]"
+    r"|\bin[- ]office\b\s+position"
     r")")
 _EMPLOYER_PAREN_RE = re.compile(r"\s*\([^)]*\)\s*$")
 _EMPLOYER_SUFFIX_RE = re.compile(
@@ -2659,11 +2745,32 @@ def _location_empty_or_country_only(loc):
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return bool(cleaned and _REMOTE_UNKNOWN_COUNTRY_RE.match(cleaned))
 
+def _work_model_from_label(text):
+    """Parse Onsite/Remote:, Remote/Onsite:, or Work Model: value.
+
+    Returns 'remote', 'not_remote', or None when no label / unclear value.
+    Field names are not remote alternatives; the value after the colon is.
+    """
+    m = _WORK_MODEL_LABEL_RE.search(str(text or ""))
+    if not m:
+        return None
+    val = re.sub(r"[*]+", " ", m.group(1))
+    val = re.sub(r"\s+", " ", val).strip().lower()
+    if not val:
+        return None
+    if re.search(r"\b(?:hybrid|on-?site|in[- ]office)\b", val):
+        return "not_remote"
+    if re.search(r"\bremote\b", val):
+        return "remote"
+    return None
+
 def _remote_only_filter_reason(r):
     """For jobspy/builtin: 'not_remote', 'remote_unknown', or None if it passes.
 
     Positive confirmation = remote token in role, location, or desc.
     Desc negatives override unless _REMOTE_ALT_RE also matches (role/loc/desc).
+    Work-model labels (Onsite/Remote:, Work Model:) use the value after the
+    colon; the label itself is not a remote alternative.
     remote / remote_hint / workplace=Remote are hints only and do not pass alone.
     No positive and no negative: remote_unknown when location is empty or
     country-only (US/USA/United States/U.S./America); else not_remote
@@ -2674,10 +2781,18 @@ def _remote_only_filter_reason(r):
     role_loc = " ".join(str(r.get(k) or "") for k in ("role", "title", "location"))
     desc = str(r.get("desc") or "")
     blob = role_loc + " " + desc
-    has_alt = bool(_REMOTE_ALT_RE.search(blob))
+    work_model = _work_model_from_label(blob)
+    if work_model == "not_remote":
+        return "not_remote"
+    # Scrub labels so Onsite/Remote: does not trip /remote as an alternative.
+    blob_for_alt = _WORK_MODEL_LABEL_RE.sub(" ", blob)
+    has_alt = bool(_REMOTE_ALT_RE.search(blob_for_alt))
     if _DESC_REMOTE_NEG_RE.search(desc) and not has_alt:
         return "not_remote"
-    if _REMOTE_POS_RE.search(role_loc) or _desc_has_remote_pos(desc) or has_alt:
+    if (work_model == "remote"
+            or _REMOTE_POS_RE.search(role_loc)
+            or _desc_has_remote_pos(desc)
+            or has_alt):
         return None
     if _location_empty_or_country_only(r.get("location")):
         return "remote_unknown"
@@ -2858,30 +2973,247 @@ def _passes_salary_min(r, minimum):
         return True
     return top >= minimum
 
-def _filter_ranked(rows, qs):
-    """Apply optional remote_only / include_unknown / us_only / salary_min /
+def _scrub_staffing_blurb(text):
+    """Drop sentences that only advertise contract staffing. Linear in len(text)."""
+    text = str(text or "")
+    if "contract staffing" not in text.lower():
+        return text
+    parts = re.split(r"([.!?\n])", text)
+    out = []
+    for part in parts:
+        if "contract staffing" in part.lower():
+            out.append(" ")
+        else:
+            out.append(part)
+    return "".join(out)
+
+def _scrub_workplace_menu(text):
+    """Drop benefit-menu sentences. Linear. Two workplace kinds joined by or.
+
+    "in-office, hybrid, or fully remote" goes. "hybrid schedule" stays.
+    """
+    text = str(text or "")
+    if not text:
+        return ""
+    low = text.lower()
+    if "hybrid" not in low and "fully remote" not in low and "100% remote" not in low:
+        return text
+    if not re.search(r"(?i)\bor\b", text):
+        return text
+    parts = re.split(r"([.!?\n])", text)
+    out = []
+    for part in parts:
+        if not part or part in ".!?\n":
+            out.append(part)
+            continue
+        kinds = set()
+        for m in _MENU_TOKEN_RE.finditer(part):
+            tok = m.group(0).lower()
+            if "hybrid" in tok:
+                kinds.add("h")
+            elif "remote" in tok:
+                kinds.add("r")
+            else:
+                kinds.add("o")
+        if len(kinds) >= 2 and re.search(r"(?i)\bor\b", part):
+            out.append(" ")
+        else:
+            out.append(part)
+    return "".join(out)
+
+def _stored_job_type(v):
+    """Normalize a stored JobSpy / JSON-LD employment type.
+
+    fulltime/FULL_TIME -> full_time, parttime/INTERN -> part_time,
+    contract/CONTRACTOR/TEMPORARY -> contract. A list prefers contract,
+    then part_time, then full_time. Empty when the value is not a type.
+    """
+    if isinstance(v, (list, tuple)):
+        mapped = [x for x in (_stored_job_type(i) for i in v) if x]
+        if "contract" in mapped:
+            return "contract"
+        if "part_time" in mapped:
+            return "part_time"
+        if "full_time" in mapped:
+            return "full_time"
+        return ""
+    raw = str(v or "").strip()
+    if "/" in raw:
+        raw = raw.rstrip("/").rsplit("/", 1)[-1]
+    compact = raw.lower().replace("-", "").replace("_", "").replace(" ", "")
+    if compact in ("fulltime", "fte", "permanent"):
+        return "full_time"
+    if compact in ("parttime", "intern", "internship"):
+        return "part_time"
+    if compact in ("contract", "contractor", "temporary", "temp", "c2h", "c2c"):
+        return "contract"
+    return ""
+
+def _job_type(r):
+    """contract | full_time | part_time | unknown at read time.
+
+    Stored contract is authoritative. A Contract label, duration, or
+    contract-to-hire in the description beats stored full_time (JSON-LD).
+    A contract-staffing blurb alone does not. Hourly is not a signal.
+    """
+    stored = _stored_job_type(r.get("job_type"))
+    title = " ".join(str(r.get(k) or "") for k in ("role", "title"))
+    desc = _scrub_staffing_blurb(r.get("desc"))
+    if stored == "contract" or _TITLE_CONTRACT_RE.search(title) or _DESC_CONTRACT_RE.search(desc):
+        return "contract"
+    if _PART_TIME_RE.search(title) or _DESC_PART_TIME_RE.search(desc):
+        return "part_time"
+    if stored == "part_time":
+        return "part_time"
+    if stored == "full_time" or _FULL_TIME_RE.search(title) or _FULL_TIME_RE.search(desc):
+        return "full_time"
+    return "unknown"
+
+def _location_is_city_state(loc):
+    """True for a city/state location. Country-only and blank are not."""
+    s = str(loc or "").strip()
+    if not s or _location_empty_or_country_only(s):
+        return False
+    if _US_ABBREV_ADDR_RE.search(s):
+        return True
+    low = s.lower()
+    for name in _US_STATE_NAMES:
+        if re.search(r"\b%s\b" % re.escape(name), low):
+            return True
+    return False
+
+def _has_fully_remote_alternative(r):
+    """True when a fully-remote option remains after benefit menus are removed."""
+    parts = []
+    for k in ("role", "title", "location", "desc"):
+        parts.append(_scrub_workplace_menu(r.get(k)))
+    return _FULLY_REMOTE_ALT_RE.search(" ".join(parts)) is not None
+
+def _is_hybrid(r):
+    """True when the listing says hybrid. Tech hybrid and cert titles do not count.
+
+    Benefit menus ("in-office, hybrid, or fully remote") do not count.
+    "be able to work onsite when needed" does not count. A direct
+    "work onsite … when needed" counts only with a city/state location
+    and no fully-remote alternative.
+    """
+    for k in ("workplace", "location", "role", "title"):
+        scrubbed = _TECH_HYBRID_RE.sub(" ", str(r.get(k) or ""))
+        if re.search(r"(?i)\bhybrid\b", scrubbed):
+            return True
+    desc = _TECH_HYBRID_RE.sub(" ", _scrub_workplace_menu(r.get("desc")))
+    if _HYBRID_POS_RE.search(desc):
+        return True
+    if (_ONSITE_WHEN_NEEDED_RE.search(desc)
+            and _location_is_city_state(r.get("location"))
+            and not _has_fully_remote_alternative(r)):
+        return True
+    return False
+
+def _workplace(r):
+    """remote | hybrid | onsite | unknown. Hybrid wins over remote."""
+    if _is_hybrid(r):
+        return "hybrid"
+    scrubbed = _scrub_workplace_menu(r.get("desc"))
+    row = r if scrubbed == str(r.get("desc") or "") else dict(r, desc=scrubbed)
+    status = _remote_status(row)
+    if status == "remote":
+        return "remote"
+    if status == "not_remote":
+        return "onsite"
+    return "unknown"
+
+def _wanted_workplace(qs):
+    """Workplace buckets requested. Empty means the filter is off.
+
+    remote_only=1 with no workplace= param is {remote}. When both are
+    sent, remote is included so an old link cannot drop the remote bucket.
+    """
+    raw = (qs.get("workplace") or [""])[0]
+    wanted = set()
+    if raw.strip():
+        for part in raw.split(","):
+            p = part.strip().lower()
+            if p in ("remote", "hybrid", "onsite"):
+                wanted.add(p)
+    if _qs_flag(qs, "remote_only"):
+        wanted.add("remote")
+    return wanted
+
+def _surface_filtered_for_workplace(rows, queue, qs):
+    """Append filtered rows the workplace filter needs. Does not write status.
+
+    hybrid or onsite in the request pulls not_remote and remote_unknown.
+    remote alone pulls remote_unknown only when include_unknown=1.
+    """
+    wanted = _wanted_workplace(qs)
+    if not wanted:
+        return rows
+    reasons = set()
+    if wanted & {"hybrid", "onsite"}:
+        reasons.update(("not_remote", "remote_unknown"))
+    elif "remote" in wanted and _qs_flag(qs, "include_unknown"):
+        reasons.add("remote_unknown")
+    if not reasons:
+        return rows
+    import jobs_store
+    seen = {(r.get("url") or "") + "|" + (r.get("apply_url") or "") for r in rows}
+    out = list(rows)
+    added = False
+    for r in queue or []:
+        if r.get("status") != "filtered" or r.get("filter_reason") not in reasons:
+            continue
+        if not jobs_store.applyable(r):
+            continue
+        key = (r.get("url") or "") + "|" + (r.get("apply_url") or "")
+        if key in seen:
+            continue
+        out.append(r)
+        seen.add(key)
+        added = True
+    if added:
+        out.sort(key=lambda r: (r.get("score") or 0), reverse=True)
+    return out
+
+def _memo_label(box, r, kind, fn):
+    """Request-local cache. box is None, or a dict that dies with the request."""
+    if box is None:
+        return fn(r)
+    key = (id(r), kind)
+    if key not in box:
+        box[key] = fn(r)
+    return box[key]
+
+def _filter_ranked(rows, qs, labels=None):
+    """Apply optional workplace / job_type / us_only / salary_min /
     employers_hidden (AND).
 
-    include_unknown=1 with remote_only=1 also keeps remote_status=unknown rows.
+    remote_only=1 is workplace=remote. include_unknown=1 keeps
+    workplace=unknown. job_type=full_time keeps full_time and unknown.
     Hidden employer keys drop unless show_hidden=1. Job status is not changed.
+    labels, when passed, remembers job_type and workplace for the response.
     """
-    want_remote = _qs_flag(qs, "remote_only")
     include_unknown = _qs_flag(qs, "include_unknown")
     want_us = _qs_flag(qs, "us_only")
     show_hidden = _qs_flag(qs, "show_hidden")
     sal_min = _qs_int(qs, "salary_min")
     hidden = set() if show_hidden else _employers_hidden()
-    if not want_remote and not want_us and sal_min is None and not hidden:
+    job_type = (qs.get("job_type") or [""])[0].strip().lower()
+    if job_type not in ("full_time", "contract"):
+        job_type = ""
+    wanted_wp = _wanted_workplace(qs)
+    if not wanted_wp and not job_type and not want_us and sal_min is None and not hidden:
         return rows
     out = []
     for r in rows:
-        if want_remote:
-            if _passes_remote_only(r):
-                pass
-            elif include_unknown and _remote_status(r) == "unknown":
-                pass
-            else:
+        if wanted_wp:
+            bucket = _memo_label(labels, r, "wp", _workplace)
+            if bucket not in wanted_wp and not (include_unknown and bucket == "unknown"):
                 continue
+        if job_type == "full_time" and _memo_label(labels, r, "jt", _job_type) in ("contract", "part_time"):
+            continue
+        if job_type == "contract" and _memo_label(labels, r, "jt", _job_type) != "contract":
+            continue
         if want_us and not _passes_us_only(r):
             continue
         if sal_min is not None and not _passes_salary_min(r, sal_min):
@@ -3582,26 +3914,13 @@ class H(BaseHTTPRequestHandler):
                 qs = urllib.parse.parse_qs(parsed.query)
                 st = (qs.get("status") or ["discovered"])[0].strip() or "discovered"
                 rows = list(jobs_store.ranked(status=st))
-                # remote_only + include_unknown: also surface filtered
-                # remote_unknown rows as if discovered.
-                if (st == "discovered"
-                        and _qs_flag(qs, "remote_only")
-                        and _qs_flag(qs, "include_unknown")):
-                    seen = {(r.get("url") or "") + "|" + (r.get("apply_url") or "")
-                            for r in rows}
-                    for r in jobs_store.load().get("queue") or []:
-                        if (r.get("status") != "filtered"
-                                or r.get("filter_reason") != "remote_unknown"):
-                            continue
-                        if not jobs_store.applyable(r):
-                            continue
-                        key = (r.get("url") or "") + "|" + (r.get("apply_url") or "")
-                        if key in seen:
-                            continue
-                        rows.append(r)
-                        seen.add(key)
-                    rows.sort(key=lambda r: (r.get("score") or 0), reverse=True)
-                rows = _filter_ranked(rows, qs)
+                # Workplace filters that need filtered rows (hybrid/onsite, or
+                # remote + include_unknown). Stored status is not written.
+                if st == "discovered":
+                    rows = _surface_filtered_for_workplace(
+                        rows, jobs_store.load().get("queue") or [], qs)
+                labels = {}
+                rows = _filter_ranked(rows, qs, labels)
                 out = []
                 for r in rows:
                     raw_score = r.get("score")
@@ -3613,7 +3932,8 @@ class H(BaseHTTPRequestHandler):
                         "discovered_at": r.get("discovered_at"),
                         "seen_at": r.get("seen_at"),
                         "location": r.get("location") or r.get("workplace", ""),
-                        "workplace": r.get("workplace", ""),
+                        "workplace": _memo_label(labels, r, "wp", _workplace),
+                        "job_type": _memo_label(labels, r, "jt", _job_type),
                         "salary": r.get("salary", ""), "desc": r.get("desc", ""),
                         "url": r.get("url", ""),
                         "apply": r.get("apply_url") or r.get("url", ""),
