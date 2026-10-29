@@ -70,7 +70,9 @@ Routes:
                       is not a remote confirmation for the workplace bucket.
                       Missing salary is KEPT.
                       Each row includes seen_at (null until marked) and
-                      discovered_at as stored.
+                      discovered_at as stored. desc is omitted unless desc=1.
+  /api/job (GET)    -> ?url=<url>. One row {desc, ...} matched like /seen
+                      (url or apply_url, query stripped). 404 when missing.
   /seen    (POST)   -> JSON {url}. 200 {ok:true, seen_at} when url or
                       apply_url matches. seen_at stays the first timestamp.
                       404 {ok:false} when nothing matches. Does not change
@@ -2450,9 +2452,9 @@ _DESC_REMOTE_POS_SKIP_RE = re.compile(
     r"(?:fridays|one\s+day|occasionally)\b"
     r")")
 # A positive inside a sentence that mentions E-Verify or I-9 is boilerplate.
-# Indeed often stores the hyphen as "\-".
-_EVERIFY_SENT_RE = re.compile(
-    r"(?i)[^.!?\n]*\b(?:e\\?-?verify|i\\?-9)\b[^.!?\n]*")
+# Indeed often stores the hyphen as "\-". Keyword probe first; sentence cut is
+# linear. The old leading [^.!?\n]* form was quadratic per sentence.
+_EVERIFY_KW_RE = re.compile(r"(?i)\b(?:e\\?-?verify|i\\?-9)\b")
 # Title/location workplace tokens that override a false Remote workplace flag
 # (JobSpy is_remote). Tech "hybrid …" is not a workplace. Remote alternatives
 # keep the row ("Hybrid @ X or Remote @ Y").
@@ -2704,6 +2706,28 @@ def _explicit_onsite_hybrid_blocks_remote(r):
         return False
     return True
 
+def _strip_everify_sentences(text):
+    """Blank sentences that mention E-Verify or I-9. Same output as the old
+    quadratic [^.!?\n]* keyword [^.!?\n]* sub. Skip entirely when absent."""
+    if not text or not _EVERIFY_KW_RE.search(text):
+        return text
+    parts = []
+    last = 0
+    for m in _EVERIFY_KW_RE.finditer(text):
+        start = m.start()
+        while start > last and text[start - 1] not in ".!?\n":
+            start -= 1
+        end = m.end()
+        while end < len(text) and text[end] not in ".!?\n":
+            end += 1
+        if start < last:
+            continue
+        parts.append(text[last:start])
+        parts.append(" ")
+        last = end
+    parts.append(text[last:])
+    return "".join(parts)
+
 def _desc_remote_pos_text(desc):
     """Description with E-Verify/I-9 sentences and seq 137 boilerplate removed.
 
@@ -2713,16 +2737,62 @@ def _desc_remote_pos_text(desc):
     text = str(desc or "")
     if not text:
         return ""
-    text = _EVERIFY_SENT_RE.sub(" ", text)
-    return _DESC_REMOTE_POS_SKIP_RE.sub(" ", text)
+    text = _strip_everify_sentences(text)
+    low = text.lower()
+    # Skip-boilerplate sub is rare (a few rows); keyword gate keeps it off
+    # the common path.
+    if ("remotely" in low and (
+            "hired to work remotely" in low
+            or "work remotely as necessary" in low
+            or "working remotely as necessary" in low
+            or "option to work remotely" in low)):
+        text = _DESC_REMOTE_POS_SKIP_RE.sub(" ", text)
+    return text
 
-def _desc_has_remote_pos(desc):
-    text = _desc_remote_pos_text(desc)
+def _memo_desc_scrub(box, r):
+    """Request-local _desc_remote_pos_text for one row. box dies with /ranked."""
+    if box is None:
+        return _desc_remote_pos_text(r.get("desc"))
+    key = (id(r), "desc_scrub")
+    if key not in box:
+        box[key] = _desc_remote_pos_text(r.get("desc"))
+    return box[key]
+
+def _memo_menu_scrub(box, r):
+    """Request-local benefit-menu scrub of desc. Shared by workplace/hybrid."""
+    if box is None:
+        return _scrub_workplace_menu(r.get("desc"))
+    key = (id(r), "menu_scrub")
+    if key not in box:
+        box[key] = _scrub_workplace_menu(r.get("desc"))
+    return box[key]
+
+def _desc_has_remote_pos(desc, scrubbed=None):
+    text = _desc_remote_pos_text(desc) if scrubbed is None else scrubbed
     if not text:
         return False
-    if _DESC_REMOTE_POS_RE.search(text):
-        return True
+    low = text.lower()
+    # Keyword gate before the large alternation (same idea as E-Verify probe).
+    if ("remote" in low or "telework" in low or "wfh" in low
+            or "work from" in low or "li-remote" in low):
+        if _DESC_REMOTE_POS_RE.search(text):
+            return True
     return _DESC_REMOTE_PAY_RE.search(text) is not None
+
+def _desc_has_remote_neg(desc):
+    """_DESC_REMOTE_NEG_RE with a cheap keyword gate. Same matches."""
+    text = str(desc or "")
+    if not text:
+        return False
+    low = text.lower()
+    if not ("hybrid" in low or "on-site" in low or "onsite" in low
+            or "on site" in low or "on\\-site" in low
+            or "in-office" in low or "in office" in low
+            or "in person" in low or "not remote" in low
+            or "not a remote" in low or "not an remote" in low
+            or "required to work" in low or "days" in low or "day " in low):
+        return False
+    return _DESC_REMOTE_NEG_RE.search(text) is not None
 
 def _aggregator_remote_source(r):
     """True for jobspy:* and builtin rows (aggregator remote flags are untrusted)."""
@@ -2764,7 +2834,7 @@ def _work_model_from_label(text):
         return "remote"
     return None
 
-def _remote_only_filter_reason(r):
+def _remote_only_filter_reason(r, labels=None):
     """For jobspy/builtin: 'not_remote', 'remote_unknown', or None if it passes.
 
     Positive confirmation = remote token in role, location, or desc.
@@ -2775,6 +2845,7 @@ def _remote_only_filter_reason(r):
     No positive and no negative: remote_unknown when location is empty or
     country-only (US/USA/United States/U.S./America); else not_remote
     (city/state location).
+    labels, when passed, memos scrubbed desc text for this request.
     """
     if not _aggregator_remote_source(r):
         return None
@@ -2786,34 +2857,46 @@ def _remote_only_filter_reason(r):
         return "not_remote"
     # Scrub labels so Onsite/Remote: does not trip /remote as an alternative.
     blob_for_alt = _WORK_MODEL_LABEL_RE.sub(" ", blob)
-    has_alt = bool(_REMOTE_ALT_RE.search(blob_for_alt))
-    if _DESC_REMOTE_NEG_RE.search(desc) and not has_alt:
+    # /remote and "or remote" need a remote token; skip the alt regex otherwise.
+    has_alt = ("remote" in blob_for_alt.lower()
+               and bool(_REMOTE_ALT_RE.search(blob_for_alt)))
+    if _desc_has_remote_neg(desc) and not has_alt:
         return "not_remote"
-    if (work_model == "remote"
-            or _REMOTE_POS_RE.search(role_loc)
-            or _desc_has_remote_pos(desc)
-            or has_alt):
+    if work_model == "remote" or _REMOTE_POS_RE.search(role_loc) or has_alt:
+        return None
+    # Scrub only when role/location did not already confirm remote.
+    if _desc_has_remote_pos(desc, scrubbed=_memo_desc_scrub(labels, r)):
         return None
     if _location_empty_or_country_only(r.get("location")):
         return "remote_unknown"
     return "not_remote"
 
-def _remote_status(r):
+def _remote_status(r, labels=None):
     """remote | not_remote | unknown for /ranked.
 
     jobspy/builtin use _remote_only_filter_reason (unknown = remote_unknown).
     ats-api/hiringcafe and others: remote or not_remote from _passes_remote_only.
+    labels shares scrubbed desc with workplace/job_type for this request.
     """
+    if labels is not None:
+        key = (id(r), "rs")
+        if key in labels:
+            return labels[key]
     if _aggregator_remote_source(r):
-        reason = _remote_only_filter_reason(r)
+        reason = _remote_only_filter_reason(r, labels)
         if reason is None:
-            return "remote"
-        if reason == "remote_unknown":
-            return "unknown"
-        return "not_remote"
-    return "remote" if _passes_remote_only(r) else "not_remote"
+            status = "remote"
+        elif reason == "remote_unknown":
+            status = "unknown"
+        else:
+            status = "not_remote"
+    else:
+        status = "remote" if _passes_remote_only(r, labels) else "not_remote"
+    if labels is not None:
+        labels[(id(r), "rs")] = status
+    return status
 
-def _passes_remote_only(r):
+def _passes_remote_only(r, labels=None):
     """Remote-only gate for /ranked.
 
     jobspy/builtin: require positive remote confirmation in role, location, or
@@ -2828,7 +2911,7 @@ def _passes_remote_only(r):
     alternative is offered.
     """
     if _aggregator_remote_source(r):
-        return _remote_only_filter_reason(r) is None
+        return _remote_only_filter_reason(r, labels) is None
     if _explicit_onsite_hybrid_blocks_remote(r):
         return False
     loc = str(r.get("location") or "").strip()
@@ -3049,23 +3132,39 @@ def _stored_job_type(v):
         return "contract"
     return ""
 
-def _job_type(r):
+def _job_type(r, labels=None):
     """contract | full_time | part_time | unknown at read time.
 
     Stored contract is authoritative. A Contract label, duration, or
     contract-to-hire in the description beats stored full_time (JSON-LD).
     A contract-staffing blurb alone does not. Hourly is not a signal.
+    labels is accepted so /ranked can share one request-local memo box with
+    workplace and remote_status (desc_scrub / rs keys).
     """
     stored = _stored_job_type(r.get("job_type"))
-    title = " ".join(str(r.get(k) or "") for k in ("role", "title"))
-    desc = _scrub_staffing_blurb(r.get("desc"))
-    if stored == "contract" or _TITLE_CONTRACT_RE.search(title) or _DESC_CONTRACT_RE.search(desc):
+    if stored == "contract":
         return "contract"
-    if _PART_TIME_RE.search(title) or _DESC_PART_TIME_RE.search(desc):
+    title = " ".join(str(r.get(k) or "") for k in ("role", "title"))
+    if _TITLE_CONTRACT_RE.search(title):
+        return "contract"
+    desc = _scrub_staffing_blurb(r.get("desc"))
+    dlow = desc.lower()
+    if (("contract" in dlow or "c2h" in dlow or "c2c" in dlow or "1099" in dlow
+            or "duration" in dlow or "temporary" in dlow or "corp" in dlow)
+            and _DESC_CONTRACT_RE.search(desc)):
+        return "contract"
+    if _PART_TIME_RE.search(title):
+        return "part_time"
+    if "part" in dlow and _DESC_PART_TIME_RE.search(desc):
         return "part_time"
     if stored == "part_time":
         return "part_time"
-    if stored == "full_time" or _FULL_TIME_RE.search(title) or _FULL_TIME_RE.search(desc):
+    if stored == "full_time":
+        return "full_time"
+    if _FULL_TIME_RE.search(title):
+        return "full_time"
+    if (("full" in dlow or "fte" in dlow or "permanent" in dlow)
+            and _FULL_TIME_RE.search(desc)):
         return "full_time"
     return "unknown"
 
@@ -3089,34 +3188,43 @@ def _has_fully_remote_alternative(r):
         parts.append(_scrub_workplace_menu(r.get(k)))
     return _FULLY_REMOTE_ALT_RE.search(" ".join(parts)) is not None
 
-def _is_hybrid(r):
+def _is_hybrid(r, labels=None):
     """True when the listing says hybrid. Tech hybrid and cert titles do not count.
 
     Benefit menus ("in-office, hybrid, or fully remote") do not count.
     "be able to work onsite when needed" does not count. A direct
     "work onsite … when needed" counts only with a city/state location
     and no fully-remote alternative.
+    labels shares request-local desc scrub with workplace/remote_status.
     """
     for k in ("workplace", "location", "role", "title"):
         scrubbed = _TECH_HYBRID_RE.sub(" ", str(r.get(k) or ""))
         if re.search(r"(?i)\bhybrid\b", scrubbed):
             return True
-    desc = _TECH_HYBRID_RE.sub(" ", _scrub_workplace_menu(r.get("desc")))
-    if _HYBRID_POS_RE.search(desc):
+    if labels is not None:
+        _memo_desc_scrub(labels, r)
+    menu = _memo_menu_scrub(labels, r)
+    desc = _TECH_HYBRID_RE.sub(" ", menu)
+    dlow = desc.lower()
+    if (("hybrid" in dlow or "day" in dlow)
+            and _HYBRID_POS_RE.search(desc)):
         return True
-    if (_ONSITE_WHEN_NEEDED_RE.search(desc)
+    if (("on-site" in dlow or "onsite" in dlow or "on site" in dlow
+            or "on\\-site" in dlow or "when needed" in dlow)
+            and _ONSITE_WHEN_NEEDED_RE.search(desc)
             and _location_is_city_state(r.get("location"))
             and not _has_fully_remote_alternative(r)):
         return True
     return False
 
-def _workplace(r):
+def _workplace(r, labels=None):
     """remote | hybrid | onsite | unknown. Hybrid wins over remote."""
-    if _is_hybrid(r):
+    if _is_hybrid(r, labels):
         return "hybrid"
-    scrubbed = _scrub_workplace_menu(r.get("desc"))
+    scrubbed = _memo_menu_scrub(labels, r)
     row = r if scrubbed == str(r.get("desc") or "") else dict(r, desc=scrubbed)
-    status = _remote_status(row)
+    # Menu scrub usually leaves desc unchanged; share labels with remote_status.
+    status = _remote_status(row, labels if row is r else None)
     if status == "remote":
         return "remote"
     if status == "not_remote":
@@ -3207,12 +3315,17 @@ def _filter_ranked(rows, qs, labels=None):
     out = []
     for r in rows:
         if wanted_wp:
-            bucket = _memo_label(labels, r, "wp", _workplace)
+            bucket = _memo_label(labels, r, "wp",
+                                 lambda row, _l=labels: _workplace(row, _l))
             if bucket not in wanted_wp and not (include_unknown and bucket == "unknown"):
                 continue
-        if job_type == "full_time" and _memo_label(labels, r, "jt", _job_type) in ("contract", "part_time"):
+        if job_type == "full_time" and _memo_label(
+                labels, r, "jt",
+                lambda row, _l=labels: _job_type(row, _l)) in ("contract", "part_time"):
             continue
-        if job_type == "contract" and _memo_label(labels, r, "jt", _job_type) != "contract":
+        if job_type == "contract" and _memo_label(
+                labels, r, "jt",
+                lambda row, _l=labels: _job_type(row, _l)) != "contract":
             continue
         if want_us and not _passes_us_only(r):
             continue
@@ -3913,6 +4026,7 @@ class H(BaseHTTPRequestHandler):
                 import jobs_store
                 qs = urllib.parse.parse_qs(parsed.query)
                 st = (qs.get("status") or ["discovered"])[0].strip() or "discovered"
+                include_desc = _qs_flag(qs, "desc")
                 rows = list(jobs_store.ranked(status=st))
                 # Workplace filters that need filtered rows (hybrid/onsite, or
                 # remote + include_unknown). Stored status is not written.
@@ -3925,22 +4039,65 @@ class H(BaseHTTPRequestHandler):
                 for r in rows:
                     raw_score = r.get("score")
                     score_out = None if raw_score is None or raw_score == "" else raw_score
-                    out.append({"company": r.get("company", ""), "role": r.get("role", ""),
+                    row_out = {"company": r.get("company", ""), "role": r.get("role", ""),
                         "score": score_out, "ats": r.get("ats", ""),
                         "status": r.get("status"), "source": r.get("source", ""),
                         "posted": r.get("posted", ""),
                         "discovered_at": r.get("discovered_at"),
                         "seen_at": r.get("seen_at"),
                         "location": r.get("location") or r.get("workplace", ""),
-                        "workplace": _memo_label(labels, r, "wp", _workplace),
-                        "job_type": _memo_label(labels, r, "jt", _job_type),
-                        "salary": r.get("salary", ""), "desc": r.get("desc", ""),
+                        "workplace": _memo_label(
+                            labels, r, "wp",
+                            lambda row, _l=labels: _workplace(row, _l)),
+                        "job_type": _memo_label(
+                            labels, r, "jt",
+                            lambda row, _l=labels: _job_type(row, _l)),
+                        "salary": r.get("salary", ""),
                         "url": r.get("url", ""),
                         "apply": r.get("apply_url") or r.get("url", ""),
                         "closed_reason": r.get("closed_reason") or "",
                         "employer_key": employer_key(r.get("company") or "", r.get("role") or ""),
-                        "remote_status": _remote_status(r)})
+                        "remote_status": _remote_status(r, labels)}
+                    if include_desc:
+                        row_out["desc"] = r.get("desc", "")
+                    out.append(row_out)
                 return self._json(200, {"count": len(out), "jobs": out})
+            except Exception as e:
+                return self._json(500, {"error": str(e)})
+        if parsed.path == "/api/job":
+            try:
+                import jobs_store
+                qs = urllib.parse.parse_qs(parsed.query)
+                url = (qs.get("url") or [""])[0]
+                row = jobs_store._row_for_seen(
+                    jobs_store.load().get("queue") or [], url)
+                if row is None:
+                    return self._json(404, {"ok": False})
+                raw_score = row.get("score")
+                score_out = None if raw_score is None or raw_score == "" else raw_score
+                return self._json(200, {
+                    "ok": True,
+                    "company": row.get("company", ""),
+                    "role": row.get("role", ""),
+                    "score": score_out,
+                    "ats": row.get("ats", ""),
+                    "status": row.get("status"),
+                    "source": row.get("source", ""),
+                    "posted": row.get("posted", ""),
+                    "discovered_at": row.get("discovered_at"),
+                    "seen_at": row.get("seen_at"),
+                    "location": row.get("location") or row.get("workplace", ""),
+                    "workplace": _workplace(row),
+                    "job_type": _job_type(row),
+                    "salary": row.get("salary", ""),
+                    "desc": row.get("desc", ""),
+                    "url": row.get("url", ""),
+                    "apply": row.get("apply_url") or row.get("url", ""),
+                    "closed_reason": row.get("closed_reason") or "",
+                    "employer_key": employer_key(
+                        row.get("company") or "", row.get("role") or ""),
+                    "remote_status": _remote_status(row),
+                })
             except Exception as e:
                 return self._json(500, {"error": str(e)})
         if parsed.path == "/discover/status":

@@ -188,7 +188,14 @@ python serve.py                       # http://127.0.0.1:8765/dashboard
 
 #### Remote filtering you can trust
 
-![Location filters: Remote only, Include unknown, US only](docs/img/jobs-filters.png)
+![Filters popover: workplace type, job type, US only, minimum salary, closed, hide viewed](docs/img/jobs-filters.png)
+
+Filters live behind one **Filters** button, with a one-line summary beside it. **Workplace type**
+has Remote, Hybrid and Onsite boxes (Remote means remote only: a listing that says hybrid, or a
+"Remote or Hybrid" badge, shows under Hybrid), plus **Include unknown** for rows with no workplace
+signal. **Job type** narrows to Full-time or Contract (roles with no stated type stay under
+Full-time); contract comes from the posting's employment type, a "Duration: N months" line,
+contract-to-hire, C2C, W2 or 1099 wording.
 
 Aggregators (Indeed via JobSpy, Built In) mark almost everything "remote", including roles whose
 own description says on-site or hybrid. Penates treats those flags as hints only:

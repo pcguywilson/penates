@@ -94,7 +94,14 @@
   /* jobs */
   .stats{display:flex;gap:18px;margin:0 0 12px;flex-wrap:wrap;color:var(--text-3);font-size:12px}
   .stat b{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums;margin-right:4px}
-  .toolbar{display:flex;gap:14px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+  .toolbar{display:flex;gap:12px;align-items:center;margin-bottom:8px;flex-wrap:wrap;position:relative}
+  .toolbar #q{width:260px}
+  .fpanel{position:absolute;left:0;top:42px;z-index:25;display:flex;flex-wrap:wrap;gap:12px;align-items:center;max-width:760px;background:var(--surface-1);border:1px solid var(--line-strong);border-radius:8px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+  .fpanel[hidden]{display:none}
+  .fsum{color:var(--text-2);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:420px}
+  .meta{display:flex;gap:14px;align-items:center;color:var(--text-3);font-size:12px;white-space:nowrap}
+  .meta .stat b{margin-right:3px}
+  #refresh.busy{opacity:.75}
   table{width:100%;border-collapse:collapse}
   th,td{text-align:left;padding:0 10px;height:36px;border-bottom:1px solid var(--line);vertical-align:middle}
   th{height:30px;color:var(--text-3);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;position:sticky;top:44px;background:var(--bg);cursor:pointer;user-select:none;z-index:2}
@@ -258,9 +265,11 @@ tr.jobrow:hover .icon,.icon:focus-visible{opacity:1}
 </div>
 <main>
   <section data-panel="jobs">
-    <div class="stats" id="stats"></div>
     <div class="toolbar">
       <input type="search" id="q" placeholder="Filter by company, role, ATS...">
+      <button class="btn ghost" id="fBtn" aria-expanded="false" aria-controls="fPanel">Filters &#9662;</button>
+      <span class="fsum" id="fSum"></span>
+      <div class="fpanel" id="fPanel" hidden>
       <fieldset class="fgroup"><legend>Workplace type</legend>
         <label class="ftchk" title="Listings that are remote and do not say hybrid"><input type="checkbox" id="wpRemote" checked> Remote</label>
         <label class="ftchk" title="Listings that say hybrid"><input type="checkbox" id="wpHybrid"> Hybrid</label>
@@ -276,10 +285,10 @@ tr.jobrow:hover .icon,.icon:focus-visible{opacity:1}
       <label class="ftchk">Min $ <input type="number" id="fSalary" min="0" step="5000" placeholder="0"></label>
       <label class="toggle"><input type="checkbox" id="fClosed"> Closed</label>
       <label class="toggle" title="Hide roles you already opened from the Role link"><input type="checkbox" id="fHideSeen"> Hide viewed</label>
-      <span class="muted" id="pruneLine"></span>
-      <span class="muted" id="count"></span>
+      </div>
       <span class="grow"></span>
-      <span class="cap mono" id="reflog"></span>
+      <span class="meta"><span id="stats"></span><span id="count"></span><span id="pruneLine"></span></span>
+      <span class="cap mono" id="reflog" hidden></span>
       <button class="btn" id="refresh">Refresh jobs</button>
     </div>
     <table>
@@ -603,19 +612,25 @@ function rankedUrl(){
   if($('fClosed')&&$('fClosed').checked) p.set('status','closed');
   const qs=p.toString(); return '/ranked'+(qs?('?'+qs):'');
 }
+let _loadSeq=0;
 async function loadJobs(){
+  const my=++_loadSeq;
+  if($('count')) $('count').textContent='loading\u2026';
+  if(typeof updateFilterSummary==='function') updateFilterSummary();
   const [r,st]=await Promise.all([
     fetch(rankedUrl()).then(r=>r.json()).catch(()=>({jobs:[]})),
     fetch('/stats').then(r=>r.json()).catch(()=>({}))
   ]);
+  if(my!==_loadSeq) return;   // a newer filter change / refresh superseded this response
   JOBS=r.jobs||[];
   const top=JOBS.slice(0,10), avg=top.length?Math.round(top.reduce((a,j)=>a+(j.score||0),0)/top.length):0;
   const closedOn=$('fClosed')&&$('fClosed').checked;
-  $('stats').innerHTML=[[closedOn?'Closed (review)':'Apply-able jobs',JOBS.length],['Avg score, top 10',avg],
-    ['Applied this week',st.applied_this_week??0],['Applied this month',st.applied_this_month??0],['Total applied',st.applied_total??0]]
-    .map(s=>`<span class="stat"><b>${s[1]}</b>${s[0].toLowerCase()}</span>`).join('');
+  $('stats').innerHTML=[[closedOn?'closed':'jobs',JOBS.length,closedOn?'Closed (review)':'Apply-able jobs'],['avg',avg,'Avg score, top 10'],
+    ['this wk',st.applied_this_week??0,'Applied this week'],['this mo',st.applied_this_month??0,'Applied this month'],['applied',st.applied_total??0,'Total applied']]
+    .map(s=>`<span class="stat" title="${s[2]}"><b>${s[1]}</b>${s[0]}</span>`).join(' \u00b7 ');
   const lp=st.last_prune;
-  $('pruneLine').textContent = lp && lp.at ? ((lp.closed||0)+' closed this refresh (hidden)') : '';
+  $('pruneLine').textContent = lp && lp.at && lp.closed ? (lp.closed+' closed') : '';
+  $('pruneLine').title = 'Closed by the last refresh (hidden unless Closed is on)';
   $('lastAdded').textContent='Jobs added: '+ago(st.last_added); $('lastAdded').title=st.last_added||'';
   LAST_ADDED=st.last_added||'';
   render();
@@ -778,8 +793,17 @@ function openDrawer(j){
   if(j.source)chips.push(['Source',j.source]);
   $('dr-meta').innerHTML=chips.map(c=>`<span class="chip">${c[0]?esc(c[0])+': ':''}${esc(String(c[1]))}</span>`).join('');
   const d=$('dr-desc');
+  const noDesc=()=>{d.className='dsc empty';d.textContent='No description captured for this source. Use "Open posting" to view the full listing.';};
   if(j.desc){d.className='dsc';d.textContent=j.desc;}
-  else{d.className='dsc empty';d.textContent='No description captured for this source. Use "Open posting" to view the full listing.';}
+  else if(j._descTried){noDesc();}
+  else{ d.className='dsc empty'; d.textContent='Loading description\u2026';
+    const key=j.url||j.apply||'';
+    fetch('/api/job?url='+encodeURIComponent(key)).then(r=>r.ok?r.json():{}).catch(()=>({})).then(x=>{
+      j._descTried=true; if(x&&x.desc) j.desc=x.desc;
+      if($('dr-open').href.indexOf(key)<0 && key) return;   // drawer moved on to another job
+      if(j.desc){d.className='dsc';d.textContent=j.desc;} else noDesc();
+    });
+  }
   $('dr-open').href=j.url||j.apply||'#'; $('dr-open').dataset.seen=j.apply||'';
   $('dr-mark').style.display=j.status==='applied'?'none':'';
   $('dr-apply').style.display=j.status==='applied'?'none':'';
@@ -804,6 +828,21 @@ async function mark(b){ b.disabled=true;b.textContent='...';
   const j=JOBS.find(x=>x.apply===b.dataset.url); if(j)j.status='applied';
 }
 $('q').oninput=render;
+function updateFilterSummary(){
+  const on=id=>$(id)&&$(id).checked, parts=[];
+  const wp=[['wpRemote','Remote'],['wpHybrid','Hybrid'],['wpOnsite','Onsite']].filter(([i])=>on(i)).map(x=>x[1]);
+  parts.push(wp.length===0||wp.length===3?'Any workplace':wp.join('/'));
+  if(on('fUnknown')) parts.push('+unknown');
+  const jt=$('fJobType')&&$('fJobType').value; if(jt) parts.push(jt==='full_time'?'Full-time':'Contract');
+  if(on('fUS')) parts.push('US');
+  const sm=parseInt(($('fSalary')&&$('fSalary').value)||'0',10); if(sm>0) parts.push('$'+Math.round(sm/1000)+'k+');
+  if(on('fClosed')) parts.push('Closed');
+  if(on('fHideSeen')) parts.push('Hide viewed');
+  $('fSum').textContent=parts.join(' \u00b7 ');
+}
+$('fBtn').onclick=e=>{ e.stopPropagation(); const p=$('fPanel'); p.hidden=!p.hidden; $('fBtn').setAttribute('aria-expanded',String(!p.hidden)); };
+document.addEventListener('click',e=>{ const p=$('fPanel'); if(!p.hidden && !p.contains(e.target) && e.target!==$('fBtn')){ p.hidden=true; $('fBtn').setAttribute('aria-expanded','false'); } });
+document.addEventListener('keydown',e=>{ if(e.key==='Escape' && !$('fPanel').hidden){ $('fPanel').hidden=true; $('fBtn').setAttribute('aria-expanded','false'); } });
 try{ const u=$('fUnknown'); if(u) u.checked=localStorage.getItem('penates.includeUnknown')==='1'; }catch(e){}
 try{ const w=JSON.parse(localStorage.getItem('penates.workplace')||'null'); if(Array.isArray(w)) [['wpRemote','remote'],['wpHybrid','hybrid'],['wpOnsite','onsite']].forEach(([id,k])=>{ if($(id)) $(id).checked=w.includes(k); }); }catch(e){}
 try{ const t=localStorage.getItem('penates.jobType'); if(t!==null && $('fJobType')) $('fJobType').value=t; }catch(e){}
@@ -815,17 +854,24 @@ try{ const t=localStorage.getItem('penates.jobType'); if(t!==null && $('fJobType
 });});
 (function(){const el=$('fHideSeen'); if(!el) return;
   try{ el.checked=localStorage.getItem('penates.hideSeen')==='1'; }catch(e){}
-  el.addEventListener('change',()=>{ try{ localStorage.setItem('penates.hideSeen',el.checked?'1':'0'); }catch(e){} render(); });
+  el.addEventListener('change',()=>{ try{ localStorage.setItem('penates.hideSeen',el.checked?'1':'0'); }catch(e){} updateFilterSummary(); render(); });
   const dro=$('dr-open'); if(dro){ dro.addEventListener('click',()=>markSeen(dro.dataset.seen)); dro.addEventListener('auxclick',e=>{ if(e.button===1) markSeen(dro.dataset.seen); }); }
 })();
 {const sal=$('fSalary'); if(sal) sal.addEventListener('change',loadJobs);}
 document.querySelectorAll('th[data-sort]').forEach(th=>th.onclick=()=>{const k=th.dataset.sort;
   sortDir=(sortKey===k)?-sortDir:((k==='score'||k==='discovered_at'||k==='posted')?-1:1); sortKey=k; render();});
-$('refresh').onclick=async()=>{ $('refresh').disabled=true;
+$('refresh').onclick=async()=>{ const b=$('refresh'); if(b.disabled) return;
+  b.disabled=true; b.classList.add('busy'); b.textContent='Refreshing\u2026';
   await fetch('/discover',{method:'POST'}).catch(()=>{});
-  const poll=setInterval(async()=>{const st=await fetch('/discover/status').then(r=>r.json()).catch(()=>({running:false}));
-    $('reflog').textContent=(st.log||[]).slice(-1)[0]||'';
-    if(!st.running){clearInterval(poll);$('refresh').disabled=false;$('reflog').textContent='refresh complete';loadJobs();}
+  let misses=0;
+  const poll=setInterval(async()=>{
+    const st=await fetch('/discover/status').then(r=>r.json()).catch(()=>null);
+    if(!st){ if(++misses<5) return; }        // a busy server is not "finished"
+    misses=0;
+    const last=((st&&st.log)||[]).slice(-1)[0]||'';
+    const m=last.match(/running (\S+)\.py/); if(m) b.textContent='Refreshing\u2026 '+m[1];
+    b.title=last;
+    if(st && !st.running){ clearInterval(poll); b.disabled=false; b.classList.remove('busy'); b.textContent='Refresh jobs'; b.title='Last refresh complete'; loadJobs(); }
   },2500);
 };
 async function loadLogs(){ const l=await fetch('/logs').then(r=>r.json()).catch(()=>({}));

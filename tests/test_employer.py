@@ -6,12 +6,14 @@ Run: python tests/test_employer.py
 """
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
 import threading
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 
 _here = os.path.dirname(os.path.abspath(__file__))
@@ -323,6 +325,50 @@ class EmployerKey(unittest.TestCase):
             self.assertFalse(serve._passes_remote_only(row), desc)
             self.assertEqual(serve._remote_only_filter_reason(row), reason, desc)
 
+    def test_everify_scrub_matches_legacy_quadratic(self):
+        # New linear scrub must match the old [^.!?\n]* keyword form exactly
+        # on the E-Verify fixtures above (seq 145 /ranked perf).
+        legacy = re.compile(
+            r"(?i)[^.!?\n]*\b(?:e\\?-?verify|i\\?-9)\b[^.!?\n]*")
+
+        def legacy_scrub(text):
+            text = str(text or "")
+            if not text:
+                return ""
+            return legacy.sub(" ", text)
+
+        cases = [
+            "You can work in our office in Los Altos, CA or remotely from home. "
+            "This employer participates in E-Verify and will provide Form I-9 "
+            "information.",
+            "all applicants and employees, including those hired to work "
+            "remotely. Upon enrollment, employers participating in E\\-Verify "
+            "are required to provide Form I\\-9 information.",
+            "This fully remote role uses E-Verify and Form I-9.",
+            "Work remotely as necessary.",
+            "No keyword here at all, just remote work.",
+            "Sentence one. Mid E-Verify stuff here! Next sentence remote.",
+            "Form I-9. Remote work available.",
+            "",
+        ]
+        for desc in cases:
+            self.assertEqual(
+                serve._strip_everify_sentences(desc), legacy_scrub(desc), desc)
+            self.assertEqual(
+                serve._desc_remote_pos_text(desc),
+                serve._DESC_REMOTE_POS_SKIP_RE.sub(" ", legacy_scrub(desc)),
+                desc)
+        # Request-local memo: same scrubbed text across remote_status path.
+        row = {"source": "jobspy:indeed", "company": "Modular",
+               "role": "Engineer", "location": "Austin, TX",
+               "desc": cases[0]}
+        labels = {}
+        first = serve._memo_desc_scrub(labels, row)
+        second = serve._memo_desc_scrub(labels, row)
+        self.assertIs(first, second)
+        self.assertEqual(serve._remote_status(row, labels), "remote")
+        self.assertEqual(labels.get((id(row), "rs")), "remote")
+
     def test_remote_status_unknown_and_include_unknown_seq138(self):
         # Empty / country-only + no signal -> unknown; city/state -> not_remote.
         unknown_rows = [
@@ -553,6 +599,51 @@ class EmployerHide(unittest.TestCase):
         code, body = self._post("   ", True)
         self.assertEqual(code, 400)
         self.assertFalse(body["ok"])
+
+    def test_api_job_and_ranked_omits_desc(self):
+        # /ranked drops desc by default; desc=1 keeps it. /api/job returns desc
+        # for one row, matched like /seen (url or apply_url, query stripped).
+        jobs = json.loads(self.real_jobs_bytes.decode("utf-8")).get("queue") or []
+        sample = next(
+            (r for r in jobs
+             if (r.get("url") or r.get("apply_url")) and (r.get("desc") or "").strip()),
+            None)
+        self.assertIsNotNone(sample, "jobs.json needs a row with url+desc")
+        url = sample.get("url") or sample.get("apply_url")
+        with urllib.request.urlopen(
+                self.base + "/api/job?url=" + urllib.parse.quote(url, safe=""),
+                timeout=30) as r:
+            body = json.loads(r.read().decode())
+        self.assertTrue(body.get("ok"))
+        self.assertEqual(body.get("desc"), sample.get("desc", ""))
+        self.assertEqual(body.get("company"), sample.get("company", ""))
+        # Query string on the url still matches.
+        with urllib.request.urlopen(
+                self.base + "/api/job?url=" + urllib.parse.quote(
+                    url + "?utm=1", safe=""),
+                timeout=30) as r:
+            body_q = json.loads(r.read().decode())
+        self.assertEqual(body_q.get("desc"), sample.get("desc", ""))
+        try:
+            urllib.request.urlopen(
+                self.base + "/api/job?url=" + urllib.parse.quote(
+                    "https://example.invalid/no-such-job", safe=""),
+                timeout=30)
+            self.fail("expected 404")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 404)
+        # Tiny /ranked slice: no desc key unless desc=1.
+        with urllib.request.urlopen(
+                self.base + "/ranked?status=applied&us_only=1", timeout=60) as r:
+            ranked = json.loads(r.read().decode())
+        for job in ranked.get("jobs") or []:
+            self.assertNotIn("desc", job)
+        with urllib.request.urlopen(
+                self.base + "/ranked?status=applied&us_only=1&desc=1",
+                timeout=60) as r:
+            ranked_desc = json.loads(r.read().decode())
+        if ranked_desc.get("jobs"):
+            self.assertIn("desc", ranked_desc["jobs"][0])
 
 
 if __name__ == "__main__":
