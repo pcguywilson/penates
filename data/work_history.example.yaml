@@ -1,0 +1,28 @@
+# work_history.example.yaml -> copy to data/work_history.yaml and edit.
+# data/work_history.yaml is git-ignored. Row 1 is your CURRENT job (current: true).
+# The Workday experience filler and grounded essays read from here.
+jobs:
+- title: Senior Platform Engineer
+  company: Example Corp
+  location: Remote
+  start: 01/2025
+  end: ''
+  current: true
+  description: 'Own a multi-tenant cloud environment end to end: Linux and Windows fleets, monitoring, and infrastructure-as-code with Terraform. Drive compliance through vulnerability scanning and remediation. Designed and deployed an internal containerized platform validated in production.'
+  supervisor: Alex Manager
+- title: DevOps Engineer
+  company: Prior Employer LLC
+  location: Remote
+  start: 01/2020
+  end: 01/2025
+  current: false
+  description: 'Maintained multi-region cloud environments, executed on-prem to cloud migrations, and operated containerized workloads on Docker and Kubernetes with zero-downtime monthly deploys. Built CI/CD pipelines and hardened environments for security and compliance.'
+  supervisor: Sam Lead
+- title: Systems Engineer
+  company: Earlier Company Inc
+  location: Anytown, USA
+  start: 01/2014
+  end: 01/2020
+  current: false
+  description: 'Managed hundreds of physical and virtual servers across Windows and Linux, supported annual PCI-DSS audits, automated operations with PowerShell, and standardized monitoring on Prometheus, Grafana, and Splunk.'
+  supervisor: Pat Supervisor

@@ -1,0 +1,502 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/img/penates-lockup-dark.svg">
+    <img src="docs/img/penates-lockup-light.svg" width="320" alt="Penates — Local answers. Locked facts. You submit.">
+  </picture>
+</p>
+
+A local helper for job applications. It fills what it can from a profile you own, and it
+drafts the written questions the paid extensions meter (why this company, tell us about a
+time, screening essays) with a model running on your own machine. It never submits the
+form.
+
+No account. No cloud LLM required. Nothing leaves the machine by default.
+
+> Two ways to fill, both in a normal browser through one extension: a whole-page **Fill
+> application** that handles identity, EEO, yes/no and dropdowns and drafts the essays, and
+> a per-field answer helper for one written question at a time. Both stop before Submit.
+
+## What's new in v0.7.0
+
+First versioned release. Full list in [CHANGELOG.md](CHANGELOG.md).
+
+- **Optional cloud models.** Answers and essays can each run on Ollama (default), a signed-in
+  Claude Code or Grok CLI, or the Anthropic or xAI API. Off until you pick one on the new
+  **Models** page. A local fallback can catch cloud errors. [Details](#models-local-or-cloud)
+- **Follow-up questions on the answer card.** With a cloud model on essays, the card can ask
+  you up to three questions when it needs more from you, draft from your answers, and save
+  the result as a new story.
+- **Resume tailor.** Pick a job or paste a posting. Penates reorders your real bullets, leads
+  with the skills that match, shows covered vs missing terms, and exports HTML or Markdown. It
+  never adds a bullet or a skill.
+- **Practice applications.** Five fictional forms at `/demo` with traps built in (AI-disclosure
+  canaries, a clearance question, a salary range below your ask, closed screening Yes/No) so you
+  can test a fill end to end without applying anywhere.
+- **Smarter Yes/No.** A posted salary range becomes Yes or No against your expected pay, never
+  your number typed into a Yes/No box. Closed screening questions get Yes, No, or blank for
+  review, never an essay. AI-disclosure questions always stop for you.
+- **Logs survive restarts.** Answers, fills and the last job refresh are kept under `logs/`.
+
+![Models page: local Ollama models plus optional cloud tiers](docs/img/models.png)
+
+## Features
+
+- **Answers from one real story.** Each screening question is classified (owned project,
+  hypothetical, why-company, or gap). The model may dress a story from your bank or admit the
+  gap; it may not invent a project. A validator rejects skills-dumps, wrong word counts, and
+  "let me define DevOps" drafts, then regenerates once and flags for review.
+- **A story bank for what never fits on the résumé.** STAR entries you add in the dashboard,
+  tagged with the tools you actually used. The engine retrieves one match and may name only
+  those tools. An empty bank pauses and asks you to add a story instead of inventing one.
+- **Import answers you already wrote.** Paste a ChatGPT (or other AI) export. Penates strips
+  the "here's a great answer / Option A" wrapper, splits variants, and offers your own wording
+  as a review-flagged draft when the question comes back. Browse, edit, and prune them in the
+  Stories tab, and turn any of them into a STAR story with one click (Make a story).
+- **Jobs from the company's ATS, not job-board soup.** Greenhouse, Lever, Ashby, and Workday
+  boards into one local queue with title, location, salary, and a real apply URL. Every source
+  is a toggle; switch the noisy aggregators off if you only want direct-ATS.
+- **A fit score you can argue with.** Each posting is scored against your own profile by
+  required-skill coverage, not keyword bingo: a one-of-many requirement (AWS *or* GCP) counts
+  as covered when you have any of them, honest gaps are named, and no title or buzzword inflates
+  the number. Every row shows its reasoning. Remote-only, US-only, and minimum salary are
+  filters on the list, never fudge factors in the score.
+- **Fills the form. You submit.** Identity and common screening fields, plus essays drafted in
+  the overlay for you to review. It mounts on application forms only, and the extension requests
+  ATS hosts, not every site.
+- **Local by default.** Ollama on your machine, a profile you keep in YAML on disk, no account,
+  no cloud LLM. Nothing leaves unless you switch a tier to a cloud model yourself (see
+  [Models](#models-local-or-cloud)).
+
+## Why it exists
+
+Applying today means filling the same form far more times than it used to, just to reach
+a human. Browser autofill already handles name, email, and phone. The unique written
+questions are the part the paid tools either skip or answer by shipping your history to a
+cloud API and charging you for it.
+
+Project Penates is the other half: your facts live in YAML on disk, the model runs
+locally through Ollama, and it is not allowed to claim a credential you didn't put in the
+profile. A fluent lie on your application is worse than a blank box.
+
+## Why "Penates"
+
+The Penates were Rome's household gods: guardians of the inner home, kept at your own
+hearth and carried with the family when it moved, not a temple you rent. Fitting for a
+tool whose whole point is that your data stays home and belongs to you.
+
+## What works today
+
+- **Whole-page fill in normal Chrome:** one "Fill application" button scans the form
+  (light DOM, open shadow roots, same-origin iframes), fills identity, EEO, yes/no and
+  radio groups, picks the right option in `react-select`-style dropdowns, drafts the
+  essays, and shows a review panel of what it filled, flagged, or left for you.
+- **Per-field helper:** right-click or a shortcut on any written-answer field for a single
+  grounded draft you can edit, regenerate, and insert.
+- **Genre-aware answers:** each written question is classified (owned-project story,
+  hypothetical, why-company, gap) and answered from a **story bank** you control - real
+  experiences you would tell in an interview but never put on the résumé. The model dresses
+  ONE story or states a gap; it never invents a project. A code validator rejects skills-dump
+  openings, off-target word counts, and definitions where a proposal was asked for, and
+  regenerates once before flagging for review.
+- **Shows only on application forms:** the extension asks for known ATS hosts only (not
+  "all sites"); on those the fill bubble appears only once a form actually scores as an
+  application, and the per-field helper injects on demand anywhere via `activeTab`. A Settings
+  page (mode plus per-site allow/deny lists) overrides the detection when it guesses wrong.
+- Deterministic identity fields (name, email, phone, city, yes/no) from a locked profile.
+- Answers grounded on your real work history: employer, dates, stack.
+- **Gap guard:** a tool or cert you didn't list stays unclaimed; the field is answered honestly and flagged for review.
+- Optional fields you marked "leave blank" stay blank instead of getting a generated essay.
+- It stops before Submit, always.
+
+The whole-page fill is early: it is solid on Greenhouse and `react-select` forms and widens
+from there. Salesforce Lightning and Workday shadow forms are still hardening.
+
+## Find jobs faster: discovery + dashboard
+
+Applying is only half the grind. The other half is finding the postings worth applying to.
+Penates now pulls openings from several sources into one local queue, ranks them against
+your lane, and shows them in a dashboard so you stop checking five sites by hand every day.
+
+![Penates Jobs view: one row per employer, profile-relative fit scores, remote and US filters](docs/img/jobs.png)
+
+*The Jobs view (demo data). One row per employer with its best-scoring role; "+N more" expands
+the rest. A dot marks a strong fit. **NEW** marks roles from the latest refresh, **viewed** marks
+roles you already opened, and applied rows dim. The header chip shows the local model and goes
+red if the engine is down.*
+
+Click any row for a preview pane with the posting's details and a one-click path to the
+real apply page:
+
+![Preview pane](docs/img/preview.png)
+
+### Sources
+
+| Source | How | Notes |
+|---|---|---|
+| **Company ATS boards** | **direct public APIs (Greenhouse, Lever, Ashby, Workday, SmartRecruiters, Workable)** | **the reliable spine: clean titles, locations, posted dates, real apply URLs; from `config/companies.yml`, which grows by itself: any board seen in a discovered job is added** |
+| LinkedIn / Indeed / Google | JobSpy (MIT) | Easy Apply on LinkedIn is skipped (no employer link to fill) |
+| Sites with no API (any job board host you add) | dashboard **Search** tab | a Google query generator: your roles, keywords, sites and look-back become one search per site group, with optional level words and clearance terms; paste good links back and Penates adds them |
+| hiring.cafe | public `_next/data` JSON | direct employer apply URLs, salary, posted date |
+| Built In | server-rendered HTML | Easy Apply cards skipped; resolves to the employer ATS |
+| RemoteOK | public JSON API | remote-only, no key |
+| Remotive | public JSON API | remote-only, no key (thin catalog) |
+| ZipRecruiter | JobSpy, opt-in | off by default (Cloudflare-gated) |
+
+Everything runs locally and writes to `data/jobs.json`. Nothing needs a key or an account.
+
+### Pipeline
+
+Each source is a small script that filters to your titles and appends new postings to the
+store, deduped by URL. Then `resolve.py` turns listing links into real apply URLs where it
+can, and `rank.py` scores each row against your lane.
+
+```
+python scan_ats.py       # company ATS boards (Greenhouse/Lever/Ashby/Workday/SmartRecruiters/Workable) - the spine
+python discover.py       # LinkedIn / Indeed / Google via JobSpy
+python hiringcafe.py     # hiring.cafe
+python builtin.py        # Built In (employer-direct only)
+python remoteok.py       # RemoteOK
+python remotive.py       # Remotive
+python resolve.py        # listing URL -> employer apply URL; fetch full JD text
+python rank.py           # score against your lane
+```
+
+Or skip the CLI: open the dashboard and hit **Refresh jobs**, which runs the whole pipeline
+in the background and respects the source toggles in **Settings**.
+
+The **Search** tab is a Google query generator for job sites Penates can't scan. Add roles,
+include and exclude keywords, and the sites to search (host names like `boards.greenhouse.io`),
+pick a look-back window, and it builds one Google search per site group with Open and Copy.
+A live query preview updates as you edit. Level words (match or exclude words like senior, staff
+or junior) and clearance terms are optional modifiers, off by default. Paste good links into
+**Add job links** and Penates adds them, plus the company's whole board when it is a
+Greenhouse, Lever, Ashby, Workday, SmartRecruiters or Workable board.
+
+![Search: roles, keywords, sites, look back, and the generated Google searches](docs/img/search.png)
+
+![Settings: job retention, local test pages, job sources, search terms](docs/img/settings.png)
+
+### Dashboard
+
+```
+python serve.py                       # http://127.0.0.1:8765/dashboard
+```
+
+- **Jobs** - a list scored against your profile, grouped one row per employer, with a per-row
+  fit score and the reason behind it. Filter to remote-only, US-only and a minimum salary; sort
+  by score or newest; hide an employer you never want to see (reversible, from the row's hover
+  icon or the preview pane); each row opens a preview pane with an Apply + autofill button that
+  hands off to the extension. Sorting by newest puts a company with a fresh role at the top even
+  when its other roles are older, and opens that group.
+- **Search** - a Google query generator for any job site you list (roles, keywords, sites, look
+  back), plus a paste box that adds job links (and their company boards) to the queue.
+- **Knowledge** - Profile, Stories and Resume, everything Penates knows about you (below).
+- **Settings** (gear menu) - edit your search terms and turn sources on or off (saved to `config.json`),
+  set job retention (delete jobs older than 1 week / 2 weeks / 1 month / custom days, or never;
+  jobs you applied to or marked go/verify are always kept, and deleted jobs are not re-added),
+  and open the local test pages: **Demo application** (`/demo`, five fictional applications
+  with traps, to run a full fill end to end) and **QA bench** (`/qa`, ask any question and see
+  the answer, the tier that answered it, and the timing).
+- **Models** (gear menu) - the Ollama connection and the answers and essay models, plus the
+  optional cloud tiers. See [Models: local or cloud](#models-local-or-cloud).
+- **Logs** (gear menu) - discovery runs, fills, and answer generations. Kept in `logs/`, so a
+  restart does not empty them.
+- **Profile** - edit the facts the answer helper draws on, card by card: personal, education,
+  EEO, eligibility and pay, screening answers, skills, a "Do NOT claim" list the honesty guard
+  enforces, work history, and references (used only when a form requires them). Saving a card
+  rewrites only that section of `profile.yaml`, keeps a timestamped backup, and takes effect on
+  the next fill with no restart.
+- **Stories** - add and edit the story bank the answer engine draws on (the interview-grade
+  experiences that never make the résumé), no YAML editing. Imported AI answers live in the same
+  tab; **Make a story** drafts a STAR story from one with the local model (checked against your
+  Do NOT claim list) and pre-fills the form. Nothing is saved until you save it.
+- **Resume** - tailor your resume to one job (below).
+- **Themes** - Stone (default), Slate, Nord and Light, in the gear menu.
+
+#### Resume tailor
+
+Knowledge > Resume. Pick a job from your queue or paste a posting. Penates picks and reorders
+the bullets already in `resume.yaml`, leads the skills section with what the posting asks for,
+and lists covered and missing terms. Missing terms are for you to decide on; nothing is written
+in. Print to PDF, download HTML, copy Markdown, or draft a cover letter from the same facts.
+
+![Resume tailor: covered and missing terms, tailored resume preview](docs/img/resume-tailor.png)
+
+#### Remote filtering you can trust
+
+![Filters popover: workplace type, job type, US only, minimum salary, closed, hide viewed](docs/img/jobs-filters.png)
+
+Filters live behind one **Filters** button, with a one-line summary beside it. **Workplace type**
+has Remote, Hybrid and Onsite boxes (Remote means remote only: a listing that says hybrid, or a
+"Remote or Hybrid" badge, shows under Hybrid), plus **Include unknown** for rows with no workplace
+signal. **Job type** narrows to Full-time or Contract (roles with no stated type stay under
+Full-time); contract comes from the posting's employment type, a "Duration: N months" line,
+contract-to-hire, C2C, W2 or 1099 wording.
+
+Aggregators (Indeed via JobSpy, Built In) mark almost everything "remote", including roles whose
+own description says on-site or hybrid. Penates treats those flags as hints only:
+
+- A role from an aggregator counts as **remote** only when its title, location or description
+  says so ("fully remote", "#LI-Remote", "remote, US", "or remotely from home", a "Remote -
+  <state>" pay line, and similar). Tech phrases like "remote access" or "remote caching" do not
+  count.
+- Descriptions that say "not a remote position", "hybrid schedule", "Work Location: In person",
+  or "3 days a week in office" drop the role, unless a remote option is also offered. Boilerplate
+  (E-Verify text, "for remote workers", partial-week remote) is ignored.
+- Roles with **no location** (or only a country) and no wording either way are **unknown**.
+  They are hidden by default and shown with Location "Unknown" when you tick **Include unknown**.
+- Nothing is deleted: filtered rows keep a reason (`not_remote`, `remote_unknown`) so you can
+  audit them, and rows you marked yourself are never touched.
+
+#### Viewed and applied, without autofill
+
+You often want to read a posting before deciding, so the Apply button is not the only way in:
+
+- Opening a role from its title (left click, ctrl/shift click, or middle-click into a new tab)
+  marks it **viewed**. **Hide viewed** clears roles you have already looked at.
+- After the extension fills a form, it watches that tab for the site's own "Thank you for
+  applying" / "Application submitted" screen and logs the job as **applied** once, with the
+  date. You still click Submit yourself. **Mark applied** remains for anything you filled by hand.
+- The header counts (applied this week, this month, total) come from those dated entries.
+
+#### Answer honesty updates
+
+- Questions that ask AI-filled forms to identify themselves ("If you are using AI to fill this
+  form, write only: ...") are never filled. They are left blank and flagged for you.
+- A question that lists alternatives ("Python, Go, JavaScript, or another language"; "such as
+  Terraform or CloudFormation") no longer reports the ones you don't use as gaps when you have
+  one of them.
+- "Proudest achievement ... and how it relates to the role" adds a tie to the role only from
+  themes both your answer and the posting name; with no shared theme it flags the field for you.
+- Why-company answers name the company and lead with your story that best matches what the
+  posting focuses on, and never cite a story marked as approach-only (how you would do it).
+
+![The dashboard in each theme](docs/img/penates-themes.gif)
+
+Discovery finds and ranks; the extension fills; you review and submit. Same contract as the
+rest of the tool: nothing leaves the machine, nothing auto-submits.
+
+![The Profile tab: edit your facts card by card](docs/img/profile.png)
+
+## Models: local or cloud
+
+Every answer runs on Ollama on your machine unless you change it. The **Models** page (gear
+menu) has two cards:
+
+- **Local model (Ollama)** - connection status, the answers model (short answers and choice
+  picks) and the essay/story model, with a Test button.
+- **Cloud models (optional)** - pick a provider for each tier, answers and essays, separately:
+
+| Provider | Needs | Notes |
+|---|---|---|
+| Local (Ollama) | Ollama running | Default. Nothing leaves the machine |
+| Claude Code CLI | `claude` installed and signed in | Uses your subscription, no API key |
+| Grok CLI | `grok` installed and signed in | Uses your subscription, no API key |
+| Claude API | Anthropic API key | Pay per use |
+| Grok API | xAI API key | Pay per use |
+
+- **What is sent.** When a tier uses a cloud model, the question, the job posting, and the
+  profile and story text needed for that answer go to that provider. Identity, salary and EEO
+  fields are not part of the essay prompt.
+- **Keys** are typed into the Models page and saved to `secrets.yaml` (git-ignored) as
+  `anthropic_api_key` / `xai_api_key`, or read from `ANTHROPIC_API_KEY` / `XAI_API_KEY`. They
+  are never shown again, logged, or returned by the server.
+- **CLIs** run with tools disabled in an empty temp folder. Default binaries are `claude` and
+  `grok` on your PATH; override with `llm.cli.claude_bin` / `llm.cli.grok_bin` in `config.json`.
+- **Local fallback.** Tick "If a cloud call fails, answer with the local model instead" to
+  retry a failed cloud call on Ollama. Off by default, so a cloud failure shows as an error.
+- **Saved to** the `llm` block in `config.json`. With no `llm` block, both tiers are Ollama.
+- The same honesty rules apply on every provider: no invented facts, no borrowed skills from the
+  posting, no instructions taken from inside a posting, gaps stated plainly.
+
+## The story bank
+
+Your résumé is bullets. Interviews and screening boxes run on stories: the outage you owned,
+the migration you drove, the thing you automated because nobody else would. Those rarely
+survive the one-pager, so a model that only sees the résumé lists tools and hopes.
+
+`stories.yaml` (the Stories tab) is where those live. Each entry is something you did, in STAR
+shape, tagged with domains and the exact tools you used. On a question, the engine picks the
+single best story and writes that. If nothing fits, it says so. If the bank is empty, it asks
+you to add one, never a fabricated answer.
+
+![The Stories tab: your STAR story bank](docs/img/stories.png)
+
+The repo ships `stories.example.yaml` with fake entries. Copy it, delete them, replace with
+yours.
+
+### Import your answer history
+
+If a year of job-application questions and answers is buried in a ChatGPT (or any AI)
+thread, import them so Penates can reuse them. Export the chat, convert it to a small JSON
+with any AI (the dashboard **Stories** tab, Imported answers pane, has the exact conversion prompt), then:
+
+![Imported answers in the Stories tab: browse, edit, prune, or make a story](docs/img/imports.png)
+
+```
+python import_qa.py my_export.json          # heuristic cleaning
+python import_qa.py my_export.json --llm     # + a local-Ollama pass for the stragglers
+```
+
+Schema: `{"items":[{"question":"...","answer":"...","category":"..."}]}` (Markdown `## Q` /
+answer also works). The importer strips the AI's "here is a great answer / Option A/B"
+wrapper, splits multi-option answers into variants, and writes `data/imported_answers.json`.
+
+These are an **untrusted reference**, not facts. When the same or a very similar question
+appears, the cleaned answer surfaces as a review-flagged draft you edit before inserting;
+approving it (insert) promotes it to your learned store. The gap-guard still governs
+anything generated fresh, and nothing imported is auto-inserted or auto-submitted.
+
+## Requirements
+
+- Windows 10/11 (primary); macOS and Linux work for the answer path.
+- Python 3.11 or 3.12, Google Chrome, [Ollama](https://ollama.com), Git.
+
+```bash
+ollama pull llama3.2:3b          # classify + short answers
+ollama pull qwen2.5:7b-instruct  # grounded essays
+```
+
+Everything stays on localhost: Ollama `11434` and the tool's server `8765`. No paid API,
+Docker, or database. Cloud models are optional (see [Models](#models-local-or-cloud)).
+
+## Quickstart
+
+1. Install Ollama and pull the two models above.
+2. `pip install -r requirements.txt`
+3. Copy the example configs and fill in your own facts (the real ones are git-ignored):
+   ```
+   cp profile.example.yaml profile.yaml
+   cp data/work_history.example.yaml data/work_history.yaml
+   cp application.example.yaml application.yaml
+   cp stories.example.yaml stories.yaml            # your story bank (or add stories in the dashboard)
+   cp config/companies.example.yml config/companies.yml
+   cp resume.example.yaml resume.yaml              # for the Resume tailor
+   ```
+4. Double-click **Start Penates.bat**. One click: it starts Ollama if it is not running,
+   restarts the local server on `127.0.0.1:8765`, checks it answers, and opens the dashboard.
+   Run it again any time to restart. (Right-click > Send to > Desktop for a shortcut.
+   Elsewhere: `python serve.py`.)
+5. In the dashboard **Models** page (gear menu), confirm Ollama shows **Connected** and pick the
+   answers model and the essay/story model (Test sends a one-line prompt and shows the reply
+   time). Leave Cloud models on Local unless you want them.
+6. In `chrome://extensions` (Developer mode, then Load unpacked), load the
+   **`penates-extension/`** folder. It works in your normal Chrome. The install
+   prompt lists only known ATS hosts, not "all sites": the fill bubble auto-mounts on those
+   application pages, and the per-field helper injects on demand (right-click / Alt+A) on any
+   page you invoke it, via `activeTab`.
+7. On an application page, click **Fill application** for the whole form, or focus a
+   written-answer box and right-click **Answer with local AI** (or press **Alt+A**). The draft is inserted; a toast shows the method and any review flag.
+
+You can run this next to a commercial autofiller: let it do the structured fields, turn
+off its AI on the unique questions, and let Penates handle those.
+
+## Configuration
+
+| File | What it is | In repo |
+|---|---|---|
+| `profile.yaml` | Your locked facts (source of truth) | `.example` only; real is git-ignored |
+| `data/work_history.yaml` | Dated employment history | `.example` only; real is git-ignored |
+| `data/jobs.json` | Your application queue | `.example` only; real is git-ignored |
+| `application.yaml` | The current job's company blurb | `.example` only; real is git-ignored |
+| `stories.yaml` | Your story bank (interview-grade experiences the answer engine uses) | `.example` only; real is git-ignored |
+| `config/companies.yml` | ATS boards to scan (auto-grows from discovered jobs) | `.example` only; real is git-ignored |
+| `data/imported_answers.json` | Imported AI-chat answers (reference) | git-ignored (runtime) |
+| `fields.yaml` | Field-label to profile mapping rules | shipped |
+| `config.json` | Dashboard search terms, source toggles, model tiers (`llm` block) | `.example` only; runtime is git-ignored |
+| `resume.yaml` | Your resume as data for the Resume tailor | `.example` only; real is git-ignored |
+| `secrets.yaml` | Optional cloud API keys (and ATS logins) | never committed |
+| `logs/` | Answer, fill and refresh logs | git-ignored (runtime) |
+| `answers.yaml` | Intent templates for essays | shipped |
+
+## How it's split
+
+| Layer | Job |
+|---|---|
+| `profile.yaml` + `data/work_history.yaml` | Source of truth. Not the model. |
+| `fields.yaml` | Deterministic rules: yes/no, work authorization, city, salary, EEO you chose. |
+| `answers.yaml` + `apply.py` | Deterministic identity + short intent-template answers (why-company, ratings). |
+| `stories.yaml` + `essay.py` | The story bank and the genre engine: classify the question, retrieve ONE real story (or a gap), validate the draft in code. |
+| Browser | One MV3 extension in normal Chrome (whole-page Fill + per-field helper) talking to a local server. |
+| Discovery (`scan_ats.py` + `sources/`, `discover.py`, `hiringcafe.py`, `builtin.py`, `remoteok.py`, `remotive.py`) | ATS-API boards first, then aggregators; pull postings into `data/jobs.json`, dedupe, `rank.py` scores, `serve.py` dashboard shows them. |
+| You | Captchas, MFA, account creation, the final read, and Submit. |
+
+Every answer resolves to one of three states: **AUTO** (deterministic, filled),
+**REVIEW** (generated but touches a limited-experience area; filled and flagged), or
+**PAUSE** (not enough grounded evidence; left for you). Two guards run first: the **gap
+guard** (never claim a listed gap) and a **cross-contamination guard** (a "why this
+company" answer must name the company on *this* page, never one pulled from another posting).
+
+## Honesty
+
+The model may rephrase work you actually did and use a company blurb you supplied. It may
+not add degrees, years, clearances, or tools that aren't in your profile. If you don't
+list Security+, it won't claim Security+. A missing fact becomes a review flag, never a
+confident lie. You review every answer, and the tool never submits unless you explicitly
+turn it on.
+
+## What it is not
+
+- Not an auto-apply bot.
+- Not a résumé that grows extra degrees.
+- Not a substitute for reading the posting.
+
+## Privacy
+
+No telemetry; nothing leaves your machine by default. Never commit `profile.yaml`,
+`secrets.yaml`, résumés, or the contents of `data/`; they're git-ignored. The public tree
+ships only fake example configs.
+
+## Related projects
+
+The space around local, honest job-application tooling, on both the apply side and the
+discovery side. Penates borrows ideas, not code; where it leans on one, it is credited.
+
+| Project | Local LLM | Autofill | Essays | You submit | Note |
+|---|---|---|---|---|---|
+| [Offlyn Apply](https://github.com/offlyn-ai/offlyn-apply) | Ollama | wide ATS | rewrite menus | yes | Closest UX; strong context-menu verbs |
+| [AgentMan](https://github.com/AliRezaBeigy/AgentMan) | Ollama | page agent (CDP) | via agent | yes | Multi-step portals, "Add entry" loops |
+| [ApplyEase](https://github.com/sainikhil1605/ApplyEase) | Ollama / LM Studio | common fields | custom answers | yes | React + FastAPI + Postgres/pgvector |
+| [AI-Job-Applier](https://github.com/khmkarimhisham/AI-Job-Applier) | Ollama | autofill | context files | yes | Learn-as-you-go into cache |
+| [Persona](https://github.com/nithiin7/persona) | Ollama | none | resume builder | n/a | Same manifesto, different artifact |
+| [ApplyPilot](https://github.com/Pickle-Pixel/ApplyPilot) | local | wide | answers | yes | JobSpy + Workday YAML; AGPL, not vendored |
+| [Simplify Copilot](https://simplify.jobs/copilot) | cloud | strong | paid/cloud | yes | Great for structure; not local |
+| [JobOps](https://github.com/DaKheera47/job-ops) | Ollama / LM Studio / cloud | - | CV tailor | yes | DevOps-style pipeline: search 10+ boards, AI fit scoring, tracking |
+| [career-ops](https://github.com/career-ops-hq/career-ops) | local (CLI) | - | CV tailor | n/a | ATS scan + A-H JD evaluation; the discovery template. MIT |
+| [Personal JobPilot](https://github.com/TheCromazone/Personal-JobPilot) | local | - | - | n/a | ATS-API-first discovery (Greenhouse/Lever/Ashby/Workday) |
+| [JobSpy](https://github.com/Bunsly/JobSpy) | - | - | - | n/a | Board scraper library (`python-jobspy`) that Penates calls |
+| [freehire](https://github.com/strelov1/freehire) | - | - | - | n/a | Large ATS-adapter aggregator (Go); dedupe reference |
+| [Pinloop CLI](https://github.com/pinloop-ai/pinloop-cli) | - | - | - | n/a | Hosted ATS index as a CLI / URL hose |
+
+Penates' distinct position: local, a hard anti-fabrication contract, a genre-aware answer
+engine that dresses one real story or states a gap, and direct-ATS discovery deduped into
+the same local store, all in a normal browser. The discovery side (`sources/`,
+`scan_ats.py`) follows career-ops' adapter pattern and freehire's dedupe idea, and calls
+`python-jobspy` rather than vendoring it; no code is copied from AGPL-licensed tools.
+
+## Roadmap
+
+- **Done:** genre-aware answer engine with a user-owned story bank and a code validator
+  (no skills dumps, honest gaps, enforced word/sentence counts); ATS-API job discovery
+  (Greenhouse/Lever/Ashby/Workday) with dedupe; full-JD enrichment so scoring reads the real
+  requirements; a profile-relative fit score (required-coverage with one-of-many credit and
+  named gaps) plus remote/US/salary list filters; application-form-only overlay gating with a
+  Settings page; a Stories tab to grow the bank without editing YAML; optional cloud and CLI
+  models per tier with a local fallback (v0.7.0); a resume tailor from the same locked facts
+  (v0.7.0); practice applications with traps (v0.7.0).
+- **Now (answer path):** better question-label detection (aria, headings, selected text),
+  native value setter with `InputEvent` for React/LWC fields, per-intent length caps.
+- **Next (structured fill without lying):** identity fields for Greenhouse/Rippling/Ashby directly in the extension (no CDP), strict Yes/No polarity, never pick "Decline to self-identify" when a real answer exists, Workday account and experience from `work_history.yaml`, Salesforce Flow shadow-DOM handling.
+- **Later:** interview prep built on the same story bank (rehearse behavioral answers from your own STARs), a generic OpenAI-compatible endpoint behind the same compose contract, a PII-free application log.
+- **Not planned:** auto-submit as default, mass-apply, hosted SaaS, or inventing skills to raise a match score.
+
+## License
+
+[PolyForm Noncommercial License 1.0.0](LICENSE): free to use, study, and modify for
+noncommercial purposes; selling a hosted clone is not permitted.
+
+## Disclaimer
+
+This tool drafts and fills; **you** review and submit. You are responsible for the
+accuracy of everything you send. It is built to keep your answers truthful, so keep them
+that way.

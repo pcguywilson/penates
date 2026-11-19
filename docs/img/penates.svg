@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Penates">
+  <title>Penates</title>
+  <g fill="#1B2A38" color="#1B2A38">
+  <!-- shrine + locked door. Original geometry. -->
+  <polygon points="512,96 96,340 928,340"/>
+  <rect x="168" y="328" width="688" height="36"/>
+  <rect x="168" y="364" width="88" height="460"/>
+  <rect x="768" y="364" width="88" height="460"/>
+  <rect x="148" y="808" width="128" height="28"/>
+  <rect x="748" y="808" width="128" height="28"/>
+  <path fill-rule="evenodd" d="
+    M 372 400 H 652 V 808 H 372 Z
+    M 512 488
+    m -58 0 a 58 58 0 1 1 116 0 a 58 58 0 1 1 -116 0
+    M 488 530 L 536 530 L 556 690 L 468 690 Z
+  "/>
+
+  </g>
+</svg>

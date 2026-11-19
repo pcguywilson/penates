@@ -1,0 +1,38 @@
+# Your resume as data. The Resume tab tailors from this file: it picks and reorders
+# these bullets for a posting and never adds one. Copy to resume.yaml (git-ignored).
+header:
+  name: Jane Example
+  title: Operations Manager
+profile_summary: >-
+  Operations manager with ten years running warehouse and fulfillment teams. Cut order
+  errors, built training that new hires actually finish, and keep sites audit-ready.
+skills:
+  Operations: [Inventory control, Lean, Six Sigma Green Belt, Vendor management]
+  Systems: [SAP, NetSuite, Excel, Power BI]
+  People: [Hiring, Training programs, Shift scheduling, Safety coaching]
+experience:
+  - title: Operations Manager
+    company: Northfield Supply Co.
+    location: Columbus, OH
+    dates: 2019 - Present
+    bullets:
+      - Run a 60-person, two-shift fulfillment center shipping 4,000 orders a day.
+      - Rebuilt the pick-and-pack process with Lean methods; order errors fell by half.
+      - Moved inventory counts from paper to NetSuite cycle counts.
+      - Built a two-week onboarding program; 90-day retention rose from 60 to 82 percent.
+    achievements:
+      - label: Safety
+        text: Led the site to two years with no lost-time injuries.
+  - title: Shift Supervisor
+    company: Lakeview Distribution
+    location: Dayton, OH
+    dates: 2015 - 2019
+    bullets:
+      - Supervised 25 associates on the night shift across receiving and shipping.
+      - Built Power BI dashboards for daily throughput and overtime.
+    achievements: []
+education:
+  degree: B.S. Business Administration, Ohio State University
+  certs:
+    - Six Sigma Green Belt
+    - OSHA 30
