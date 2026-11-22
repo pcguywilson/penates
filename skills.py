@@ -13,7 +13,7 @@ pure-GCP role at 100): NO umbrella aliases. 'cloud' / 'devops' / 'sre' /
 credit AWS/GCP/Azure. Only concrete tools/services/languages count. Umbrella
 words are handled by the title band in rank.py, never as skill fit.
 """
-import re, html, functools
+import bisect, re, html, functools
 
 # --------------------------------------------------------------- canonical vocab
 # surface spelling (lowercased) -> canonical display form. Curated cloud / devops /
@@ -167,23 +167,106 @@ _INLINE_HEADERS = re.compile(
 
 def _split_inline_headers(text):
     """These postings often run headers inline ('...Requirements: 5+ years...AWS...') with no line
-    breaks. Put each 'Header:' on its own line so the section parser can see it."""
-    return _INLINE_HEADERS.sub(lambda m: "\n" + m.group(1) + ":", text)
+    breaks. Put each 'Header:' on its own line so the section parser can see it.
+
+    Same matches as _INLINE_HEADERS over the whole text. Colons are rare relative
+    to the posting length, so each candidate is checked in a short window instead
+    of running the header regex at every character."""
+    if not text or ":" not in text:
+        return text or ""
+    parts = []
+    last = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        j = text.find(":", i)
+        if j < 0:
+            break
+        start = j - 80 if j >= 80 else 0
+        if start < last:
+            start = last
+        lead = "\n" if start > 0 and text[start - 1] == "\n" else ""
+        chunk = lead + text[start:j + 1]
+        hit = None
+        for m in _INLINE_HEADERS.finditer(chunk):
+            if m.end() == len(chunk):
+                hit = m
+                break
+        if hit is None:
+            i = j + 1
+            continue
+        abs_start = start + hit.start() - len(lead)
+        if abs_start < last:
+            i = j + 1
+            continue
+        parts.append(text[last:abs_start])
+        parts.append("\n" + hit.group(1) + ":")
+        last = j + 1
+        i = j + 1
+    if not parts:
+        return text
+    parts.append(text[last:])
+    return "".join(parts)
 
 
-def extract_jd_skills(desc):
+def _skills_by_line(text, phrases):
+    """Canon + HAVE-phrase hits per line, from one scan of the whole text.
+
+    Matches cannot cross a newline (the vocab is word characters), so a hit
+    belongs to exactly one line. Same tokens as canon_skills_in(line) |
+    phrase_skills_in(line)."""
+    lines = text.split("\n")
+    starts = []
+    pos = 0
+    for raw in lines:
+        starts.append(pos)
+        pos += len(raw) + 1
+    by_line = [set() for _ in lines]
+
+    def _put(m, tokens):
+        if not tokens:
+            return
+        idx = bisect.bisect_right(starts, m.start()) - 1
+        if idx >= 0:
+            by_line[idx] |= tokens
+
+    for m in _VOCAB_RE.finditer(text):
+        c = CANON.get(m.group(1).lower())
+        if c:
+            _put(m, {c})
+    compiled = _phrase_matcher(phrases)
+    if compiled:
+        rx, credit = compiled
+        for m in rx.finditer(text):
+            key = _norm_phrase(m.group(1)).lower()
+            _put(m, set(credit.get(key, ())))
+    return lines, by_line
+
+
+def extract_jd_skills(desc, profile=None, phrases=None):
     """Return (required, preferred, found_req_section).
 
     Section-aware: skills under REQUIRED headers -> required; under PREFERRED ->
     preferred; NON-REQ closes the block. If no requirement/preferred header is
     ever found (thin/flat JD), EVERY recognized skill is returned as PREFERRED and
     found_req_section=False, so the caller applies no required-gap penalty
-    (false-soft beats false-hard on thin aggregator blurbs)."""
+    (false-soft beats false-hard on thin aggregator blurbs).
+
+    Profile HAVE strings of length >= 4 are phrase-matched (word boundary,
+    longest first) into the same sets and credited like canon skills. Shorter
+    tokens (Go, C, R, IT, AD) stay on the canon/alias matcher only.
+    `phrases`, when passed, is that list and profile.yaml is not read.
+    Otherwise phrases come from `profile` (default profile.yaml). Tests pass a dict."""
     text = _split_inline_headers(clean_desc(desc))
+    if phrases is None:
+        phrases = tuple(have_phrases(profile))
+    else:
+        phrases = tuple(have_phrases(phrases=phrases))
+    lines, by_line = _skills_by_line(text, phrases)
     required, preferred = set(), set()
     found_req_section = False
     mode = None  # None | 'req' | 'pref'
-    for raw in text.split("\n"):
+    for i, raw in enumerate(lines):
         line = raw.strip()
         if not line:
             continue
@@ -194,7 +277,7 @@ def extract_jd_skills(desc):
             mode = "pref"; found_req_section = True
         elif _REQ_HEADER.match(line):
             mode = "req"; found_req_section = True
-        skills = canon_skills_in(line)
+        skills = by_line[i]
         if not skills:
             continue
         if mode == "req":
@@ -204,7 +287,9 @@ def extract_jd_skills(desc):
         # mode None: skills seen outside any block are held for the fallback below
     if not found_req_section:
         # thin/flat JD: no structure to trust -> everything is a soft (preferred) signal
-        preferred = canon_skills_in(text)
+        preferred = set()
+        for s in by_line:
+            preferred |= s
         required = set()
     return required, preferred, found_req_section
 
@@ -266,46 +351,157 @@ _HAVE_KEYS = ["cloud", "iac", "containers", "cicd", "monitoring_security",
 
 @functools.lru_cache(maxsize=1)
 def _profile():
+    """profile.yaml as a dict. A missing file is no extra phrases, not an error."""
     import yaml
-    with open("profile.yaml", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    try:
+        with open("profile.yaml", encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        return {}
 
-def have_set():
+def _as_tokens(item):
+    """Canon names for a profile string, or the stripped string when canon misses it."""
+    s = str(item).strip()
+    if not s:
+        return set()
+    return canon_skills_in(s) or {s}
+
+def _limited_items(p):
+    le = p.get("limited_experience") or {}
+    if isinstance(le, dict):
+        return list(le.keys())
+    if isinstance(le, (list, tuple)):
+        return list(le)
+    return []
+
+def _limited_tokens(p):
+    out = set()
+    for item in _limited_items(p):
+        out |= _as_tokens(item)
+    return out
+
+def _norm_phrase(s):
+    return re.sub(r"\s+", " ", str(s).strip()).strip()
+
+def have_phrases(profile=None, phrases=None):
+    """HAVE strings with len >= 4, longest first.
+
+    Short tokens (Go, C, R, IT, AD) are omitted so they stay on canon/alias
+    matching and are not free-string matched. No noun extractor.
+
+    `phrases`, when passed, is normalized and returned. profile.yaml is not read.
+    `profile` defaults to profile.yaml only when both arguments are omitted.
+    A caller that already has HAVE passes `phrases=HAVE` (or a profile dict)."""
+    raw = []
+    if phrases is not None:
+        for item in phrases:
+            s = _norm_phrase(item)
+            if len(s) >= 4:
+                raw.append(s)
+    else:
+        p = _profile() if profile is None else profile
+        for k in _HAVE_KEYS:
+            for item in (p.get(k) or []):
+                s = _norm_phrase(item)
+                if len(s) >= 4:
+                    raw.append(s)
+    raw.sort(key=lambda s: (-len(s), s.lower()))
+    out, seen = [], set()
+    for s in raw:
+        low = s.lower()
+        if low in seen:
+            continue
+        seen.add(low)
+        out.append(s)
+    return out
+
+@functools.lru_cache(maxsize=16)
+def _phrase_matcher(phrases):
+    """Compiled longest-first alternation plus the credit token for each phrase."""
+    if not phrases:
+        return None
+    parts = []
+    credit = {}
+    for s in phrases:
+        bits = [re.escape(b) for b in s.split(" ") if b]
+        if not bits:
+            continue
+        parts.append(r"\s+".join(bits))
+        credit[s.lower()] = frozenset(_as_tokens(s))
+    if not parts:
+        return None
+    rx = re.compile(
+        r"(?<![A-Za-z0-9])(" + "|".join(parts) + r")(?![A-Za-z0-9])", re.I)
+    return rx, credit
+
+def phrase_skills_in(text, phrases=None, profile=None):
+    """Profile HAVE phrases that hit `text` on word boundaries.
+
+    `phrases` is a tuple from have_phrases (longest first). When omitted, it is
+    built from `profile` (default profile.yaml). Returns the same tokens
+    have_set() would credit for those strings."""
+    if not text:
+        return set()
+    if phrases is None:
+        phrases = tuple(have_phrases(profile))
+    elif not isinstance(phrases, tuple):
+        phrases = tuple(phrases)
+    compiled = _phrase_matcher(phrases)
+    if not compiled:
+        return set()
+    rx, credit = compiled
+    out = set()
+    for m in rx.finditer(text):
+        key = _norm_phrase(m.group(1)).lower()
+        out |= set(credit.get(key, ()))
+    return out
+
+def have_set(profile=None):
     """Canonical skills the user HAS, from profile.yaml HAVE lists (+ derived: CI/CD
-    from GitHub Actions, IaC from Terraform/Ansible)."""
-    p = _profile()
+    from GitHub Actions, IaC from Terraform/Ansible).
+
+    limited_experience keys are removed: those are SUPPORTED (half credit), not HAVE.
+    `profile` defaults to profile.yaml; tests pass a dict."""
+    p = _profile() if profile is None else profile
     have = set()
     for k in _HAVE_KEYS:
         for item in (p.get(k) or []):
-            have |= canon_skills_in(str(item)) or {_title(item)}
+            have |= _as_tokens(item)
     if {"GitHub Actions", "GitLab CI", "Jenkins"} & have or "GitHub Actions" in have:
         have.add("CI/CD")
     if {"Terraform", "Ansible", "CloudFormation"} & have:
         have.add("IaC")
+    have -= _limited_tokens(p)
     return have
 
-def gap_set():
+def gap_set(profile=None):
     """Canonical skills the user LACKS (heavier penalty when REQUIRED), from
-    profile.yaml limited_or_none plus Go/Ruby (no primary-language experience)."""
-    p = _profile()
+    profile.yaml limited_or_none. Go/Ruby are gaps only when the profile lists
+    them (they live in limited_or_none, not a hardcoded set)."""
+    p = _profile() if profile is None else profile
     gap = set()
     for item in (p.get("limited_or_none") or []):
-        gap |= canon_skills_in(str(item)) or {_title(item)}
-    gap |= {"Go", "Ruby"}
-    return gap - have_set()  # a HAVE never doubles as a GAP
+        gap |= _as_tokens(item)
+    return gap - have_set(p)  # a HAVE never doubles as a GAP
 
-def supported_blob():
+def supported_blob(profile=None):
     """Lowercased prose from signature_projects + canonical_stories - a skill not in
     the HAVE lists but named here counts as SUPPORTED (0.5 of a HAVE)."""
-    p = _profile()
+    p = _profile() if profile is None else profile
     parts = list(p.get("signature_projects") or [])
     cs = p.get("canonical_stories") or {}
     if isinstance(cs, dict):
         parts += list(cs.values())
     return " ".join(str(x) for x in parts)
 
-def supported_set():
-    return canon_skills_in(supported_blob()) - have_set()
+def supported_set(profile=None):
+    """Story-blob canon skills plus limited_experience keys, minus HAVE.
+
+    limited_experience is half credit (SUPPORTED), never a full HAVE."""
+    p = _profile() if profile is None else profile
+    supp = canon_skills_in(supported_blob(p))
+    supp |= _limited_tokens(p)
+    return supp - have_set(p)
 
 def _title(s):
     return str(s).strip()

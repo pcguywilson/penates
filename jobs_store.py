@@ -248,16 +248,19 @@ def add_discovered(jobs):
 
 
 def reconcile_remote_only():
-    """Mark discovered jobspy/builtin rows that fail remote-only as filtered.
+    """Mark discovered rows that fail remote-only as filtered.
 
-    Also re-run filtered rows whose filter_reason is remote_unconfirmed or
-    remote_unknown: restore when they now pass; otherwise rewrite the reason
-    (legacy remote_unconfirmed -> remote_unknown or not_remote). filter_reason
-    is 'not_remote' (desc negative or city/state with no remote positive) or
-    'remote_unknown' (empty or country-only location, no remote signal).
-    Does not delete rows. Does not change user-set statuses (anything other
-    than discovered, or filtered for a reason other than remote_unconfirmed /
-    remote_unknown). ats-api / hiringcafe are left alone. JobSpy
+    jobspy/builtin use _remote_only_filter_reason. Also re-run filtered rows
+    whose filter_reason is remote_unconfirmed or remote_unknown: restore when
+    they now pass; otherwise rewrite the reason (legacy remote_unconfirmed ->
+    remote_unknown or not_remote). filter_reason is 'not_remote' (desc
+    negative, city/state with no remote positive, hybrid model, or a non-US
+    location) or 'remote_unknown' (empty or country-only location, no remote
+    signal). Other sources (ats-api, hiringcafe, and the rest): a discovered
+    row that fails _passes_remote_only is filtered as not_remote. Country-only
+    and empty locations are unchanged. Does not delete rows. Does not change
+    user-set statuses (anything other than discovered, or filtered for a
+    reason other than remote_unconfirmed / remote_unknown). JobSpy
     workplace=Remote is moved to remote_hint. Returns (newly_filtered, restored).
     """
     import serve
@@ -270,32 +273,41 @@ def reconcile_remote_only():
         changed = False
         for r in q:
             src = (r.get("source") or "").lower()
-            if not (src.startswith("jobspy") or src == "builtin"):
-                continue
-            # Aggregator Remote stamps are hints only (JobSpy is_remote / builtin badge).
-            if str(r.get("workplace") or "").strip().lower() == "remote":
-                r["remote_hint"] = True
-                r["workplace"] = ""
-                changed = True
-            if (r.get("status") == "filtered"
-                    and r.get("filter_reason") in _REWRITE):
+            aggregator = src.startswith("jobspy") or src == "builtin"
+            if aggregator:
+                # Aggregator Remote stamps are hints only (JobSpy is_remote / builtin badge).
+                if str(r.get("workplace") or "").strip().lower() == "remote":
+                    r["remote_hint"] = True
+                    r["workplace"] = ""
+                    changed = True
+                if (r.get("status") == "filtered"
+                        and r.get("filter_reason") in _REWRITE):
+                    reason = serve._remote_only_filter_reason(r)
+                    if not reason:
+                        r["status"] = "discovered"
+                        r.pop("filter_reason", None)
+                        restored += 1
+                        changed = True
+                    elif reason != r.get("filter_reason"):
+                        r["filter_reason"] = reason
+                        changed = True
+                    continue
+                if r.get("status") != "discovered":
+                    continue
                 reason = serve._remote_only_filter_reason(r)
                 if not reason:
-                    r["status"] = "discovered"
-                    r.pop("filter_reason", None)
-                    restored += 1
-                    changed = True
-                elif reason != r.get("filter_reason"):
-                    r["filter_reason"] = reason
-                    changed = True
+                    continue
+                r["status"] = "filtered"
+                r["filter_reason"] = reason
+                n += 1
+                changed = True
                 continue
             if r.get("status") != "discovered":
                 continue
-            reason = serve._remote_only_filter_reason(r)
-            if not reason:
+            if serve._passes_remote_only(r):
                 continue
             r["status"] = "filtered"
-            r["filter_reason"] = reason
+            r["filter_reason"] = "not_remote"
             n += 1
             changed = True
         if changed:
@@ -335,6 +347,14 @@ def config_terms(default):
 def config_sources(default):
     src = load_config().get("sources")
     return src if isinstance(src, dict) else dict(default)
+
+
+def config_search(default=None):
+    """Return config.json 'search' block (title phrases + level). Empty dict if unset."""
+    s = load_config().get("search")
+    if isinstance(s, dict):
+        return s
+    return dict(default or {})
 
 
 def applyable(r):

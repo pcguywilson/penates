@@ -13,15 +13,12 @@ both and make a small number of requests.
   python remoteok.py --debug
 """
 import argparse, sys, re
-import jobs_store
+import jobs_store, titles
 
 API = "https://remoteok.com/api"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36")
 DEFAULT_TAGS = ["devops", "sre", "cloud", "sysadmin", "infrastructure", "linux"]
-TITLE_OK = re.compile(r"devops|\bsre\b|site reliability|cloud|infrastructure|platform|"
-                      r"systems? engineer|systems? admin|systems? analyst|linux|reliability|devsecops", re.I)
-TITLE_NO = re.compile(r"\bsales\b|account exec|recruiter|\bmanager\b|director|\bintern\b|pre-?sales", re.I)
 _TAG = re.compile(r"<[^>]+>")
 
 
@@ -104,7 +101,7 @@ def main():
             url = j.get("apply_url") or j.get("url", "")
             if not url or url in seen:
                 continue
-            if TITLE_NO.search(title) or not TITLE_OK.search(title):
+            if not titles.keep(title):
                 continue
             seen.add(url); batch.append(_row(j)); kept += 1
         print("  tag %-16s %d in-lane" % (tag, kept))

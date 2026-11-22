@@ -59,20 +59,30 @@ Routes:
                       unless show_hidden=1. score is null when the row is
                       unscored.
                       remote_only classification: ats-api/hiringcafe keep
-                      city/country rules (remote_status remote|not_remote).
-                      jobspy/builtin need a positive remote token in role,
-                      location, or desc (aggregator remote flags are hints
-                      only). Desc negatives override desc positives unless a
-                      remote alternative matches; tech hybrid stays. Empty or
-                      country-only location with no remote signal is
-                      remote_status=unknown (filter_reason remote_unknown).
+                      empty and country-only locations. A city/state location
+                      needs a remote word in role, location, or desc; a stored
+                      remote flag does not confirm one. jobspy/builtin need a
+                      positive remote token in role, location, or desc
+                      (aggregator remote flags are hints only). Desc negatives
+                      override desc positives unless a remote alternative
+                      matches; tech hybrid stays. Employer boilerplate about a
+                      remote option is stripped before those checks. A hybrid
+                      model/schedule/role with no fully-remote alternative is
+                      hybrid. A location that names a non-US country and not
+                      the US is not_remote. Empty or country-only location
+                      with no remote signal is remote_status=unknown
+                      (filter_reason remote_unknown) for jobspy/builtin.
                       A benefits menu ("in-office, hybrid, or fully remote")
                       is not a remote confirmation for the workplace bucket.
                       Missing salary is KEPT.
                       Each row includes seen_at (null until marked) and
                       discovered_at as stored. desc is omitted unless desc=1.
-  /api/job (GET)    -> ?url=<url>. One row {desc, ...} matched like /seen
-                      (url or apply_url, query stripped). 404 when missing.
+                      Each row includes reason_text, a plain-English score
+                      reason from reasons.explain. HAVE/SUPP are computed once
+                      per request. Desc-less unscored rows skip the JD parse.
+  /api/job (GET)    -> ?url=<url>. One row {desc, reason_text, ...} matched
+                      like /seen (url or apply_url, query stripped). 404 when
+                      missing. reason_text uses the same explain() call.
   /seen    (POST)   -> JSON {url}. 200 {ok:true, seen_at} when url or
                       apply_url matches. seen_at stays the first timestamp.
                       404 {ok:false} when nothing matches. Does not change
@@ -2808,7 +2818,7 @@ _NON_US_RE = re.compile(
     r"\bphilippines\b|\bmexico\b|\bbrazil\b|\blatam\b|\blatin\s+america\b|"
     r"\bhong\s+kong\b|\bargentina\b|\buruguay\b|\bchile\b|\bcolombia\b|"
     r"\bbuenos\s+aires\b|\bs[aã]o\s+paulo\b|\bmontevideo\b|\bsantiago\b|\bbogot[aá]\b|"
-    r"\bpakistan\b|\bwarsaw\b|\bpoland\b|"
+    r"\bpakistan\b|\bwarsaw\b|\bpoland\b|\bbulgaria\b|"
     r"\bfinland\b|\bhelsinki\b|\bsweden\b|\bstockholm\b|\bnorway\b|\boslo\b|\bdenmark\b|\bcopenhagen\b|"
     r"\bspain\b|\bmadrid\b|\bbarcelona\b|\bportugal\b|\blisbon\b|\bitaly\b|\bmilan\b|\bswitzerland\b|\bzurich\b|"
     r"\bczech\b|\bprague\b|\bromania\b|\bbucharest\b|\bukraine\b|\bkyiv\b|\bserbia\b|\bbelgrade\b|\bhungary\b|\bbudapest\b|"
@@ -2966,16 +2976,40 @@ def _strip_everify_sentences(text):
     parts.append(text[last:])
     return "".join(parts)
 
+# Employer boilerplate that offers remote only for some other posting type.
+# Comcast: "(In most cases, ... remote option.)" and "If a position is listed
+# with both office locations and virtual offerings ... for the remote option."
+# Strip before positive and alternative checks so that sentence is not a yes.
+_BOILER_REMOTE_RE = re.compile(
+    r"(?is)\(?\s*in most cases,[^)]{0,400}?remote option\.?\)?|"
+    r"if a position is listed with both office locations and virtual[^.]{0,300}\.")
+# ats-api / non-aggregator city confirmation. Stored remote=true is not enough.
+_ATS_REMOTE_WORD_RE = re.compile(
+    r"(?i)\bremote(?:ly)?\b|work from home|\bwfh\b|telework|telecommut|\bvirtual\b|"
+    r"anywhere in the (?:us|u\.s\.|united states)")
+# These phrases are a hybrid workplace unless a fully-remote alternative is stated.
+# "hybrid work schedule" is the same workplace phrase as "hybrid schedule".
+_HYBRID_MODEL_RE = re.compile(
+    r"(?i)\bhybrid\s+(?:model|work\s+model|work\s+schedule|schedule|role|position|"
+    r"work\s+arrangement)\b")
+_HYBRID_REMOTE_ALT_RE = re.compile(
+    r"(?i)\bfully\s+remote\b|\b100%\s+remote\b|\bor\s+remote\b|"
+    r"\bremote\s+(?:option|schedule|eligible)\b|\bwork\s+from\s+home\b")
+# "hybrid (preferred) or remote" is a remote alternative, not a hybrid schedule.
+_HYBRID_PREFERRED_RE = re.compile(r"(?i)\bhybrid\s*\(\s*preferred\s*\)")
+
 def _desc_remote_pos_text(desc):
     """Description with E-Verify/I-9 sentences and seq 137 boilerplate removed.
 
     Positives are matched on what remains, so a real workplace phrase in
-    another sentence still counts.
+    another sentence still counts. Comcast-style remote-option boilerplate
+    is removed first so it cannot count as a positive or an alternative.
     """
     text = str(desc or "")
     if not text:
         return ""
     text = _strip_everify_sentences(text)
+    text = _BOILER_REMOTE_RE.sub(" ", text)
     low = text.lower()
     # Skip-boilerplate sub is rare (a few rows); keyword gate keeps it off
     # the common path.
@@ -3072,14 +3106,55 @@ def _work_model_from_label(text):
         return "remote"
     return None
 
+def _remote_rule_desc(r):
+    """Description with remote-option boilerplate removed."""
+    return _BOILER_REMOTE_RE.sub(" ", str(r.get("desc") or ""))
+
+def _remote_rule_blob(r, desc=None):
+    if desc is None:
+        desc = _remote_rule_desc(r)
+    return " ".join(
+        str(r.get(k) or "") for k in ("role", "title", "location")) + " " + desc
+
+def _location_names_foreign(loc):
+    """True when the location field names a non-US country and not the US.
+
+    "Remote, Canada; Remote, United States" stays. "-REMOTE, BULGARIA-" drops.
+    "Remote, Global" is not a country and stays.
+    """
+    text = str(loc or "")
+    if not text.strip():
+        return False
+    if _text_has_us(text):
+        return False
+    return _text_has_non_us(text)
+
+def _hybrid_model_without_remote_alt(r, desc=None):
+    """True for hybrid model/schedule/role phrases with no fully-remote alternative."""
+    blob = _remote_rule_blob(r, desc)
+    if not _HYBRID_MODEL_RE.search(blob):
+        return False
+    return _HYBRID_REMOTE_ALT_RE.search(blob) is None
+
+def _ats_has_remote_word(r, desc=None):
+    """Remote word in role, location, or desc. Ignores the stored remote flag."""
+    if desc is None:
+        desc = _remote_rule_desc(r)
+    blob = " ".join(str(r.get(k) or "") for k in ("role", "title", "location"))
+    return _ATS_REMOTE_WORD_RE.search(blob + " " + desc) is not None
+
 def _remote_only_filter_reason(r, labels=None):
     """For jobspy/builtin: 'not_remote', 'remote_unknown', or None if it passes.
 
     Positive confirmation = remote token in role, location, or desc.
     Desc negatives override unless _REMOTE_ALT_RE also matches (role/loc/desc).
+    Boilerplate remote-option sentences are stripped before both checks.
     Work-model labels (Onsite/Remote:, Work Model:) use the value after the
     colon; the label itself is not a remote alternative.
     remote / remote_hint / workplace=Remote are hints only and do not pass alone.
+    A non-US location that does not also name the US is not_remote.
+    Hybrid model/schedule/role/position/work arrangement is not_remote unless
+    a fully-remote alternative is stated.
     No positive and no negative: remote_unknown when location is empty or
     country-only (US/USA/United States/U.S./America); else not_remote
     (city/state location).
@@ -3088,7 +3163,11 @@ def _remote_only_filter_reason(r, labels=None):
     if not _aggregator_remote_source(r):
         return None
     role_loc = " ".join(str(r.get(k) or "") for k in ("role", "title", "location"))
-    desc = str(r.get("desc") or "")
+    desc = _remote_rule_desc(r)
+    if _location_names_foreign(r.get("location")):
+        return "not_remote"
+    if _hybrid_model_without_remote_alt(r, desc):
+        return "not_remote"
     blob = role_loc + " " + desc
     work_model = _work_model_from_label(blob)
     if work_model == "not_remote":
@@ -3098,7 +3177,13 @@ def _remote_only_filter_reason(r, labels=None):
     # /remote and "or remote" need a remote token; skip the alt regex otherwise.
     has_alt = ("remote" in blob_for_alt.lower()
                and bool(_REMOTE_ALT_RE.search(blob_for_alt)))
-    if _desc_has_remote_neg(desc) and not has_alt:
+    # A fully-remote alternative clears the hybrid-model phrase itself.
+    # Other negatives (not remote, days in office) still apply. _REMOTE_ALT_RE
+    # does not cover "fully remote" / "100% remote" / "work from home".
+    neg_desc = desc
+    if _HYBRID_REMOTE_ALT_RE.search(blob):
+        neg_desc = _HYBRID_MODEL_RE.sub(" ", desc)
+    if _desc_has_remote_neg(neg_desc) and not has_alt:
         return "not_remote"
     if work_model == "remote" or _REMOTE_POS_RE.search(role_loc) or has_alt:
         return None
@@ -3143,18 +3228,31 @@ def _passes_remote_only(r, labels=None):
     Empty/country-only with no signal fails (remote_unknown); use
     include_unknown=1 to keep those.
 
-    ats-api / hiringcafe / other: drop a city/state location with no remote
-    token. Country-only stays. Empty location stays. Explicit onsite/in-office/
-    hybrid in role/title/location overrides a remote signal unless a remote
+    ats-api / hiringcafe / other: drop a city/state location unless role,
+    location, or desc has a remote word (remote/remotely, work from home,
+    wfh, telework, telecommut, virtual, anywhere in the US). Stored
+    remote=true and workplace do not confirm a city. Country-only stays.
+    Empty location stays. A location that names a non-US country and not
+    the US drops. Hybrid model/schedule/role phrases drop unless a
+    fully-remote alternative is stated. Explicit onsite/in-office/hybrid
+    in role/title/location overrides a remote signal unless a remote
     alternative is offered.
     """
     if _aggregator_remote_source(r):
         return _remote_only_filter_reason(r, labels) is None
+    desc = _remote_rule_desc(r)
+    if _location_names_foreign(r.get("location")):
+        return False
+    if _hybrid_model_without_remote_alt(r, desc):
+        return False
     if _explicit_onsite_hybrid_blocks_remote(r):
         return False
     loc = str(r.get("location") or "").strip()
-    if loc and not _ranked_remote_signal(r) and _RANK_COUNTRY_ONLY.sub(" ", loc).strip():
-        return False
+    # City/state (tokens left after country-only stripping). Empty and
+    # country-only locations are unchanged and do not need a remote word.
+    if loc and _RANK_COUNTRY_ONLY.sub(" ", loc).strip():
+        if not _ats_has_remote_word(r, desc):
+            return False
     return True
 
 def _strip_employer_noise(name):
@@ -3430,19 +3528,30 @@ def _is_hybrid(r, labels=None):
     """True when the listing says hybrid. Tech hybrid and cert titles do not count.
 
     Benefit menus ("in-office, hybrid, or fully remote") do not count.
-    "be able to work onsite when needed" does not count. A direct
-    "work onsite … when needed" counts only with a city/state location
-    and no fully-remote alternative.
+    "hybrid model / work model / schedule / role / position / work arrangement"
+    counts unless a fully-remote alternative is stated. "hybrid (preferred)
+    or remote" does not. "be able to work onsite when needed" does not count.
+    A direct "work onsite … when needed" counts only with a city/state
+    location and no fully-remote alternative.
     labels shares request-local desc scrub with workplace/remote_status.
     """
+    if _hybrid_model_without_remote_alt(r):
+        return True
+    alt = _HYBRID_REMOTE_ALT_RE.search(_remote_rule_blob(r)) is not None
     for k in ("workplace", "location", "role", "title"):
         scrubbed = _TECH_HYBRID_RE.sub(" ", str(r.get(k) or ""))
+        if alt:
+            scrubbed = _HYBRID_MODEL_RE.sub(" ", scrubbed)
+            scrubbed = _HYBRID_PREFERRED_RE.sub(" ", scrubbed)
         if re.search(r"(?i)\bhybrid\b", scrubbed):
             return True
     if labels is not None:
         _memo_desc_scrub(labels, r)
     menu = _memo_menu_scrub(labels, r)
     desc = _TECH_HYBRID_RE.sub(" ", menu)
+    if alt:
+        desc = _HYBRID_MODEL_RE.sub(" ", desc)
+        desc = _HYBRID_PREFERRED_RE.sub(" ", desc)
     dlow = desc.lower()
     if (("hybrid" in dlow or "day" in dlow)
             and _HYBRID_POS_RE.search(desc)):
@@ -3573,6 +3682,23 @@ def _filter_ranked(rows, qs, labels=None):
             continue
         out.append(r)
     return out
+
+def _job_reason_text(row, HAVE, SUPP):
+    """Plain-English reason for one /ranked or /api/job row.
+
+    HAVE and SUPP are computed once per request by the caller. explain()
+    reads row['desc'], so call this on the full row before the list payload
+    drops desc. A desc-less unscored row returns the short not-scored line
+    and does not parse a JD. explain() also skips the parse when the score
+    is missing."""
+    import reasons
+    if not str(row.get("desc") or "").strip():
+        why = row.get("score_reason") or ""
+        if row.get("score") is None or "UNSCORED" in why:
+            return ("Not scored: the posting has too little detail. "
+                    "Open it and judge it yourself.")
+    return reasons.explain(row, HAVE, SUPP)
+
 
 _PIPE = {"running": False, "log": [], "started": 0, "finished": 0}
 _ANSWER_LOG = []   # local-model reasoning: recent /answer resolutions
@@ -4451,10 +4577,16 @@ class H(BaseHTTPRequestHandler):
                         rows, jobs_store.load().get("queue") or [], qs)
                 labels = {}
                 rows = _filter_ranked(rows, qs, labels)
+                import skills
+                _HAVE = skills.have_set()
+                _SUPP = skills.supported_set()
                 out = []
                 for r in rows:
                     raw_score = r.get("score")
                     score_out = None if raw_score is None or raw_score == "" else raw_score
+                    # explain() needs desc; attach reason_text before the list
+                    # payload drops it. HAVE/SUPP are once per request.
+                    reason_text = _job_reason_text(r, _HAVE, _SUPP)
                     row_out = {"company": r.get("company", ""), "role": r.get("role", ""),
                         "score": score_out, "ats": r.get("ats", ""),
                         "status": r.get("status"), "source": r.get("source", ""),
@@ -4473,7 +4605,8 @@ class H(BaseHTTPRequestHandler):
                         "apply": r.get("apply_url") or r.get("url", ""),
                         "closed_reason": r.get("closed_reason") or "",
                         "employer_key": employer_key(r.get("company") or "", r.get("role") or ""),
-                        "remote_status": _remote_status(r, labels)}
+                        "remote_status": _remote_status(r, labels),
+                        "reason_text": reason_text}
                     if include_desc:
                         row_out["desc"] = r.get("desc", "")
                     out.append(row_out)
@@ -4491,6 +4624,9 @@ class H(BaseHTTPRequestHandler):
                     return self._json(404, {"ok": False})
                 raw_score = row.get("score")
                 score_out = None if raw_score is None or raw_score == "" else raw_score
+                import skills
+                reason_text = _job_reason_text(
+                    row, skills.have_set(), skills.supported_set())
                 return self._json(200, {
                     "ok": True,
                     "company": row.get("company", ""),
@@ -4513,6 +4649,7 @@ class H(BaseHTTPRequestHandler):
                     "employer_key": employer_key(
                         row.get("company") or "", row.get("role") or ""),
                     "remote_status": _remote_status(row),
+                    "reason_text": reason_text,
                 })
             except Exception as e:
                 return self._json(500, {"error": str(e)})

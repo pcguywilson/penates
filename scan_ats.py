@@ -8,7 +8,7 @@ zero tokens. This is the reliable discovery spine; the aggregator sources stay s
   python scan_ats.py --no-filter     # keep every title/location (debug)
 """
 import argparse, concurrent.futures as cf, json, os, re, sys, threading, time, urllib.parse, yaml
-import jobs_store
+import jobs_store, titles
 from sources import greenhouse, lever, ashby, workday, smartrecruiters, workable
 from sources import recruitee, teamtailor, breezy, bamboohr, jazzhr, paylocity
 
@@ -163,12 +163,12 @@ def _has(term, text):
 
 
 def _match(title, loc, tf, lf):
-    t = (title or "").lower(); l = (loc or "").lower()
-    if tf:
-        pos = [p.lower() for p in (tf.get("positive") or [])]
-        neg = [n.lower() for n in (tf.get("negative") or [])]
-        if pos and not any(p in t for p in pos): return False
-        if any(n in t for n in neg): return False
+    # Title: titles.keep (config.json search). tf is the companies.yml
+    # title_filter fallback only when that search has no target/related.
+    # Location stays on lf (companies.yml location_filter).
+    l = (loc or "").lower()
+    if not titles.keep(title, title_filter=tf):
+        return False
     if lf and l:
         if any(_has(n, l) for n in (lf.get("negative") or [])): return False
         pos = lf.get("positive") or []

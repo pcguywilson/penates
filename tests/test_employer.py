@@ -75,9 +75,14 @@ class EmployerKey(unittest.TestCase):
             "location": "Multiple Locations", "role": "SRE", "workplace": ""}))
         self.assertTrue(serve._passes_remote_only({
             "location": "", "role": "SRE", "workplace": "onsite"}))
+        # Stored remote=true does not confirm a city. A remote word in the desc does.
+        self.assertFalse(serve._passes_remote_only({
+            "location": "New York, NY", "workplace": "New York, NY",
+            "role": "Engineer", "remote": True, "desc": ""}))
         self.assertTrue(serve._passes_remote_only({
             "location": "New York, NY", "workplace": "New York, NY",
-            "role": "Engineer", "remote": True}))
+            "role": "Engineer", "remote": True,
+            "desc": "Employees can work remotely from anywhere in the US."}))
 
     def test_remote_only_title_onsite_hybrid_overrides_workplace(self):
         # JobSpy often sets workplace=Remote while the title says onsite/hybrid.
@@ -189,13 +194,21 @@ class EmployerKey(unittest.TestCase):
             self.assertEqual(serve._remote_status(row), "remote", row)
 
     def test_remote_only_ats_keeps_current_logic(self):
-        # ats-api / hiringcafe still trust remote / country-only location.
-        self.assertTrue(serve._passes_remote_only({
+        # ats-api: stored remote=true does not confirm a city/state location.
+        # Country-only and empty stay. A remote word in role/location/desc keeps.
+        self.assertFalse(serve._passes_remote_only({
             "source": "ats-api", "location": "New York, NY",
             "role": "Engineer", "remote": True, "desc": ""}))
         self.assertTrue(serve._passes_remote_only({
+            "source": "ats-api", "location": "New York, NY",
+            "role": "Engineer", "remote": True,
+            "desc": "This position is work from home."}))
+        self.assertTrue(serve._passes_remote_only({
             "source": "hiringcafe", "location": "United States",
             "role": "SRE", "workplace": "", "desc": ""}))
+        self.assertTrue(serve._passes_remote_only({
+            "source": "ats-api", "location": "",
+            "role": "SRE", "remote": True, "desc": ""}))
         self.assertFalse(serve._passes_remote_only({
             "source": "ats-api", "location": "Austin, TX",
             "role": "DevOps Engineer", "workplace": "", "desc": ""}))

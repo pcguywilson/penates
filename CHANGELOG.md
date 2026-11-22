@@ -4,6 +4,41 @@ Penates uses [Semantic Versioning](https://semver.org/). Before 1.0, a minor ver
 change behavior. The extension version in `penates-extension/manifest.json` matches the
 release.
 
+## [0.8.0] - 2026-11-21
+
+### Added
+
+- **What you're looking for** Settings card (`config.json` `search` block): `target_titles`,
+  `related_titles`, `push_down_titles`, `exclude_titles`, `level`
+  (entry | mid | senior | staff | executive).
+- Level ladder from common title words (intern/junior; senior/sr/snr; staff/principal/architect/
+  distinguished/lead; manager/head/director/VP/chief). Distance from your level: one above x0.7,
+  two or more above x0.35, one below x0.8, two or more below x0.6. No level word = your level.
+  Associate and II/III/IV are not mapped because they mean different things across careers.
+- `reasons.py` and a **Why** column: a plain-English reason per job (`/ranked` and `/api/job`
+  return `reason_text`).
+- Profile skills (4+ characters) matched as phrases in postings, for careers the built-in tech
+  vocabulary does not know.
+- **Foundational skills** card on the Profile tab (`limited_experience`); those skills count half.
+- `titles.py`: one title filter for every discovery script, read from the same `search` block
+  (falls back to `config/companies.yml` `title_filter` when no titles are set).
+
+### Changed
+
+- `rank.py` no longer has built-in DevOps title lists, a built-in off-target list, or data/ML
+  penalties. With no titles set, every title is neutral.
+- Your clouds come from the profile `cloud` list.
+- Postings with no requirements list are scored on every skill they mention, with no 70% ceiling;
+  postings that name few skills score lower.
+- Go and Ruby are no longer gaps for everyone; list them under "Do NOT claim" if they are yours.
+
+### Fixed
+
+- "Secrets management" no longer reads as a Secret clearance requirement.
+- A degree only caps the score when the posting gives no equivalent-experience path.
+- Remote detection: employer boilerplate about a remote option, a board's remote flag on a city
+  location with no remote wording, "hybrid model" postings, and non-US locations.
+
 ## [0.7.1] - 2026-11-19
 
 ### Fixed

@@ -42,5 +42,70 @@
       "terms": []
     }
   },
-  "workday_skip_terms": []
+  "workday_skip_terms": [],
+  "search": {
+    "target_titles": [
+      "site reliability",
+      "SRE",
+      "devops",
+      "devsecops",
+      "platform engineer",
+      "infrastructure engineer",
+      "cloud engineer",
+      "cloud infrastructure",
+      "systems engineer",
+      "reliability engineer",
+      "cloud architect",
+      "solutions architect",
+      "infrastructure architect"
+    ],
+    "related_titles": [
+      "systems administrator",
+      "systems admin",
+      "system admin",
+      "systems analyst",
+      "linux",
+      "sysadmin",
+      "network engineer",
+      "automation engineer",
+      "build engineer",
+      "release engineer",
+      "cloud operations",
+      "it engineer"
+    ],
+    "push_down_titles": [
+      "Data",
+      "Machine Learning",
+      "ML",
+      "Database",
+      "DBA",
+      "DNS",
+      "Firmware",
+      "Embedded",
+      "Mainframe",
+      "SAP",
+      "Salesforce",
+      "Snowflake",
+      "Databricks"
+    ],
+    "exclude_titles": [
+      "Intern",
+      "Junior",
+      "Associate",
+      "Director",
+      "VP",
+      "Sales",
+      "Account Executive",
+      "Recruiter",
+      "Manager",
+      "Pre-Sales",
+      "Solutions Architect - Sales",
+      "New College Grad",
+      "College Grad",
+      "SDET",
+      "DGX",
+      "Software Development Engineer in Test"
+    ],
+    "level": "mid"
+  }
 }

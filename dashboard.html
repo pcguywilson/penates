@@ -217,6 +217,9 @@ tr.jobrow:hover .icon,.icon:focus-visible{opacity:1}
 .chipadd{min-width:0 !important;width:160px;padding:6px 8px}
 .whcard{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:var(--panel2)}
 .chk{display:flex;align-items:center;gap:8px;color:var(--text);font-size:14px}
+.lf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:8px}.lf-grid textarea{width:100%;min-height:110px;box-sizing:border-box}
+td.role{min-width:190px}.whycell{white-space:nowrap;width:1%}.whycell .why{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;max-width:260px;vertical-align:middle}.whycell.open{white-space:normal}.whycell.open .why{white-space:normal;max-width:420px;display:block}.why-more{border:0;background:none;color:var(--muted);cursor:pointer;padding:0 4px;font-size:14px;vertical-align:middle}.whycell.open .why-more{display:none}.why-drawer{font-size:13px;line-height:1.45;margin:8px 0 10px;color:var(--muted,#888)}
+.lex{margin:4px 0;padding-left:18px}.lex-row{display:flex;gap:6px;margin:4px 0}.lex-row input:first-child{flex:0 0 160px}.lex-row input:nth-child(2){flex:1}
 </style>
 </head>
 <body>
@@ -295,7 +298,7 @@ tr.jobrow:hover .icon,.icon:focus-visible{opacity:1}
     <table>
       <thead><tr>
         <th data-sort="score">Score</th><th data-sort="company">Company</th>
-        <th data-sort="role">Role</th><th data-sort="discovered_at">Discovered</th><th data-sort="posted">Posted</th>
+        <th data-sort="role">Role</th><th>Why</th><th data-sort="discovered_at">Discovered</th><th data-sort="posted">Posted</th>
         <th data-sort="location">Location</th><th data-sort="salary">Salary</th>
         <th data-sort="ats">ATS</th><th></th>
       </tr></thead>
@@ -388,6 +391,20 @@ tr.jobrow:hover .icon,.icon:focus-visible{opacity:1}
     <div class="card"><h3>Search terms</h3><p class="hint">One per line. Used by every source on the next Refresh.</p>
       <textarea id="terms"></textarea>
       <div style="margin-top:10px"><button class="btn" id="saveCfg">Save settings</button> <span class="muted" id="cfgMsg"></span></div></div>
+    <div class="card"><h3>What you're looking for</h3>
+      <p class="hint">These decide how jobs are scored. One title per line; a title counts when its words appear in the job title. Takes effect on the next Refresh or rescore.</p>
+      <label class="muted">Your level <select id="lfLevel">
+        <option value="entry">Entry (junior, intern)</option><option value="mid">Mid (no level word)</option>
+        <option value="senior">Senior</option><option value="staff">Staff / Principal / Lead</option>
+        <option value="executive">Manager / Director / Executive</option></select></label>
+      <p class="hint">Job titles above your level are scored down (one step x0.7, two or more x0.35); below it, x0.8 / x0.6. A title with no level word always counts as your level.</p>
+      <div class="lf-grid">
+        <div><b>Target titles</b> <span class="muted">full credit</span><textarea id="lfTarget" placeholder="e.g. Registered Nurse&#10;Staff Accountant&#10;DevOps Engineer"></textarea></div>
+        <div><b>Related titles</b> <span class="muted">slightly less (x0.9)</span><textarea id="lfRelated"></textarea></div>
+        <div><b>Push down</b> <span class="muted">titles in a specialty you don't do (x0.6)</span><textarea id="lfPush"></textarea></div>
+        <div><b>Exclude</b> <span class="muted">never shown</span><textarea id="lfExclude"></textarea></div>
+      </div>
+      <div style="margin-top:10px"><button class="btn" id="saveLf">Save</button> <span class="muted" id="lfMsg"></span></div></div>
   </section>
   <section data-panel="profile" hidden>
     <p class="hint" style="margin:0 0 12px">Edit a section, then save. Profile sections write profile.yaml. Work history writes its own file. Each save keeps a timestamped backup and clears cached answers.</p>
@@ -511,6 +528,7 @@ Rules: one object per distinct question. Put ONLY the final answer text in "answ
   </header>
   <div class="body">
     <div class="meta" id="dr-meta"></div>
+    <p id="dr-why" class="why-drawer" hidden></p>
     <div id="dr-desc" class="dsc"></div>
   </div>
   <footer>
@@ -716,6 +734,7 @@ function jobRowHtml(j, opt){
       ${sc}
       <td class="co">${co}</td>
       <td class="role"><a class="role-link" href="${esc(j.apply)}" data-url="${esc(j.apply)}" target="_blank" rel="noopener">${esc(j.role)}</a>${nw?'<span class="chip-new" title="Found in the latest sync">NEW</span>':''}${seen?'<span class="viewed-tag" title="Opened '+esc(j.seen_at)+'">viewed</span>':''}</td>
+      <td class="whycell">${j.reason_text?'<div class="why" title="'+esc(j.reason_text)+'">'+esc(j.reason_text)+'</div><button type="button" class="why-more" aria-label="Show full reason">\u2026</button>':''}</td>
       <td class="muted" style="white-space:nowrap;font-size:12px">${esc(discFmt(j.discovered_at))}</td>
       <td class="muted" style="white-space:nowrap;font-size:12px">${esc(postedFmt(j.posted))}</td>
       <td class="muted" style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(locText(j))}</td>
@@ -810,6 +829,7 @@ function openDrawer(j){
   if(j.ats)chips.push(['ATS',j.ats]);
   if(j.closed_reason)chips.push(['Closed',j.closed_reason]);
   if(j.source)chips.push(['Source',j.source]);
+  const dw=$('dr-why'); dw.hidden=!j.reason_text; dw.textContent=j.reason_text?('Why this score: '+j.reason_text):'';
   $('dr-meta').innerHTML=chips.map(c=>`<span class="chip">${c[0]?esc(c[0])+': ':''}${esc(String(c[1]))}</span>`).join('');
   const d=$('dr-desc');
   const noDesc=()=>{d.className='dsc empty';d.textContent='No description captured for this source. Use "Open posting" to view the full listing.';};
@@ -969,6 +989,9 @@ $('olTest').onclick=async()=>{ $('olMsg').textContent='testing '+$('olModel').va
   const r=await fetch('/api/ollama/test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:$('olModel').value})}).then(x=>x.json()).catch(e=>({ok:false,error:String(e)}));
   $('olMsg').textContent=r.ok?('OK: '+r.model+' replied "'+r.reply+'" in '+(r.ms/1000).toFixed(1)+'s'):('failed: '+(r.error||'')); };
 async function loadCfg(){ const c=await fetch('/config').then(r=>r.json()).catch(()=>({}));
+  const sr=c.search||{}; const lines=a=>(a||[]).join('\n');
+  $('lfLevel').value=sr.level||'mid'; $('lfTarget').value=lines(sr.target_titles); $('lfRelated').value=lines(sr.related_titles);
+  $('lfPush').value=lines(sr.push_down_titles); $('lfExclude').value=lines(sr.exclude_titles);
   $('terms').value=(c.terms||[]).join('\n'); const src=c.sources||{};
   const SRC_LABELS={ats:'ATS boards (Greenhouse/Lever/Ashby/Workday/SmartRecruiters/Workable)',discover:'JobSpy (LinkedIn/Indeed/ZipRecruiter/Google)',hiringcafe:'hiring.cafe',builtin:'Built In',remotive:'Remotive',remoteok:'RemoteOK'};
   $('srcs').innerHTML=Object.keys(SRC_LABELS).map(k=>`<label class="src"><input type="checkbox" data-src="${k}" ${src[k]!==false?'checked':''}> ${SRC_LABELS[k]}</label>`).join('');
@@ -978,6 +1001,12 @@ $('saveCfg').onclick=async()=>{ const terms=$('terms').value.split('\n').map(t=>
   const r=await fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({terms,sources})}).then(r=>r.json()).catch(()=>({}));
   $('cfgMsg').textContent=r.ok?'saved':'save failed'; setTimeout(()=>$('cfgMsg').textContent='',2500);
 };
+$('saveLf').onclick=async()=>{ const L=id=>$(id).value.split('\n').map(t=>t.trim()).filter(Boolean);
+  const search={level:$('lfLevel').value,target_titles:L('lfTarget'),related_titles:L('lfRelated'),push_down_titles:L('lfPush'),exclude_titles:L('lfExclude')};
+  const r=await fetch('/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({search})}).then(r=>r.json()).catch(()=>({}));
+  $('lfMsg').textContent=r.ok?'saved (applies on next Refresh)':'save failed'; setTimeout(()=>$('lfMsg').textContent='',3000);
+};
+document.addEventListener('click',ev=>{const b=ev.target.closest('.why-more')||ev.target.closest('.whycell.open .why'); if(!b) return; ev.stopPropagation(); ev.preventDefault(); b.closest('.whycell').classList.toggle('open');},true);
 async function loadImports(){
   const st=await fetch('/api/imports/stats').then(r=>r.json()).catch(()=>({total:0}));
   const li=st.last_import;
@@ -1146,6 +1175,16 @@ function fieldsBlock(sec, editing){
   const obj=PROFILE[sec]||{};
   return `<div class="pgrid">${profKeys(sec, obj).map(k=>fieldHtml(sec, k, obj[k], editing)).join('')}</div>`;
 }
+function lexBlock(editing){
+  const lx=PROFILE.limited_experience||{}; const keys=Object.keys(lx);
+  if(!editing) return keys.length?'<ul class="lex">'+keys.map(k=>`<li><b>${esc(k)}</b>: <span class="muted">${esc(lx[k])}</span></li>`).join('')+'</ul>':'<p class="muted">None.</p>';
+  return keys.map((k,i)=>`<div class="lex-row"><input data-lex="k" data-i="${i}" value="${esc(k)}" placeholder="Skill"><input data-lex="v" data-i="${i}" value="${esc(lx[k])}" placeholder="How you'd describe it, e.g. basic scripting"><button type="button" class="mini" data-act="lex-del" data-i="${i}">Remove</button></div>`).join('')
+    +'<button type="button" class="mini" data-act="lex-add">Add skill</button>';
+}
+function lexFromInputs(){
+  const ks=[...document.querySelectorAll('[data-lex="k"]')], vs=[...document.querySelectorAll('[data-lex="v"]')];
+  const out={}; ks.forEach((el,i)=>{ const k=el.value.trim(); if(k) out[k]=(vs[i]&&vs[i].value.trim())||''; }); return out;
+}
 function chipRow(sec, key, values, editing){
   const chips=(values||[]).map((v,i)=>`<span class="chip">${esc(v)}${editing?`<button type="button" data-act="chip-del" data-sec="${sec}" data-key="${esc(key)}" data-i="${i}" aria-label="Remove">×</button>`:''}</span>`).join('');
   const add=editing?`<input class="chipadd" type="text" data-chipfor="${sec}" data-key="${esc(key)}" placeholder="Add"><button type="button" class="mini" data-act="chip-add" data-sec="${sec}" data-key="${esc(key)}">Add</button>`:'';
@@ -1183,6 +1222,7 @@ function renderProfile(){
     `<div class="card">${profCardHead('screening','Screening answers',e('screening'))}<p class="hint">Workable-style answers. The question patterns stay in fields.yaml.</p>${fieldsBlock('screening', e('screening'))}<p class="muted" id="pmsg-screening"></p></div>`,
     `<div class="card">${profCardHead('skills','Skills',e('skills'))}${skillsBlock(e('skills'))}<p class="muted" id="pmsg-skills"></p></div>`,
     `<div class="card">${profCardHead('limited_or_none','Do NOT claim',e('limited_or_none'))}<p class="hint">The honesty guard will not claim these.</p>${chipRow('limited_or_none','', PROFILE.limited_or_none, e('limited_or_none'))}<p class="muted" id="pmsg-limited_or_none"></p></div>`,
+    `<div class="card">${profCardHead('limited_experience','Foundational skills',e('limited_experience'))}<p class="hint">Skills you have but only at a basic level. They count half when jobs are scored, and answers describe them with your note.</p>${lexBlock(e('limited_experience'))}<p class="muted" id="pmsg-limited_experience"></p></div>`,
     `<div class="card">${profCardHead('work_history','Work history',e('work_history'))}${(PROFILE.work_history||[]).map((j,i)=>jobCard(j,i,e('work_history'))).join('')||'<p class="muted">No jobs yet.</p>'}${e('work_history')?'<button type="button" class="mini" data-act="job-add">Add job</button>':''}<p class="muted" id="pmsg-work_history"></p></div>`,
     `<div class="card">${profCardHead('references','References',e('references'))}<p class="hint">Used only when a required question asks you to provide references. Optional questions, willingness questions, and referred-by stay blank.</p>${(PROFILE.references||[]).map((r,i)=>refCard(r,i,e('references'))).join('')||(e('references')?'':'<p class="muted">None yet.</p>')}${e('references')?'<button type="button" class="mini" data-act="ref-add">Add reference</button>':''}<p class="muted" id="pmsg-references"></p></div>`
   ];
@@ -1233,7 +1273,7 @@ function onProfClick(ev){
     renderProfile();
     return;
   }
-  if(act==='save'){ saveProfileCard(card); return; }
+  if(act==='save'){ if(card==='limited_experience') PROFILE.limited_experience=lexFromInputs(); saveProfileCard(card); return; }
   if(act==='chip-add'){
     const sec=b.dataset.sec, key=b.dataset.key;
     const input=document.querySelector(`[data-chipfor="${sec}"][data-key="${key}"]`);
@@ -1248,6 +1288,8 @@ function onProfClick(ev){
     else PROFILE.skills[b.dataset.key].splice(i,1);
     renderProfile(); return;
   }
+  if(act==='lex-add'){ PROFILE.limited_experience=lexFromInputs(); PROFILE.limited_experience['']=''; renderProfile(); return; }
+  if(act==='lex-del'){ const o=lexFromInputs(); const k=Object.keys(o)[+b.dataset.i]; if(k!==undefined) delete o[k]; PROFILE.limited_experience=o; renderProfile(); return; }
   if(act==='job-add'){ PROFILE.work_history.push(blankJob()); renderProfile(); return; }
   if(act==='job-del'){ PROFILE.work_history.splice(+b.dataset.i,1); renderProfile(); return; }
   if(act==='ref-add'){ PROFILE.references.push(blankRef()); renderProfile(); return; }

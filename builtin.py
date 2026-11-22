@@ -17,7 +17,7 @@ try:
     from bs4 import BeautifulSoup
 except ImportError:
     sys.exit("pip install beautifulsoup4")
-import jobs_store
+import jobs_store, titles
 
 BASE = "https://builtin.com"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -25,9 +25,6 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 DEFAULT_TERMS = ["devops engineer", "site reliability engineer", "cloud engineer",
                  "platform engineer", "infrastructure engineer",
                  "systems administrator", "systems engineer", "systems analyst"]
-TITLE_OK = re.compile(r"devops|\bsre\b|site reliability|cloud|infrastructure|platform|"
-                      r"systems? engineer|systems? admin|systems? analyst|linux|reliability|devsecops", re.I)
-TITLE_NO = re.compile(r"\bsales\b|account exec|recruiter|\bmanager\b|director|\bintern\b|pre-?sales", re.I)
 DESC_CAP = 20000  # match discover.py; cap stored JD length
 
 
@@ -279,7 +276,7 @@ def main():
             for r in rows:
                 if r["url"] in seen or not r["title"]:
                     continue
-                if TITLE_NO.search(r["title"]) or not TITLE_OK.search(r["title"]):
+                if not titles.keep(r["title"]):
                     continue
                 seen.add(r["url"])
                 loc, wp, remote, keep = _geo(r)

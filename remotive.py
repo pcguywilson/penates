@@ -10,7 +10,7 @@ which forwards to the employer. Good for discovery.
 """
 import argparse, sys, re, json
 from urllib.parse import quote_plus
-import jobs_store
+import jobs_store, titles
 
 API = "https://remotive.com/api/remote-jobs"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -18,9 +18,6 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 DEFAULT_TERMS = ["devops engineer", "site reliability engineer", "cloud engineer",
                  "platform engineer", "infrastructure engineer",
                  "systems administrator", "systems engineer", "systems analyst"]
-TITLE_OK = re.compile(r"devops|\bsre\b|site reliability|cloud|infrastructure|platform|"
-                      r"systems? engineer|systems? admin|systems? analyst|linux|reliability|devsecops", re.I)
-TITLE_NO = re.compile(r"\bsales\b|account exec|recruiter|\bmanager\b|director|\bintern\b|pre-?sales", re.I)
 _TAG = re.compile(r"<[^>]+>")
 
 
@@ -86,7 +83,7 @@ def main():
             js = _fetch_all(s)
         except Exception as e:
             sys.exit("Fetch failed: %s" % e)
-        inlane = [j for j in js if TITLE_OK.search(j.get("title") or "") and not TITLE_NO.search(j.get("title") or "")]
+        inlane = [j for j in js if titles.keep(j.get("title") or "")]
         print("[debug] full feed: %d jobs, %d in-lane. First 8 in-lane:" % (len(js), len(inlane)))
         for j in inlane[:8]:
             print("   %-22s %-46s %s" % ((j.get("company_name") or "")[:22],
@@ -105,7 +102,7 @@ def main():
                 print("  [%-28s] failed: %s" % (term, str(e)[:60])); continue
             for j in js:
                 url, title = j.get("url", ""), j.get("title") or ""
-                if not url or url in seen or TITLE_NO.search(title) or not TITLE_OK.search(title):
+                if not url or url in seen or not titles.keep(title):
                     continue
                 seen.add(url); batch.append(_row(j)); kept += 1
             print("  %-30s %d in-lane" % (term, kept))
@@ -117,7 +114,7 @@ def main():
         kept = 0
         for j in js:
             url, title = j.get("url", ""), j.get("title") or ""
-            if not url or url in seen or TITLE_NO.search(title) or not TITLE_OK.search(title):
+            if not url or url in seen or not titles.keep(title):
                 continue
             seen.add(url); batch.append(_row(j)); kept += 1
         print("  full feed (%d jobs)  %d in-lane" % (len(js), kept))

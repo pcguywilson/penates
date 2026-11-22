@@ -17,7 +17,7 @@ try:
     import requests
 except ImportError:
     sys.exit("pip install requests")
-import jobs_store
+import jobs_store, titles
 
 BASE = "https://hiringcafe.com"
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -25,11 +25,6 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 DEFAULT_TERMS = ["devops engineer", "site reliability engineer", "cloud engineer",
                  "platform engineer", "infrastructure engineer",
                  "systems administrator", "systems engineer", "systems analyst"]
-TITLE_OK = re.compile(r"devops|\bsre\b|site reliability|cloud|infrastructure|platform|"
-                      r"systems? engineer|systems? admin|systems? analyst|linux|reliability|devsecops", re.I)
-TITLE_NO = re.compile(r"\bsales\b|account exec|recruiter|\bmanager\b|director|\bintern\b|pre-?sales", re.I)
-
-
 def _session():
     # hiring.cafe sits behind Cloudflare; cloudscraper solves the challenge and carries
     # the cf_clearance cookie automatically. Plain requests gets a 403.
@@ -246,7 +241,7 @@ def main():
             title = _title(j); company = _company(j); url = _url(j)
             if not url or not title or url in seen:
                 continue
-            if TITLE_NO.search(title) or not TITLE_OK.search(title):
+            if not titles.keep(title):
                 continue
             seen.add(url)
             batch.append({"url": url, "company": company, "role": title[:120], "source": "hiringcafe",

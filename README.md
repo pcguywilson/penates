@@ -16,28 +16,36 @@ No account. No cloud LLM required. Nothing leaves the machine by default.
 > application** that handles identity, EEO, yes/no and dropdowns and drafts the essays, and
 > a per-field answer helper for one written question at a time. Both stop before Submit.
 
-## What's new in v0.7.0
+## What's new in v0.8.0
 
-First versioned release. Full list in [CHANGELOG.md](CHANGELOG.md).
+Ranking now works for any career, set from the dashboard. Full list in [CHANGELOG.md](CHANGELOG.md).
 
-- **Optional cloud models.** Answers and essays can each run on Ollama (default), a signed-in
-  Claude Code or Grok CLI, or the Anthropic or xAI API. Off until you pick one on the new
-  **Models** page. A local fallback can catch cloud errors. [Details](#models-local-or-cloud)
-- **Follow-up questions on the answer card.** With a cloud model on essays, the card can ask
-  you up to three questions when it needs more from you, draft from your answers, and save
-  the result as a new story.
-- **Resume tailor.** Pick a job or paste a posting. Penates reorders your real bullets, leads
-  with the skills that match, shows covered vs missing terms, and exports HTML or Markdown. It
-  never adds a bullet or a skill.
-- **Practice applications.** Five fictional forms at `/demo` with traps built in (AI-disclosure
-  canaries, a clearance question, a salary range below your ask, closed screening Yes/No) so you
-  can test a fill end to end without applying anywhere.
-- **Smarter Yes/No.** A posted salary range becomes Yes or No against your expected pay, never
-  your number typed into a Yes/No box. Closed screening questions get Yes, No, or blank for
-  review, never an essay. AI-disclosure questions always stop for you.
-- **Logs survive restarts.** Answers, fills and the last job refresh are kept under `logs/`.
+- **Tell it what you're looking for.** A new Settings card holds your target titles, related
+  titles, titles to push down (specialties you don't do), titles to exclude, and your level
+  (Entry, Mid, Senior, Staff, Executive). The ranking code has no career built in; a nurse, an
+  accountant and a DevOps engineer set it up the same way. The example config, search terms and
+  answer bank ship as a DevOps sample, so replace them with your own.
+- **Level-aware scores.** Job titles above your level are scored down (one step x0.7, two or more
+  x0.35) and below it a little (x0.8 / x0.6), using common words like Senior, Staff, Principal,
+  Lead, Manager and Director. A title with no level word counts as your level.
+- **Plain-English reasons.** A new Why column says, in a sentence, why each job scored where it
+  did: title fit, level, which required skills you have, partly have, or don't have, and any cap
+  that applied. Click the dots to read the full reason.
+- **Your own skills count.** Skills you list on your profile are matched straight against the
+  posting text, so "Epic", "QuickBooks" or "BLS" count the same as built-in tech terms.
+  Foundational skills (a new Profile card) count half.
+- **Fewer false remotes.** Company boilerplate about "the remote option", a board's remote flag on
+  a city-only listing, "hybrid model" postings, and postings located outside the US no longer
+  pass as remote.
+- **Fairer caps.** A required clearance you don't hold caps the score at 20; a required degree
+  caps it at 25 only when the posting offers no "or equivalent experience" path.
 
-![Models page: local Ollama models plus optional cloud tiers](docs/img/models.png)
+![Jobs list with the Why column](docs/img/jobs-why.png)
+
+![What you're looking for: titles and level](docs/img/looking-for.png)
+
+v0.7.0 added optional cloud models, follow-up questions on the answer card, the resume tailor,
+practice applications, smarter Yes/No answers and persistent logs.
 
 ## Features
 
@@ -191,7 +199,9 @@ python serve.py                       # http://127.0.0.1:8765/dashboard
 - **Search** - a Google query generator for any job site you list (roles, keywords, sites, look
   back), plus a paste box that adds job links (and their company boards) to the queue.
 - **Knowledge** - Profile, Stories and Resume, everything Penates knows about you (below).
-- **Settings** (gear menu) - edit your search terms and turn sources on or off (saved to `config.json`),
+- **Settings** (gear menu) - **What you're looking for** (target, related, push-down and excluded
+  titles plus your level; these drive the score and the discovery title filter), search terms and
+  sources (saved to `config.json`),
   set job retention (delete jobs older than 1 week / 2 weeks / 1 month / custom days, or never;
   jobs you applied to or marked go/verify are always kept, and deleted jobs are not re-added),
   and open the local test pages: **Demo application** (`/demo`, five fictional applications
@@ -371,21 +381,24 @@ Docker, or database. Cloud models are optional (see [Models](#models-local-or-cl
    cp application.example.yaml application.yaml
    cp stories.example.yaml stories.yaml            # your story bank (or add stories in the dashboard)
    cp config/companies.example.yml config/companies.yml
+   cp config.example.json config.json              # sample DevOps search; change it in Settings
    cp resume.example.yaml resume.yaml              # for the Resume tailor
    ```
 4. Double-click **Start Penates.bat**. One click: it starts Ollama if it is not running,
    restarts the local server on `127.0.0.1:8765`, checks it answers, and opens the dashboard.
    Run it again any time to restart. (Right-click > Send to > Desktop for a shortcut.
    Elsewhere: `python serve.py`.)
-5. In the dashboard **Models** page (gear menu), confirm Ollama shows **Connected** and pick the
+5. In **Settings > What you're looking for**, enter the job titles you want and pick your level.
+   The example config ships a DevOps set as a sample; replace it with your own.
+6. In the dashboard **Models** page (gear menu), confirm Ollama shows **Connected** and pick the
    answers model and the essay/story model (Test sends a one-line prompt and shows the reply
    time). Leave Cloud models on Local unless you want them.
-6. In `chrome://extensions` (Developer mode, then Load unpacked), load the
+7. In `chrome://extensions` (Developer mode, then Load unpacked), load the
    **`penates-extension/`** folder. It works in your normal Chrome. The install
    prompt lists only known ATS hosts, not "all sites": the fill bubble auto-mounts on those
    application pages, and the per-field helper injects on demand (right-click / Alt+A) on any
    page you invoke it, via `activeTab`.
-7. On an application page, click **Fill application** for the whole form, or focus a
+8. On an application page, click **Fill application** for the whole form, or focus a
    written-answer box and right-click **Answer with local AI** (or press **Alt+A**). The draft is inserted; a toast shows the method and any review flag.
 
 You can run this next to a commercial autofiller: let it do the structured fields, turn

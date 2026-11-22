@@ -10,8 +10,8 @@ the NEW ones (deduped by URL against everything already in the store) as status
   python discover.py                 # your configured terms, last 7 days
   python discover.py --terms "registered nurse,charge nurse" --results 30 --hours 72
 """
-import argparse, sys, re, math
-import jobs_store
+import argparse, sys, math
+import jobs_store, titles
 
 DESC_CAP = 20000
 
@@ -39,13 +39,6 @@ DEFAULT_TERMS = [
     "platform engineer", "infrastructure engineer",
     "systems administrator", "systems engineer", "systems analyst",
 ]
-# keep only titles that look like your lane; drop obvious non-fits
-TITLE_OK = re.compile(r"devops|sre|site reliability|cloud|infrastructure|platform|"
-                      r"systems? engineer|systems? admin|systems? analyst|linux|reliability", re.I)
-TITLE_NO = re.compile(r"\bsales\b|account exec|recruiter|\bmanager\b|director|"
-                      r"\bintern\b|principal architect|pre-?sales|solutions consultant", re.I)
-
-
 def discover(terms, results, hours, sites, include_easy=False):
     try:
         from jobspy import scrape_jobs
@@ -73,7 +66,7 @@ def discover(terms, results, hours, sites, include_easy=False):
             # LinkedIn: skip Easy Apply (no external link -> stays on LinkedIn, can't autofill)
             if site == "linkedin" and not direct and not include_easy:
                 continue
-            if TITLE_NO.search(title) or not TITLE_OK.search(title):
+            if not titles.keep(title):
                 continue
             loc = _clean(r.get("location"))
             # JobSpy is_remote is often true for onsite/hybrid titles; drop those
