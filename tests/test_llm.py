@@ -538,6 +538,48 @@ class LlmRouter(unittest.TestCase):
         self.assertFalse(cwd.startswith(root + os.sep))
         self.assertEqual(llm.last_meta, {"provider": "claude_cli", "fell_back": False, "model": "sonnet"})
 
+    def test_windows_cmd_shim_uses_claude_code_exe(self):
+        seen = []
+
+        def fake_run(argv, **kwargs):
+            seen.append(argv)
+            return self._completed("OK")
+
+        cfg = self._cli_cfg("claude_cli", model="")
+        with tempfile.TemporaryDirectory() as tmp:
+            shim = os.path.join(tmp, "claude.CMD")
+            exe = os.path.join(
+                tmp, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe")
+            os.makedirs(os.path.dirname(exe))
+            for path in (shim, exe):
+                with open(path, "w", encoding="utf-8"):
+                    pass
+            missing = os.path.join(tmp, "missing.cmd")
+            with open(missing, "w", encoding="utf-8"):
+                pass
+
+            def which_present(name):
+                return shim if name == "claude" else None
+
+            def which_missing(name):
+                return missing if name == "claude" else None
+
+            with mock.patch("jobs_store.load_config", return_value=cfg), \
+                 mock.patch("shutil.which", side_effect=which_present), \
+                 mock.patch("subprocess.run", fake_run), \
+                 mock.patch("llm.os.name", "nt"):
+                text = llm.complete("Say hi", task="answers")
+            self.assertEqual(text, "OK")
+            self.assertEqual(seen[0][0], exe)
+
+            with mock.patch("jobs_store.load_config", return_value=cfg), \
+                 mock.patch("shutil.which", side_effect=which_missing), \
+                 mock.patch("subprocess.run", fake_run), \
+                 mock.patch("llm.os.name", "nt"):
+                text = llm.complete("Say hi", task="answers")
+            self.assertEqual(text, "OK")
+            self.assertEqual(seen[1][0], missing)
+
     def test_grok_cli_uses_p_arg_not_stdin(self):
         seen = []
 

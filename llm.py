@@ -569,6 +569,28 @@ def _run_cli(provider, argv, prompt):
         return text
 
 
+def _windows_shim_exe(path):
+    """On Windows, use the exe an npm .cmd/.bat shim launches when it exists.
+
+    cmd.exe mishandles quotes in --system-prompt, so a < becomes a redirect.
+    The Claude Code shim runs node_modules/@anthropic-ai/claude-code/bin/<stem>.exe
+    next to the shim. A missing exe keeps the shim path.
+    """
+    if os.name != "nt" or not path:
+        return path
+    low = path.lower()
+    if not (low.endswith(".cmd") or low.endswith(".bat")):
+        return path
+    stem = os.path.splitext(os.path.basename(path))[0]
+    exe = os.path.join(
+        os.path.dirname(path),
+        "node_modules", "@anthropic-ai", "claude-code", "bin", stem + ".exe",
+    )
+    if os.path.isfile(exe):
+        return exe
+    return path
+
+
 def _require_cli(provider):
     bins = _cli_bins()
     key = "claude_bin" if provider == "claude_cli" else "grok_bin"
@@ -577,7 +599,7 @@ def _require_cli(provider):
     path = shutil.which(name)
     if not path:
         raise RuntimeError("%s CLI not found: %s" % (label, name))
-    return path
+    return _windows_shim_exe(path)
 
 
 def _call_claude_cli(prompt, system, model):
