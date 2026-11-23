@@ -2507,7 +2507,7 @@
     if (typed && typed !== currentQuestion) { currentQuestion = typed; fresh = true; qChanged = true; }
     if (!currentQuestion) { setMeta("Click the question on the page, or type it in the box above.", true); return; }
     stopPick();
-    setCardBusy(true, fresh ? "Regenerating..." : "Drafting a local answer...");
+    setCardBusy(true, fresh ? "Regenerating..." : "Drafting an answer...");
     const limit = charLimit(currentEl);
     const prevDraft = fresh && !qChanged && els.text ? (els.text.value || "").trim() : "";
     const isMulti = currentEl && (currentEl.tagName === "TEXTAREA" || currentEl.isContentEditable);
