@@ -218,7 +218,7 @@ tr.jobrow:hover .icon,.icon:focus-visible{opacity:1}
 .whcard{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:var(--panel2)}
 .chk{display:flex;align-items:center;gap:8px;color:var(--text);font-size:14px}
 .lf-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:8px}.lf-grid textarea{width:100%;min-height:110px;box-sizing:border-box}
-td.role{min-width:190px}.whycell{white-space:nowrap;width:1%}.whycell .why{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;max-width:260px;vertical-align:middle}.whycell.open{white-space:normal}.whycell.open .why{white-space:normal;max-width:420px;display:block}.why-more{border:0;background:none;color:var(--muted);cursor:pointer;padding:0 4px;font-size:14px;vertical-align:middle}.whycell.open .why-more{display:none}.why-drawer{font-size:13px;line-height:1.45;margin:8px 0 10px;color:var(--muted,#888)}
+td.role{min-width:260px}.co .grp{display:block;margin:2px 0 0 -6px}#jobsTable th .colgrip{position:absolute;right:0;top:0;bottom:0;width:7px;cursor:col-resize;user-select:none}#jobsTable th .colgrip:hover,#jobsTable th .colgrip.on{border-right:2px solid var(--accent)}.whycell{white-space:nowrap;width:1%}.whycell .why{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;max-width:260px;vertical-align:middle}.whycell.open{white-space:normal}.whycell.open .why{white-space:normal;max-width:420px;display:block}.why-more{border:0;background:none;color:var(--muted);cursor:pointer;padding:0 4px;font-size:14px;vertical-align:middle}.whycell.open .why-more{display:none}.why-drawer{font-size:13px;line-height:1.45;margin:8px 0 10px;color:var(--muted,#888)}
 .lex{margin:4px 0;padding-left:18px}.lex-row{display:flex;gap:6px;margin:4px 0}.lex-row input:first-child{flex:0 0 160px}.lex-row input:nth-child(2){flex:1}
 </style>
 </head>
@@ -295,7 +295,7 @@ td.role{min-width:190px}.whycell{white-space:nowrap;width:1%}.whycell .why{font-
       <span class="cap mono" id="reflog" hidden></span>
       <button class="btn" id="refresh">Refresh jobs</button>
     </div>
-    <table>
+    <table id="jobsTable">
       <thead><tr>
         <th data-sort="score">Score</th><th data-sort="company">Company</th>
         <th data-sort="role">Role</th><th>Why</th><th data-sort="discovered_at">Discovered</th><th data-sort="posted">Posted</th>
@@ -735,7 +735,7 @@ function jobRowHtml(j, opt){
       <td class="co">${co}</td>
       <td class="role"><a class="role-link" href="${esc(j.apply)}" data-url="${esc(j.apply)}" target="_blank" rel="noopener">${esc(j.role)}</a>${nw?'<span class="chip-new" title="Found in the latest sync">NEW</span>':''}${seen?'<span class="viewed-tag" title="Opened '+esc(j.seen_at)+'">viewed</span>':''}</td>
       <td class="whycell">${j.reason_text?'<div class="why" title="'+esc(j.reason_text)+'">'+esc(j.reason_text)+'</div><button type="button" class="why-more" aria-label="Show full reason">\u2026</button>':''}</td>
-      <td class="muted" style="white-space:nowrap;font-size:12px">${esc(discFmt(j.discovered_at))}</td>
+      <td class="muted" style="white-space:nowrap;font-size:12px" title="${esc(discFmt(j.discovered_at))}">${esc(postedFmt(j.discovered_at))}</td>
       <td class="muted" style="white-space:nowrap;font-size:12px">${esc(postedFmt(j.posted))}</td>
       <td class="muted" style="font-size:12px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(locText(j))}</td>
       <td class="muted" style="font-size:12px;white-space:nowrap">${esc(j.salary||'')}</td>
@@ -1499,6 +1499,40 @@ $('gsAdd').onclick=async()=>{ const urls=gsLines($('gsUrls').value).filter(u=>/^
   const r=await fetch('/api/jobs/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({urls})}).then(r=>r.json()).catch(e=>({ok:false,error:String(e)}));
   $('gsAddMsg').textContent=r.ok?(r.added+' added, '+(urls.length-r.added)+' already in Penates'+(r.boards?(' . '+r.boards+' new company board(s) queued for the next scan'):'')):('failed: '+(r.error||''));
   if(r.ok) $('gsUrls').value=''; };
+
+// Resizable job-list columns: drag a header edge; widths saved per browser; double-click an edge to reset.
+(function(){
+  const KEY='penates.colw', tbl=document.getElementById('jobsTable'); if(!tbl) return;
+  const ths=[...tbl.querySelectorAll('thead th')];
+  let w={}; try{ w=JSON.parse(localStorage.getItem(KEY)||'{}')||{}; }catch(_){ w={}; }
+  const st=document.createElement('style'); document.head.appendChild(st);
+  function apply(){
+    let css='';
+    for(const [i,px] of Object.entries(w)){
+      const n=+i+1;
+      css+=`#jobsTable th:nth-child(${n}){width:${px}px;min-width:${px}px;max-width:${px}px}`+
+           `#jobsTable tbody td:nth-child(${n}){width:${px}px;min-width:${px}px;max-width:${px}px;overflow:hidden;text-overflow:ellipsis}#jobsTable tbody td.whycell.open:nth-child(${n}){max-width:none}`+
+           `#jobsTable tbody td:nth-child(${n}):not(.open) .why{max-width:${Math.max(40,px-34)}px}`;
+    }
+    st.textContent=css;
+  }
+  function save(){ try{ localStorage.setItem(KEY,JSON.stringify(w)); }catch(_){} }
+  ths.forEach((th,i)=>{
+    if(i===ths.length-1) return;   // actions column
+    const g=document.createElement('span'); g.className='colgrip'; g.title='Drag to resize. Double-click to reset.';
+    th.appendChild(g);
+    g.addEventListener('click',e=>e.stopPropagation());
+    g.addEventListener('dblclick',e=>{ e.stopPropagation(); delete w[i]; apply(); save(); });
+    g.addEventListener('mousedown',e=>{
+      e.preventDefault(); e.stopPropagation();
+      const x0=e.clientX, w0=th.getBoundingClientRect().width; g.classList.add('on');
+      const mv=ev=>{ w[i]=Math.max(40,Math.round(w0+ev.clientX-x0)); apply(); };
+      const up=()=>{ g.classList.remove('on'); document.removeEventListener('mousemove',mv); document.removeEventListener('mouseup',up); save(); };
+      document.addEventListener('mousemove',mv); document.addEventListener('mouseup',up);
+    });
+  });
+  apply();
+})();
 </script>
 </body>
 </html>
