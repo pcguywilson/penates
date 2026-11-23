@@ -6,7 +6,7 @@
 //      yes-no / radios / selects / short text and drafts essays, then shows a review
 //      panel of what it filled, flagged, or skipped. Alt+F, the floating button, or the
 //      right-click "Fill this application".
-//   2. Per-field helper (focus chip / Alt+A / right-click "Answer with local AI"):
+//   2. Per-field helper (focus chip / Alt+A / right-click "Answer this field"):
 //      opens a review card for ONE field so you can read, edit, regenerate, insert. Edits
 //      you keep are learned (serve.py /learn).
 (() => {

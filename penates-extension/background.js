@@ -6,7 +6,7 @@ const BASE = "http://127.0.0.1:8765";
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: "answer-field", title: "Answer with local AI (Penates)", contexts: ["editable"] });
+    chrome.contextMenus.create({ id: "answer-field", title: "Answer this field (Penates)", contexts: ["editable"] });
     chrome.contextMenus.create({ id: "fill-application", title: "Fill this application (Penates)", contexts: ["page", "selection", "editable"] });
   });
 });

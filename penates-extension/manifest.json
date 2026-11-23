@@ -71,7 +71,7 @@
       "suggested_key": {
         "default": "Alt+A"
       },
-      "description": "Answer the focused field with local AI (per-field card)"
+      "description": "Answer the focused field (per-field card)"
     },
     "fill-application": {
       "suggested_key": {

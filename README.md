@@ -399,7 +399,7 @@ Docker, or database. Cloud models are optional (see [Models](#models-local-or-cl
    application pages, and the per-field helper injects on demand (right-click / Alt+A) on any
    page you invoke it, via `activeTab`.
 8. On an application page, click **Fill application** for the whole form, or focus a
-   written-answer box and right-click **Answer with local AI** (or press **Alt+A**). The draft is inserted; a toast shows the method and any review flag.
+   written-answer box and right-click **Answer this field** (or press **Alt+A**). The draft is inserted; a toast shows the method and any review flag.
 
 You can run this next to a commercial autofiller: let it do the structured fields, turn
 off its AI on the unique questions, and let Penates handle those.
